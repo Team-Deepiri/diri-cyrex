@@ -166,6 +166,9 @@ RUN groupadd -r appuser && \
 # Download stage works for both build types
 FROM prebuilt-base AS download-ml-packages
 
+# Ensure the directory exists even if downloads fail
+RUN mkdir -p /tmp/ml-packages
+
 # Download heavy ML packages with dependencies for resume capability
 # Stage 4.1: Download transformers and dependencies
 RUN pip download \
@@ -231,7 +234,9 @@ RUN sed -i '/^torch/d' /app/requirements.txt && \
 RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
 
 # Copy downloaded ML packages (if available from download stage)
-COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages 2>/dev/null || true
+# Create directory first, then copy (will be empty if downloads failed, which is handled later)
+RUN mkdir -p /tmp/ml-packages
+COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
 # Note: We use prebuilt base images and downloaded packages for faster builds
 # No need to copy from host venv - Docker builds should be self-contained
@@ -375,7 +380,9 @@ RUN sed -i '/^torch/d' /app/requirements.txt && \
 RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
 
 # Copy downloaded ML packages (if available from download stage)
-COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages 2>/dev/null || true
+# Create directory first, then copy (will be empty if downloads failed, which is handled later)
+RUN mkdir -p /tmp/ml-packages
+COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
 # Note: We use prebuilt base images and downloaded packages for faster builds
 # No need to copy from host venv - Docker builds should be self-contained
