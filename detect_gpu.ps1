@@ -29,7 +29,8 @@ if ($nvidiaSmiPath) {
             # Check if GPU meets minimum requirements
             if ($memoryGB -ge $MIN_GPU_MEMORY_GB) {
                 Write-Host "GPU meets requirements, using CUDA image" -ForegroundColor Green
-                Write-Output "pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime"
+                # Use latest stable PyTorch with CUDA 12.6 (most compatible)
+                Write-Output "pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime"
                 exit 0
             } else {
                 Write-Host "GPU memory (${memoryGB}GB) below minimum (${MIN_GPU_MEMORY_GB}GB), using CPU image" -ForegroundColor Yellow

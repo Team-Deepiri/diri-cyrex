@@ -27,7 +27,8 @@ if command -v nvidia-smi &> /dev/null; then
     # Check if GPU meets minimum requirements
     if [ "$GPU_MEMORY_GB" -ge "$MIN_GPU_MEMORY_GB" ]; then
         echo "GPU meets requirements, using CUDA image" >&2
-        echo "pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime"
+        # Use latest stable PyTorch with CUDA 12.6 (most compatible)
+        echo "pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime"
         exit 0
     else
         echo "GPU memory (${GPU_MEMORY_GB}GB) below minimum (${MIN_GPU_MEMORY_GB}GB), using CPU image" >&2

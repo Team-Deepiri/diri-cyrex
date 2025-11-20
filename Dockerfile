@@ -3,10 +3,10 @@
 # =============================================================================
 # Build args to control build type
 ARG BUILD_TYPE=prebuilt
-ARG PYTORCH_VERSION=2.0.0
+ARG PYTORCH_VERSION=2.9.1
 ARG CUDA_VERSION=12.1
 ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE=pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime
+ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
 
 # =============================================================================
 # OPTION 1: PREBUILT (Fast, Reliable, Larger) - DEFAULT
@@ -14,12 +14,21 @@ ARG BASE_IMAGE=pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime
 # Use BASE_IMAGE build arg (set by build scripts based on GPU detection)
 FROM ${BASE_IMAGE} AS prebuilt-base
 
-ENV BUILD_TYPE=prebuilt
+# Re-declare ARG in this stage so it's available
+ARG PYTORCH_VERSION=2.9.1
+ARG PYTHON_VERSION=3.11
+
+ENV BUILD_TYPE=prebuilt \
+    PYTORCH_VERSION=${PYTORCH_VERSION} \
+    PYTHON_VERSION=${PYTHON_VERSION}
+
+# Upgrade pip first for better package resolution
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # If PyTorch is not already installed (e.g., using python:3.11-slim for CPU), install it
-# If using pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime (GPU build), PyTorch is already installed
+# If using pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime (GPU build), PyTorch is already installed
 RUN python -c "import torch" 2>/dev/null || \
-    (echo "CPU build detected, installing PyTorch CPU..." && \
+    (echo "CPU build detected, installing PyTorch CPU (version: ${PYTORCH_VERSION})..." && \
      pip install --no-cache-dir --upgrade-strategy=only-if-needed \
          torch==${PYTORCH_VERSION} \
          torchvision \
@@ -152,54 +161,92 @@ RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || tr
 # Download stage works for both build types
 FROM prebuilt-base AS download-ml-packages
 
+# Re-declare ARG in this stage
+ARG PYTORCH_VERSION=2.9.1
+
+# Ensure directory exists and set up pip for better reliability
+RUN mkdir -p /tmp/ml-packages && \
+    pip install --upgrade pip setuptools wheel --quiet
+
+# Configure pip environment for downloads
+ENV PIP_DEFAULT_TIMEOUT=600 \
+    PIP_RETRIES=5 \
+    PIP_CONSTRAINT_TIMEOUT=600
+
 # Download heavy ML packages with dependencies for resume capability
+# Note: Downloads are optional - if they fail, packages will be installed from PyPI during build
 # Stage 4.1: Download transformers and dependencies
+# Using --no-deps to download only the package (faster, dependencies resolved during install)
 RUN pip download \
-    --timeout=300 \
+    --timeout=600 \
     --retries=5 \
     --dest /tmp/ml-packages \
+    --no-deps \
     transformers>=4.30.0 \
-    || echo "Warning: transformers download failed, will install from PyPI"
+    2>&1 | tee /tmp/transformers-download.log || \
+    (echo "⚠️  Warning: transformers download failed (this is OK - will install from PyPI)" && \
+     echo "   Download logs saved to /tmp/transformers-download.log" && \
+     mkdir -p /tmp/ml-packages || true)
 
 # Stage 4.2: Download datasets
 RUN pip download \
-    --timeout=300 \
+    --timeout=600 \
     --retries=5 \
     --dest /tmp/ml-packages \
+    --no-deps \
     datasets>=2.14.0 \
-    || echo "Warning: datasets download failed, will install from PyPI"
+    2>&1 | tee /tmp/datasets-download.log || \
+    (echo "⚠️  Warning: datasets download failed (this is OK - will install from PyPI)" && \
+     mkdir -p /tmp/ml-packages || true)
 
 # Stage 4.3: Download accelerate
 RUN pip download \
-    --timeout=300 \
+    --timeout=600 \
     --retries=5 \
     --dest /tmp/ml-packages \
+    --no-deps \
     accelerate>=0.20.0 \
-    || echo "Warning: accelerate download failed, will install from PyPI"
+    2>&1 | tee /tmp/accelerate-download.log || \
+    (echo "⚠️  Warning: accelerate download failed (this is OK - will install from PyPI)" && \
+     mkdir -p /tmp/ml-packages || true)
 
 # Stage 4.4: Download sentence-transformers
 RUN pip download \
-    --timeout=300 \
+    --timeout=600 \
     --retries=5 \
     --dest /tmp/ml-packages \
+    --no-deps \
     sentence-transformers>=2.2.0 \
-    || echo "Warning: sentence-transformers download failed, will install from PyPI"
+    2>&1 | tee /tmp/sentence-transformers-download.log || \
+    (echo "⚠️  Warning: sentence-transformers download failed (this is OK - will install from PyPI)" && \
+     mkdir -p /tmp/ml-packages || true)
 
 # Stage 4.5: Download mlflow (heavy)
 RUN pip download \
-    --timeout=300 \
+    --timeout=600 \
     --retries=5 \
     --dest /tmp/ml-packages \
+    --no-deps \
     mlflow>=2.7.0 \
-    || echo "Warning: mlflow download failed, will install from PyPI"
+    2>&1 | tee /tmp/mlflow-download.log || \
+    (echo "⚠️  Warning: mlflow download failed (this is OK - will install from PyPI)" && \
+     mkdir -p /tmp/ml-packages || true)
 
 # Stage 4.6: Download wandb
 RUN pip download \
-    --timeout=300 \
+    --timeout=600 \
     --retries=5 \
     --dest /tmp/ml-packages \
+    --no-deps \
     wandb>=0.15.0 \
-    || echo "Warning: wandb download failed, will install from PyPI"
+    2>&1 | tee /tmp/wandb-download.log || \
+    (echo "⚠️  Warning: wandb download failed (this is OK - will install from PyPI)" && \
+     mkdir -p /tmp/ml-packages || true)
+
+# Summary: Show what was downloaded (if anything)
+RUN echo "📦 Download stage complete. Packages in /tmp/ml-packages:" && \
+    ls -lh /tmp/ml-packages/*.whl 2>/dev/null | wc -l | xargs -I {} echo "   {} wheel files downloaded" || \
+    echo "   No packages downloaded (will install from PyPI during build)"
 
 # =============================================================================
 # STAGE 5: Install All Packages (PREBUILT PATH - DEFAULT)
@@ -323,6 +370,27 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--worker
 # =============================================================================
 # STAGE 6: Install All Packages (FROM-SCRATCH PATH)
 # =============================================================================
+FROM install-torch AS base-from-scratch
+
+# Set common environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=3 \
+    TRANSFORMERS_CACHE=/app/.cache/huggingface \
+    HF_HOME=/app/.cache/huggingface \
+    SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl \
+        && rm -rf /var/lib/apt/lists/* \
+        && apt-get clean
+
 FROM base-from-scratch AS final-from-scratch
 
 # Copy requirements and setup
