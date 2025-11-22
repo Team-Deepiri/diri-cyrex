@@ -64,6 +64,9 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 # =============================================================================
 FROM from-scratch-base AS download-torch
 
+# Re-declare ARG in this stage so it's available
+ARG PYTORCH_VERSION=2.9.1
+
 # Download PyTorch in separate stages for resume capability
 # Stage 1.1: Download torch (can resume if fails)
 RUN pip download --no-deps \
@@ -93,6 +96,9 @@ RUN pip download --no-deps \
 # STAGE 2: Install Heavy Packages - FROM SCRATCH ONLY
 # =============================================================================
 FROM from-scratch-base AS install-torch
+
+# Re-declare ARG in this stage so it's available
+ARG PYTORCH_VERSION=2.9.1
 
 # Copy downloaded packages
 COPY --from=download-torch /tmp/packages /tmp/packages
@@ -404,7 +410,9 @@ RUN sed -i '/^torch/d' /app/requirements.txt && \
 RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
 
 # Copy downloaded ML packages (if available from download stage)
-COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages 2>/dev/null || true
+# The download-ml-packages stage always creates /tmp/ml-packages (even if empty)
+# so this COPY will always succeed
+COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
 # Note: We use prebuilt base images and downloaded packages for faster builds
 # No need to copy from host venv - Docker builds should be self-contained

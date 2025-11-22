@@ -3,7 +3,7 @@
 # =============================================================================
 # Build args to control build type
 ARG BUILD_TYPE=prebuilt
-ARG PYTORCH_VERSION=2.0.0
+ARG PYTORCH_VERSION=2.9.1
 ARG CUDA_VERSION=12.1
 ARG PYTHON_VERSION=3.11
 ARG BASE_IMAGE=pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime
@@ -13,6 +13,9 @@ ARG BASE_IMAGE=pytorch/pytorch:2.0.0-cuda12.1-cudnn8-runtime
 # =============================================================================
 # Use BASE_IMAGE build arg (set by build scripts based on GPU detection)
 FROM ${BASE_IMAGE} AS prebuilt-base
+
+# Redeclare ARG for this stage
+ARG PYTORCH_VERSION=2.9.1
 
 ENV BUILD_TYPE=prebuilt
 
@@ -31,6 +34,10 @@ RUN python -c "import torch" 2>/dev/null || \
 # OPTION 2: FROM SCRATCH (Customizable, Smaller, Slower)
 # =============================================================================
 FROM python:${PYTHON_VERSION}-slim AS from-scratch-base
+
+# Redeclare ARGs for this stage
+ARG PYTORCH_VERSION=2.9.1
+ARG PYTHON_VERSION=3.11
 
 ENV BUILD_TYPE=from-scratch
 
@@ -54,6 +61,9 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 # STAGE 1: Download Heavy Packages (Torch/CUDA) - FROM SCRATCH ONLY
 # =============================================================================
 FROM from-scratch-base AS download-torch
+
+# Redeclare ARG for this stage
+ARG PYTORCH_VERSION=2.9.1
 
 # Download PyTorch in separate stages for resume capability
 # Stage 1.1: Download torch (can resume if fails)
@@ -84,6 +94,9 @@ RUN pip download --no-deps \
 # STAGE 2: Install Heavy Packages - FROM SCRATCH ONLY
 # =============================================================================
 FROM from-scratch-base AS install-torch
+
+# Redeclare ARG for this stage
+ARG PYTORCH_VERSION=2.9.1
 
 # Copy downloaded packages
 COPY --from=download-torch /tmp/packages /tmp/packages
