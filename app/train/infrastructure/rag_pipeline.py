@@ -3,6 +3,7 @@ Production RAG Pipeline for Challenge Generation
 Retrieval-Augmented Generation with vector search, reranking, and context management
 """
 from typing import List, Dict, Optional, Tuple
+import os
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
@@ -20,15 +21,17 @@ class RAGPipeline:
         self,
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
         collection_name: str = "deepiri_challenges",
-        milvus_host: str = "localhost",
-        milvus_port: int = 19530
+        milvus_host: Optional[str] = None,
+        milvus_port: Optional[int] = None
     ):
         self.embedding_model = SentenceTransformer(embedding_model)
         self.collection_name = collection_name
-        self.milvus_host = milvus_host
-        self.milvus_port = milvus_port
+        # Use environment variables with fallback defaults
+        self.milvus_host = milvus_host or os.getenv("MILVUS_HOST", "localhost")
+        self.milvus_port = milvus_port or int(os.getenv("MILVUS_PORT", "19530"))
         self.collection = None
         self.reranker = None
+        self._milvus_available = False
         self._initialize_milvus()
         self._load_reranker()
     
@@ -46,10 +49,12 @@ class RAGPipeline:
             else:
                 self._create_collection()
             
-            logger.info("Milvus connection established", collection=self.collection_name)
+            self._milvus_available = True
+            logger.info("Milvus connection established", collection=self.collection_name, host=self.milvus_host, port=self.milvus_port)
         except Exception as e:
-            logger.error("Milvus initialization failed", error=str(e))
-            raise
+            self._milvus_available = False
+            logger.warning("Milvus initialization failed - RAG features will be unavailable", error=str(e), host=self.milvus_host, port=self.milvus_port)
+            # Don't raise - allow service to start without Milvus
     
     def _create_collection(self):
         """Create Milvus collection schema."""
@@ -99,6 +104,10 @@ class RAGPipeline:
     
     def add_challenges(self, challenges: List[Dict]):
         """Add challenge embeddings to vector store."""
+        if not self._milvus_available or not self.collection:
+            logger.warning("Cannot add challenges - Milvus not available")
+            return
+        
         if not challenges:
             return
         
@@ -128,6 +137,10 @@ class RAGPipeline:
         rerank: bool = True
     ) -> List[Dict]:
         """Retrieve relevant challenges using semantic search."""
+        if not self._milvus_available or not self.collection:
+            logger.warning("Cannot retrieve - Milvus not available")
+            return []
+        
         query_embedding = self.embedding_model.encode([query])[0]
         
         search_params = {
@@ -242,7 +255,10 @@ class RAGDataPipeline:
 
 def initialize_rag_system():
     """Initialize production RAG system."""
-    rag = RAGPipeline()
+    # Use environment variables for Milvus connection
+    milvus_host = os.getenv("MILVUS_HOST", "localhost")
+    milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+    rag = RAGPipeline(milvus_host=milvus_host, milvus_port=milvus_port)
     return rag
 
 
