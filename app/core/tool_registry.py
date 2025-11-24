@@ -7,8 +7,7 @@ from typing import Dict, List, Optional, Any, Callable, Type
 from enum import Enum
 from dataclasses import dataclass
 from langchain_core.tools import BaseTool, Tool
-from langchain_core.pydantic_v1 import BaseModel, Field
-from pydantic import validate_call
+from pydantic import BaseModel, Field
 import inspect
 from ..logging_config import get_logger
 

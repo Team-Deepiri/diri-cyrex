@@ -10,7 +10,7 @@ pytest-cov==4.1.0
 structlog==24.1.0
 python-json-logger==2.0.7
 prometheus-client==0.20.0
-redis==5.0.1
+redis[hiredis]>=5.0.1  # Includes hiredis for better async performance
 pydantic-settings==2.2.1
 
 # AI Training Dependencies
@@ -43,7 +43,6 @@ influxdb-client>=1.38.0  # For InfluxDB
 
 # MLOps Dependencies
 kubernetes>=28.1.0  # For Kubernetes deployment
-prometheus-client>=0.20.0  # Already included above
 
 # Additional ML Libraries
 optuna>=3.5.0  # For hyperparameter optimization (optional)
@@ -63,12 +62,9 @@ langchain-milvus>=0.1.0
 langchain-text-splitters>=0.0.1
 langsmith>=0.0.60  # Optional: for LangSmith monitoring and debugging
 
-# LangChain for AI orchestration
-langchain>=0.1.0
-langchain-openai>=0.0.5
-langchain-community>=0.0.20
-langchain-core>=0.1.0
-langchain-chroma>=0.1.0
-langchain-milvus>=0.1.0
-langsmith>=0.0.60  # Optional: for LangSmith monitoring
-
+# Local LLM Support (Cost-effective alternatives to OpenAI)
+ollama>=0.1.0  # Ollama API client for local models
+llama-cpp-python>=0.2.0  # llama.cpp bindings (optional, for direct model loading)
+# Note: Install llama-cpp-python separately with: pip install llama-cpp-python
+# For GPU support: CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
+# For CPU only: pip install llama-cpp-python
