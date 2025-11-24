@@ -30,6 +30,20 @@ class Settings(BaseSettings):
     AI_MAX_TOKENS: int = 2000
     AI_TOP_P: float = 0.9
     
+    # Deepiri AI Model Paths
+    INTENT_CLASSIFIER_MODEL_PATH: Optional[str] = None
+    PRODUCTIVITY_AGENT_MODEL_PATH: Optional[str] = None
+    
+    # Vector Store Configuration
+    CHROMA_PERSIST_DIR: str = "./chroma_db"
+    MILVUS_HOST: str = "localhost"
+    MILVUS_PORT: int = 19530
+    
+    # LangChain Configuration
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: Optional[str] = None
+    LANGCHAIN_PROJECT: Optional[str] = "deepiri"
+    
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 

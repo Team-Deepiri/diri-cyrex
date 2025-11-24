@@ -16,9 +16,13 @@ class EmbeddingService:
     
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
         self.model_name = model_name
-        self.model = SentenceTransformer(model_name)
         self.cache = CacheManager()
-        logger.info("Embedding service initialized", model=model_name)
+        try:
+            self.model = SentenceTransformer(model_name)
+            logger.info("Embedding service initialized", model=model_name)
+        except Exception as e:
+            logger.error("Failed to load SentenceTransformer model", model=model_name, error=str(e))
+            raise RuntimeError(f"Failed to initialize embedding model: {str(e)}")
     
     def embed(self, text: Union[str, List[str]], use_cache: bool = True) -> np.ndarray:
         """Generate embeddings."""
@@ -30,12 +34,24 @@ class EmbeddingService:
         if use_cache:
             cached = self.cache.get(cache_key)
             if cached:
-                return np.array(cached)
+                result = np.array(cached)
+                # Return first element if single text was passed
+                if len(text) == 1 and len(result.shape) > 1:
+                    return result[0]
+                return result
         
-        embeddings = self.model.encode(text, show_progress_bar=False)
+        try:
+            embeddings = self.model.encode(text, show_progress_bar=False)
+        except Exception as e:
+            logger.error("Model encoding failed", error=str(e), text_length=len(text[0]) if text else 0)
+            raise RuntimeError(f"Failed to generate embeddings: {str(e)}")
         
         if use_cache:
             self.cache.set(cache_key, embeddings.tolist(), ttl=86400)
+        
+        # Return first element if single text was passed
+        if len(text) == 1 and len(embeddings.shape) > 1:
+            return embeddings[0]
         
         return embeddings
     
