@@ -271,6 +271,7 @@ from .routes.inference import router as inference_router
 from .routes.bandit import router as bandit_router
 from .routes.session import router as session_router
 from .routes.monitoring import router as monitoring_router
+from .routes.intelligence_api import router as intelligence_api_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
 
@@ -286,6 +287,7 @@ app.include_router(inference_router, prefix="/agent", tags=["inference"])
 app.include_router(bandit_router, prefix="/agent", tags=["bandit"])
 app.include_router(session_router, prefix="/agent", tags=["session"])
 app.include_router(monitoring_router, prefix="/agent", tags=["monitoring"])
+app.include_router(intelligence_api_router, prefix="/agent", tags=["intelligence"])
 
 
 if __name__ == "__main__":

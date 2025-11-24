@@ -2,6 +2,16 @@
 
 Cyrex is the AI/ML service that provides natural language processing, embeddings, challenge generation, and model inference capabilities.
 
+## 🤖 Deepiri AI System (Three-Tier Architecture)
+
+Cyrex now includes the complete Deepiri AI system with three tiers:
+
+1. **Intent Classification** (Tier 1): BERT/DeBERTa-based intent classification
+2. **Ability Generation** (Tier 2): LLM + RAG for dynamic ability creation
+3. **Productivity Agent** (Tier 3): RL-based adaptive learning
+
+See `DEEPIRI_AI_SYSTEM.md` for complete documentation.
+
 ## 🚀 Quick Start
 
 ### 1. Start Cyrex Service
@@ -76,6 +86,67 @@ cat .env | grep CYREX_API_KEY
 ```
 
 **Default API Key**: `change-me` (if not set in environment)
+
+## 🤖 Deepiri AI Endpoints
+
+### Command Routing (Tier 1)
+```bash
+# Route user command to predefined ability
+curl -X POST http://localhost:8000/agent/intelligence/route-command \
+  -H "x-api-key: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command": "Can you review this code for security issues?",
+    "user_role": "software_engineer",
+    "min_confidence": 0.7
+  }'
+```
+
+### Contextual Ability Generation (Tier 2)
+```bash
+# Generate dynamic ability using LLM + RAG
+curl -X POST http://localhost:8000/agent/intelligence/generate-ability \
+  -H "x-api-key: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "user123",
+    "user_command": "I need to refactor this codebase to use TypeScript",
+    "user_profile": {
+      "role": "software_engineer",
+      "momentum": 450,
+      "level": 15
+    }
+  }'
+```
+
+### Workflow Optimization (Tier 3)
+```bash
+# Get RL optimizer recommendation
+curl -X POST http://localhost:8000/agent/intelligence/recommend-action \
+  -H "x-api-key: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_data": {
+      "momentum": 450,
+      "current_level": 15,
+      "task_completion_rate": 0.85,
+      "daily_streak": 7
+    }
+  }'
+```
+
+### Knowledge Retrieval
+```bash
+# Query knowledge bases
+curl -X POST http://localhost:8000/agent/intelligence/knowledge/query \
+  -H "x-api-key: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "What are effective focus boost strategies?",
+    "knowledge_bases": ["user_patterns", "ability_templates"],
+    "top_k": 5
+  }'
+```
 
 ## 📡 API Endpoints
 
@@ -428,6 +499,31 @@ response = requests.post('http://localhost:8000/api/embeddings',
   headers={'x-api-key': 'change-me'})  # Required!
 print(response.json())
 ```
+
+## 🖥️ Cyrex Interface
+
+Prefer a UI over cURL? Launch the Cyrex Interface that lives in `diri-cyrex/cyrex-interface`.
+
+### Local run
+```bash
+cd diri-cyrex/cyrex-interface
+npm install
+npm run dev -- --host 0.0.0.0 --port 5175
+# visit http://localhost:5175 and plug in your x-api-key
+```
+
+### Docker Compose
+Use the `cyrex-interface` service that is already wired into `docker-compose.dev.yml`:
+
+```bash
+cd deepiri
+docker compose -f docker-compose.dev.yml up cyrex cyrex-interface
+```
+
+The dashboard exposes:
+- Chat UX powered by `/agent/intelligence/generate-ability`
+- Forms for `/route-command`, `/generate-ability`, `/recommend-action`, `/knowledge/query`
+- Inline reminders for `pytest`, `mypy`, and `npm run lint`
 
 ## 🎯 Common Use Cases
 

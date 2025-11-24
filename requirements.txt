@@ -53,3 +53,22 @@ tensorboard>=2.15.0  # For visualization (optional)
 # Sentence Transformers for embeddings
 sentence-transformers>=2.2.0
 
+# LangChain for AI orchestration and RAG
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+langchain-core>=0.1.0
+langchain-chroma>=0.1.0
+langchain-milvus>=0.1.0
+langchain-text-splitters>=0.0.1
+langsmith>=0.0.60  # Optional: for LangSmith monitoring and debugging
+
+# LangChain for AI orchestration
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-community>=0.0.20
+langchain-core>=0.1.0
+langchain-chroma>=0.1.0
+langchain-milvus>=0.1.0
+langsmith>=0.0.60  # Optional: for LangSmith monitoring
+
