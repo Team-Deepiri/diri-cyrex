@@ -8,6 +8,7 @@ from .logging_config import get_logger, RequestLogger, ErrorLogger
 import time
 import uuid
 import logging
+import numpy as np
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 from contextlib import asynccontextmanager
 import asyncio
@@ -180,6 +181,86 @@ def root():
         "health": "/health",
         "metrics": "/metrics"
     }
+
+
+# Direct API endpoints (without /agent prefix)
+from pydantic import BaseModel
+from typing import Optional
+
+class EmbeddingRequest(BaseModel):
+    text: str
+    model: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2"
+
+class CompletionRequest(BaseModel):
+    prompt: str
+    max_tokens: Optional[int] = 100
+    temperature: Optional[float] = 0.7
+
+@app.post("/api/embeddings")
+async def api_embeddings(req: EmbeddingRequest, request: Request):
+    """Generate text embeddings - direct API endpoint."""
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    try:
+        from ..services.embedding_service import get_embedding_service
+        
+        service = get_embedding_service()
+        # Embed returns numpy array - get first if it's 2D
+        embedding_result = service.embed(req.text, use_cache=True)
+        
+        # Handle numpy array - convert to list and flatten if needed
+        if isinstance(embedding_result, np.ndarray):
+            if len(embedding_result.shape) > 1:
+                embedding = embedding_result[0]
+            else:
+                embedding = embedding_result
+            embedding_list = embedding.tolist()
+        else:
+            embedding_list = list(embedding_result) if hasattr(embedding_result, '__iter__') else [embedding_result]
+        
+        return {
+            "embedding": embedding_list,
+            "dimension": len(embedding_list),
+            "model": req.model
+        }
+    
+    except Exception as e:
+        error_logger.log_api_error(e, request_id, "/api/embeddings")
+        logger.error("Embedding generation failed", request_id=request_id, error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(e)}")
+
+@app.post("/api/complete")
+async def api_complete(req: CompletionRequest, request: Request):
+    """Generate AI completion - direct API endpoint."""
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    try:
+        if not settings.OPENAI_API_KEY:
+            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        
+        import openai
+        import asyncio
+        
+        client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        completion = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=settings.OPENAI_MODEL,
+            messages=[{"role": "user", "content": req.prompt}],
+            max_tokens=req.max_tokens,
+            temperature=req.temperature
+        )
+        
+        return {
+            "completion": completion.choices[0].message.content,
+            "tokens_used": completion.usage.total_tokens if completion.usage else 0,
+            "model": completion.model
+        }
+    
+    except Exception as e:
+        error_logger.log_api_error(e, request_id, "/api/complete")
+        logger.error("Completion generation failed", request_id=request_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Completion generation failed: {str(e)}")
 
 
 # Include routers
