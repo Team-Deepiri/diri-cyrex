@@ -8,12 +8,22 @@ from typing import Dict, List, Optional
 import json
 import os
 from datetime import datetime
-from langchain_openai import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+    ChatOpenAI = None
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import JsonOutputParser, PydanticOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from langchain_community.vectorstores import Chroma, Milvus
-from langchain_community.embeddings import OpenAIEmbeddings, HuggingFaceEmbeddings
+try:
+    from langchain_community.embeddings import OpenAIEmbeddings, HuggingFaceEmbeddings
+except ImportError:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    OpenAIEmbeddings = None
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
@@ -53,21 +63,46 @@ class ContextualAbilityEngine:
         self.llm_model_name = llm_model
         self.vector_store_type = vector_store_type
         
-        # Initialize LLM
-        if not settings.OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY not configured")
+        # Initialize LLM - prefer OpenAI/external API, fallback to local LLM
+        if HAS_OPENAI and settings.OPENAI_API_KEY:
+            # Try OpenAI first
+            try:
+                self.llm = ChatOpenAI(
+                    model=llm_model,
+                    temperature=0.7,
+                    api_key=settings.OPENAI_API_KEY
+                )
+                logger.info(f"Using OpenAI: {llm_model}")
+            except Exception as e:
+                logger.warning(f"Failed to initialize OpenAI: {e}, falling back to local LLM")
+                # Fall through to local LLM
+                self.llm = None
+        else:
+            self.llm = None
         
-        self.llm = ChatOpenAI(
-            model=llm_model,
-            temperature=0.7,
-            api_key=settings.OPENAI_API_KEY
-        )
+        # Fallback to local LLM if OpenAI not available or failed
+        if not self.llm:
+            try:
+                from ..integrations.local_llm import get_local_llm
+                local_llm = get_local_llm()
+                
+                if local_llm and local_llm.is_available():
+                    self.llm = local_llm.get_langchain_llm()
+                    logger.info(f"Using local LLM: {local_llm.config.backend}")
+                else:
+                    raise ValueError("Local LLM not available")
+            except Exception as e:
+                logger.error(f"Failed to initialize local LLM: {e}")
+                raise ValueError("No LLM available. Configure OpenAI API key or local LLM.")
         
         # Initialize embeddings
         if embedding_model.startswith("sentence-transformers"):
             self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
-        else:
+        elif OpenAIEmbeddings and settings.OPENAI_API_KEY:
             self.embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY)
+        else:
+            # Default to HuggingFace
+            self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
         
         # Initialize vector store
         self.vectorstore = self._initialize_vectorstore()

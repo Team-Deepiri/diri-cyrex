@@ -204,6 +204,14 @@ class LocalLLMProvider:
             raise RuntimeError("LLM not initialized")
         return self.llm
     
+    def get_langchain_llm(self) -> BaseLLM:
+        """Alias for get_llm() for compatibility"""
+        return self.get_llm()
+    
+    def is_available(self) -> bool:
+        """Check if LLM is available and initialized"""
+        return self.llm is not None
+    
     def update_config(self, **kwargs):
         """Update LLM configuration and reinitialize"""
         for key, value in kwargs.items():
@@ -244,7 +252,7 @@ def get_local_llm(
     backend: Optional[str] = None,
     model_name: Optional[str] = None,
     **kwargs
-) -> LocalLLMProvider:
+) -> Optional[LocalLLMProvider]:
     """
     Factory function to get configured local LLM
     
@@ -254,15 +262,37 @@ def get_local_llm(
         **kwargs: Additional config parameters
     
     Returns:
-        Configured LocalLLMProvider instance
+        Configured LocalLLMProvider instance, or None if initialization fails
     """
-    backend_enum = LLMBackend(backend) if backend else LLMBackend.OLLAMA
-    
-    config = LocalLLMConfig(
-        backend=backend_enum,
-        model_name=model_name or os.getenv("LOCAL_LLM_MODEL", "llama3:8b"),
-        **kwargs
-    )
-    
-    return LocalLLMProvider(config)
+    try:
+        # Use settings if available
+        from ..settings import settings
+        
+        backend_str = backend or settings.LOCAL_LLM_BACKEND
+        model_str = model_name or settings.LOCAL_LLM_MODEL
+        
+        backend_enum = LLMBackend(backend_str)
+        
+        config_kwargs = {
+            "backend": backend_enum,
+            "model_name": model_str,
+        }
+        
+        # Add Ollama base URL if available
+        if backend_enum == LLMBackend.OLLAMA and hasattr(settings, 'OLLAMA_BASE_URL'):
+            config_kwargs["base_url"] = settings.OLLAMA_BASE_URL
+        
+        config_kwargs.update(kwargs)
+        
+        config = LocalLLMConfig(**config_kwargs)
+        
+        provider = LocalLLMProvider(config)
+        if provider.is_available():
+            return provider
+        else:
+            logger.warning("Local LLM initialized but not available")
+            return None
+    except Exception as e:
+        logger.warning(f"Failed to initialize local LLM: {e}")
+        return None
 

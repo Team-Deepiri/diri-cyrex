@@ -11,7 +11,12 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.retrievers import BaseRetriever
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import LLMChainExtractor
-from langchain_openai import ChatOpenAI
+try:
+    from langchain_openai import ChatOpenAI
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
+    ChatOpenAI = None
 import os
 from ..logging_config import get_logger
 from ..settings import settings
@@ -53,11 +58,39 @@ class KnowledgeRetrievalEngine:
             "historical_abilities": self._init_kb("historical_abilities")
         }
         
-        # Initialize compressor if enabled
+        # Initialize compressor if enabled - prefer OpenAI, fallback to local LLM
         self.compressor = None
-        if use_compression and settings.OPENAI_API_KEY:
-            llm = ChatOpenAI(model="gpt-3.5-turbo", api_key=settings.OPENAI_API_KEY)
-            self.compressor = LLMChainExtractor.from_llm(llm)
+        if use_compression:
+            llm = None
+            
+            # Try OpenAI first
+            if HAS_OPENAI and settings.OPENAI_API_KEY:
+                try:
+                    llm = ChatOpenAI(model="gpt-3.5-turbo", api_key=settings.OPENAI_API_KEY)
+                    logger.info("Using OpenAI for document compression")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize OpenAI for compression: {e}, trying local LLM")
+            
+            # Fallback to local LLM
+            if not llm:
+                try:
+                    from ..integrations.local_llm import get_local_llm
+                    local_llm = get_local_llm()
+                    
+                    if local_llm and local_llm.is_available():
+                        llm = local_llm.get_langchain_llm()
+                        logger.info("Using local LLM for document compression")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize local LLM for compression: {e}")
+            
+            # Create compressor if we have an LLM
+            if llm:
+                try:
+                    self.compressor = LLMChainExtractor.from_llm(llm)
+                except Exception as e:
+                    logger.warning(f"Failed to create compressor: {e}. Compression disabled.")
+            else:
+                logger.warning("Compression disabled: No LLM available")
         
         # Text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(

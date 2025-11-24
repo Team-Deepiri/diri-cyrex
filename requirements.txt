@@ -53,10 +53,11 @@ tensorboard>=2.15.0  # For visualization (optional)
 sentence-transformers>=2.2.0
 
 # LangChain for AI orchestration and RAG
+# Note: langchain-core must be installed before other langchain packages
+langchain-core>=0.1.23
 langchain>=0.1.0
 langchain-openai>=0.0.5
 langchain-community>=0.0.20
-langchain-core>=0.1.0
 langchain-chroma>=0.1.0
 langchain-milvus>=0.1.0
 langchain-text-splitters>=0.0.1

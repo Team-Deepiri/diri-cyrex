@@ -19,6 +19,8 @@ from .queue_manager import TaskQueueManager, get_queue_manager, TaskPriority
 from .monitoring import SystemMonitor, get_monitor
 from .prompt_manager import PromptVersionManager, get_prompt_manager
 from ..integrations.local_llm import LocalLLMProvider, get_local_llm, LLMBackend
+from ..integrations.openai_wrapper import OpenAIProvider, get_openai_provider
+from typing import Union
 from ..integrations.milvus_store import MilvusVectorStore, get_milvus_store
 from ..integrations.rag_bridge import RAGBridge, get_rag_bridge
 from ..services.knowledge_retrieval_engine import KnowledgeRetrievalEngine
@@ -35,7 +37,7 @@ class WorkflowOrchestrator:
     
     def __init__(
         self,
-        llm_provider: Optional[LocalLLMProvider] = None,
+        llm_provider: Optional[Union[LocalLLMProvider, OpenAIProvider]] = None,
         vector_store: Optional[MilvusVectorStore] = None,
         execution_engine: Optional[TaskExecutionEngine] = None,
         state_manager: Optional[WorkflowStateManager] = None,
@@ -48,20 +50,38 @@ class WorkflowOrchestrator:
     ):
         self.logger = logger
         
-        # Initialize LLM provider with local model
+        # Initialize LLM provider - prefer OpenAI, fallback to local LLM
         if llm_provider:
             self.llm_provider = llm_provider
         else:
-            try:
-                backend = LLMBackend(settings.LOCAL_LLM_BACKEND)
-                self.llm_provider = get_local_llm(
-                    backend=backend.value,
-                    model_name=settings.LOCAL_LLM_MODEL,
-                    base_url=settings.OLLAMA_BASE_URL if backend == LLMBackend.OLLAMA else None,
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to initialize local LLM, will use OpenAI fallback: {e}")
-                self.llm_provider = None
+            self.llm_provider = None
+            
+            # Try OpenAI first if API key is available
+            if settings.OPENAI_API_KEY:
+                try:
+                    # Create OpenAI wrapper that matches LocalLLMProvider interface
+                    from ..integrations.openai_wrapper import get_openai_provider
+                    self.llm_provider = get_openai_provider()
+                    if self.llm_provider:
+                        self.logger.info(f"Using OpenAI: {settings.OPENAI_MODEL}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to initialize OpenAI: {e}, will try local LLM")
+                    self.llm_provider = None
+            
+            # Fallback to local LLM if OpenAI not configured or failed
+            if not self.llm_provider:
+                try:
+                    backend = LLMBackend(settings.LOCAL_LLM_BACKEND)
+                    self.llm_provider = get_local_llm(
+                        backend=backend.value,
+                        model_name=settings.LOCAL_LLM_MODEL,
+                        base_url=settings.OLLAMA_BASE_URL if backend == LLMBackend.OLLAMA else None,
+                    )
+                    if self.llm_provider:
+                        self.logger.info(f"Using local LLM: {backend.value}")
+                except Exception as e:
+                    self.logger.warning(f"Failed to initialize local LLM: {e}")
+                    self.llm_provider = None
         
         # Initialize vector store (Milvus)
         if vector_store:
@@ -232,7 +252,15 @@ class WorkflowOrchestrator:
             
             # Track metrics
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-            model_name = self.llm_provider.config.model_name if self.llm_provider else "unknown"
+            if self.llm_provider:
+                if hasattr(self.llm_provider, 'config'):
+                    model_name = self.llm_provider.config.model_name
+                elif hasattr(self.llm_provider, 'model'):
+                    model_name = self.llm_provider.model
+                else:
+                    model_name = "unknown"
+            else:
+                model_name = "unknown"
             self.monitor.record_request(
                 request_id=request_id,
                 user_id=user_id,
