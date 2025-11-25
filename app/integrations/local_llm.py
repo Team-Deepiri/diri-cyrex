@@ -82,15 +82,9 @@ class LocalLLMProvider:
         # If not explicitly set, detect Docker and use appropriate hostname
         if not base_url:
             if is_docker:
-                # Try host.docker.internal first (works on Windows/Mac Docker)
-                # Fallback to host gateway IP on Linux
-                import platform
-                if platform.system() == "Linux":
-                    # On Linux Docker, try common gateway IPs
-                    base_url = "http://172.17.0.1:11434"
-                else:
-                    # Windows/Mac Docker
-                    base_url = "http://host.docker.internal:11434"
+                # In Docker, always try host.docker.internal first (works on Windows/Mac/Linux with Docker Desktop)
+                # This is the most common case for development
+                base_url = "http://host.docker.internal:11434"
             else:
                 # Not in Docker, use localhost
                 base_url = "http://localhost:11434"
@@ -100,30 +94,34 @@ class LocalLLMProvider:
         tried_urls = [base_url]
         verified_url = None
         
+        # Define alternative URLs to try (in order of preference)
+        if is_docker:
+            alternatives = [
+                base_url,
+                "http://host.docker.internal:11434",  # Works on Windows/Mac Docker Desktop
+                "http://172.17.0.1:11434",             # Linux Docker bridge
+                "http://gateway.docker.internal:11434", # Alternative gateway
+            ]
+        else:
+            alternatives = [base_url]
+        
         # Try to find a working URL
-        for attempt in range(3):
+        for url in alternatives:
+            if url in tried_urls:
+                continue
+            tried_urls.append(url)
+            
             try:
-                response = httpx.get(f"{base_url}/api/tags", timeout=5.0)
+                logger.info(f"Trying to connect to Ollama at {url}")
+                response = httpx.get(f"{url}/api/tags", timeout=5.0)
                 if response.status_code == 200:
-                    verified_url = base_url
-                    logger.info(f"Successfully verified Ollama connection at {base_url}")
+                    verified_url = url
+                    base_url = url
+                    logger.info(f"Successfully verified Ollama connection at {url}")
                     break
             except Exception as e:
-                logger.debug(f"Ollama connection check failed at {base_url}: {e}")
-                
-                # Try alternative hostnames if in Docker
-                if is_docker and attempt < 2:
-                    alternatives = [
-                        "http://host.docker.internal:11434",
-                        "http://172.17.0.1:11434",
-                        "http://localhost:11434"
-                    ]
-                    for alt_url in alternatives:
-                        if alt_url not in tried_urls:
-                            base_url = alt_url
-                            tried_urls.append(alt_url)
-                            logger.info(f"Trying alternative Ollama URL: {base_url}")
-                            break
+                logger.debug(f"Ollama connection check failed at {url}: {e}")
+                continue
         
         # Use the verified URL if found, otherwise use the last tried URL
         final_url = verified_url or base_url

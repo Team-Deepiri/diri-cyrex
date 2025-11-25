@@ -64,21 +64,35 @@ async def process_request(
                     base_url=settings.OLLAMA_BASE_URL if backend == LLMBackend.OLLAMA else None,
                 )
                 
-                if local_llm and local_llm.is_available():
+                if local_llm:
                     # Create a temporary orchestrator with local LLM only
-                    temp_orchestrator = WorkflowOrchestrator(llm_provider=local_llm)
-                    result = await temp_orchestrator.process_request(
-                        user_input=input.user_input,
-                        user_id=input.user_id,
-                        workflow_id=input.workflow_id,
-                        use_rag=input.use_rag,
-                        use_tools=input.use_tools,
-                    )
-                    return result
+                    # Note: We'll try to use it even if health check failed - actual invocation will handle errors
+                    try:
+                        temp_orchestrator = WorkflowOrchestrator(llm_provider=local_llm)
+                        result = await temp_orchestrator.process_request(
+                            user_input=input.user_input,
+                            user_id=input.user_id,
+                            workflow_id=input.workflow_id,
+                            use_rag=input.use_rag,
+                            use_tools=input.use_tools,
+                        )
+                        return result
+                    except Exception as e:
+                        error_msg = str(e)
+                        if "Connection" in error_msg or "connect" in error_msg.lower():
+                            raise HTTPException(
+                                status_code=503,
+                                detail=f"Local LLM ({backend_str}) connection failed. Make sure Ollama is running at the configured URL. Error: {error_msg}"
+                            )
+                        else:
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Local LLM ({backend_str}) error: {error_msg}"
+                            )
                 else:
                     raise HTTPException(
                         status_code=503,
-                        detail=f"Local LLM ({backend_str}) not available. Make sure Ollama is running or configure local LLM."
+                        detail=f"Local LLM ({backend_str}) could not be initialized. Check logs for details."
                     )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid LLM backend: {e}")
