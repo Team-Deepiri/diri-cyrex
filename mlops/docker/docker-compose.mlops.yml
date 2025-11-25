@@ -1,8 +1,19 @@
 version: '3.8'
 
+# Minimal logging - logs are automatically cleared and not saved on restart
+# max-size: 1MB, max-file: 1 (no rotation), no compression
+x-logging: &minimal-logging
+  driver: "local"
+  options:
+    max-size: "1m"      # Only 1MB per file
+    max-file: "1"       # Only 1 file (no rotation backup)
+    compress: "false"   # No compression (faster cleanup)
+
 services:
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.8.1
+    restart: unless-stopped
+    logging: *minimal-logging
     ports:
       - "5000:5000"
     environment:
@@ -14,6 +25,8 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
+    restart: unless-stopped
+    logging: *minimal-logging
     ports:
       - "9090:9090"
     volumes:
@@ -25,6 +38,8 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    restart: unless-stopped
+    logging: *minimal-logging
     ports:
       - "3000:3000"
     environment:
@@ -38,6 +53,8 @@ services:
     build:
       context: ../../diri-cyrex
       dockerfile: mlops/docker/Dockerfile.mlops
+    restart: unless-stopped
+    logging: *minimal-logging
     ports:
       - "8001:8000"
     environment:
