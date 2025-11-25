@@ -282,6 +282,21 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
 
+# Install LangChain packages (required for orchestration)
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
+        langchain-core>=0.1.23 \
+        langchain>=0.1.0 \
+        langchain-openai>=0.0.5 \
+        langchain-community>=0.0.20 \
+        langchain-chroma>=0.1.0 \
+        langchain-milvus>=0.1.0 \
+        langchain-text-splitters>=0.0.1 \
+        ollama>=0.1.0 && \
+    echo "✓ LangChain packages installed successfully" || \
+    (echo "❌ ERROR: Failed to install critical LangChain packages" && \
+     pip list | grep -E "langchain|ollama" && \
+     exit 1)
+
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \
         echo "Installing from downloaded packages (with PyPI fallback for dependencies)..." && \
@@ -349,8 +364,9 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
     python -c "import torch; print('✓ torch version:', torch.__version__); print('✓ CUDA available:', torch.cuda.is_available() if hasattr(torch.cuda, 'is_available') else False)" && \
-    python -c "import sentence_transformers; print('✓ sentence-transformers installed')" || \
-    (echo "ERROR: Failed to verify critical packages" && pip list | grep -E "(numpy|torch|sentence)" && exit 1)
+    python -c "import sentence_transformers; print('✓ sentence-transformers installed')" && \
+    python -c "import langchain_core; print('✓ langchain-core installed')" || \
+    (echo "ERROR: Failed to verify critical packages" && pip list | grep -E "(numpy|torch|sentence|langchain)" && exit 1)
 
 # Create non-root user and set up directories
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
@@ -437,6 +453,21 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
 
+# Install LangChain packages (required for orchestration)
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
+        langchain-core>=0.1.23 \
+        langchain>=0.1.0 \
+        langchain-openai>=0.0.5 \
+        langchain-community>=0.0.20 \
+        langchain-chroma>=0.1.0 \
+        langchain-milvus>=0.1.0 \
+        langchain-text-splitters>=0.0.1 \
+        ollama>=0.1.0 && \
+    echo "✓ LangChain packages installed successfully" || \
+    (echo "❌ ERROR: Failed to install critical LangChain packages" && \
+     pip list | grep -E "langchain|ollama" && \
+     exit 1)
+
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \
         echo "Installing from downloaded packages (with PyPI fallback for dependencies)..." && \
@@ -504,8 +535,9 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
     python -c "import torch; print('✓ torch version:', torch.__version__); print('✓ CUDA available:', torch.cuda.is_available() if hasattr(torch.cuda, 'is_available') else False)" && \
-    python -c "import sentence_transformers; print('✓ sentence-transformers installed')" || \
-    (echo "ERROR: Failed to verify critical packages" && pip list | grep -E "(numpy|torch|sentence)" && exit 1)
+    python -c "import sentence_transformers; print('✓ sentence-transformers installed')" && \
+    python -c "import langchain_core; print('✓ langchain-core installed')" || \
+    (echo "ERROR: Failed to verify critical packages" && pip list | grep -E "(numpy|torch|sentence|langchain)" && exit 1)
 
 # Create non-root user and set up directories
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \

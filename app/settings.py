@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     LANGCHAIN_API_KEY: Optional[str] = None
     LANGCHAIN_PROJECT: Optional[str] = "deepiri"
     
+    # Local LLM Configuration
+    LOCAL_LLM_BACKEND: str = "ollama"  # "ollama", "llama_cpp", or "transformers"
+    LOCAL_LLM_MODEL: str = "llama3:8b"  # Model name/identifier
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
+    
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 
