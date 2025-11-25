@@ -21,6 +21,9 @@ class ProcessRequestInput(BaseModel):
     workflow_id: Optional[str] = Field(None, description="Workflow ID for state tracking")
     use_rag: bool = Field(True, description="Whether to use RAG for context")
     use_tools: bool = Field(True, description="Whether to allow tool usage")
+    force_local_llm: bool = Field(False, description="Force use of local LLM instead of OpenAI")
+    llm_backend: Optional[str] = Field(None, description="Local LLM backend (ollama, llama_cpp, transformers)")
+    llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., llama3:8b)")
 
 
 class WorkflowStep(BaseModel):
@@ -45,6 +48,42 @@ async def process_request(
 ):
     """Process a user request through the orchestration pipeline"""
     try:
+        # If force_local_llm is True, create a temporary orchestrator with local LLM only
+        if input.force_local_llm:
+            from ..integrations.local_llm import get_local_llm, LLMBackend
+            from ..settings import settings
+            
+            backend_str = input.llm_backend or settings.LOCAL_LLM_BACKEND
+            model_str = input.llm_model or settings.LOCAL_LLM_MODEL
+            
+            try:
+                backend = LLMBackend(backend_str)
+                local_llm = get_local_llm(
+                    backend=backend.value,
+                    model_name=model_str,
+                    base_url=settings.OLLAMA_BASE_URL if backend == LLMBackend.OLLAMA else None,
+                )
+                
+                if local_llm and local_llm.is_available():
+                    # Create a temporary orchestrator with local LLM only
+                    temp_orchestrator = WorkflowOrchestrator(llm_provider=local_llm)
+                    result = await temp_orchestrator.process_request(
+                        user_input=input.user_input,
+                        user_id=input.user_id,
+                        workflow_id=input.workflow_id,
+                        use_rag=input.use_rag,
+                        use_tools=input.use_tools,
+                    )
+                    return result
+                else:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=f"Local LLM ({backend_str}) not available. Make sure Ollama is running or configure local LLM."
+                    )
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=f"Invalid LLM backend: {e}")
+        
+        # Use default orchestrator (OpenAI preferred, local LLM fallback)
         result = await orchestrator.process_request(
             user_input=input.user_input,
             user_id=input.user_id,
@@ -53,6 +92,8 @@ async def process_request(
             use_tools=input.use_tools,
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Request processing failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

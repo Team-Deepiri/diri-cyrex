@@ -73,19 +73,71 @@ class LocalLLMProvider:
     
     def _initialize_ollama(self) -> Ollama:
         """Initialize Ollama LLM"""
-        base_url = self.config.base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        # Check if running in Docker
+        is_docker = os.path.exists("/.dockerenv") or os.path.exists("/proc/self/cgroup")
         
-        # Check if Ollama is running
-        try:
-            response = httpx.get(f"{base_url}/api/tags", timeout=5.0)
-            if response.status_code != 200:
-                raise ConnectionError(f"Ollama not accessible at {base_url}")
-        except Exception as e:
-            logger.warning(f"Ollama connection check failed: {e}. Make sure Ollama is running.")
+        # Get base URL from config or environment
+        base_url = self.config.base_url or os.getenv("OLLAMA_BASE_URL")
+        
+        # If not explicitly set, detect Docker and use appropriate hostname
+        if not base_url:
+            if is_docker:
+                # Try host.docker.internal first (works on Windows/Mac Docker)
+                # Fallback to host gateway IP on Linux
+                import platform
+                if platform.system() == "Linux":
+                    # On Linux Docker, try common gateway IPs
+                    base_url = "http://172.17.0.1:11434"
+                else:
+                    # Windows/Mac Docker
+                    base_url = "http://host.docker.internal:11434"
+            else:
+                # Not in Docker, use localhost
+                base_url = "http://localhost:11434"
+        
+        # Try to verify Ollama is accessible, but don't fail initialization if check fails
+        # The actual invocation will handle connection errors
+        tried_urls = [base_url]
+        verified_url = None
+        
+        # Try to find a working URL
+        for attempt in range(3):
+            try:
+                response = httpx.get(f"{base_url}/api/tags", timeout=5.0)
+                if response.status_code == 200:
+                    verified_url = base_url
+                    logger.info(f"Successfully verified Ollama connection at {base_url}")
+                    break
+            except Exception as e:
+                logger.debug(f"Ollama connection check failed at {base_url}: {e}")
+                
+                # Try alternative hostnames if in Docker
+                if is_docker and attempt < 2:
+                    alternatives = [
+                        "http://host.docker.internal:11434",
+                        "http://172.17.0.1:11434",
+                        "http://localhost:11434"
+                    ]
+                    for alt_url in alternatives:
+                        if alt_url not in tried_urls:
+                            base_url = alt_url
+                            tried_urls.append(alt_url)
+                            logger.info(f"Trying alternative Ollama URL: {base_url}")
+                            break
+        
+        # Use the verified URL if found, otherwise use the last tried URL
+        final_url = verified_url or base_url
+        
+        if not verified_url:
+            logger.warning(
+                f"Could not verify Ollama connection at {final_url}. "
+                f"Will attempt to use it anyway. Tried URLs: {tried_urls}. "
+                f"Make sure Ollama is running and accessible."
+            )
         
         return Ollama(
             model=self.config.model_name,
-            base_url=base_url,
+            base_url=final_url,
             temperature=self.config.temperature,
             num_predict=self.config.max_tokens,
             top_p=self.config.top_p,
