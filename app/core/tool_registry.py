@@ -6,12 +6,21 @@ Supports dynamic tool registration, validation, and execution
 from typing import Dict, List, Optional, Any, Callable, Type
 from enum import Enum
 from dataclasses import dataclass
-from langchain_core.tools import BaseTool, Tool
 from pydantic import BaseModel, Field
 import inspect
 from ..logging_config import get_logger
 
 logger = get_logger("cyrex.tool_registry")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN_TOOLS = False
+try:
+    from langchain_core.tools import BaseTool, Tool
+    HAS_LANGCHAIN_TOOLS = True
+except ImportError as e:
+    logger.warning(f"LangChain tools not available: {e}")
+    BaseTool = None
+    Tool = None
 
 
 class ToolCategory(str, Enum):

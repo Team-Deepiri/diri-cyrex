@@ -3,18 +3,28 @@ OpenAI Provider Wrapper
 Wraps OpenAI to match LocalLLMProvider interface for seamless integration
 """
 from typing import Optional, Dict, Any, Iterator
-from langchain_core.language_models.llms import BaseLLM
-try:
-    from langchain_openai import ChatOpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-    ChatOpenAI = None
-
 from ..logging_config import get_logger
 from ..settings import settings
 
 logger = get_logger("cyrex.openai_wrapper")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN_CORE = False
+HAS_OPENAI = False
+
+try:
+    from langchain_core.language_models.llms import BaseLLM
+    HAS_LANGCHAIN_CORE = True
+except ImportError as e:
+    logger.warning(f"LangChain core not available: {e}")
+    BaseLLM = None
+
+try:
+    from langchain_openai import ChatOpenAI
+    HAS_OPENAI = True
+except ImportError as e:
+    logger.info(f"langchain-openai not available: {e}")
+    ChatOpenAI = None
 
 
 class OpenAIProvider:

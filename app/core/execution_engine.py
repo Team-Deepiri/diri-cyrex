@@ -7,14 +7,24 @@ from dataclasses import dataclass
 from enum import Enum
 import asyncio
 from datetime import datetime
-from langchain_core.runnables import Runnable, RunnableConfig
-from langchain_core.callbacks import CallbackManager
 from ..logging_config import get_logger
 from .tool_registry import ToolRegistry, get_tool_registry
 from .state_manager import WorkflowStateManager, WorkflowState, StateStatus
 from .guardrails import SafetyGuardrails, get_guardrails
 
 logger = get_logger("cyrex.execution_engine")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN_RUNNABLES = False
+try:
+    from langchain_core.runnables import Runnable, RunnableConfig
+    from langchain_core.callbacks import CallbackManager
+    HAS_LANGCHAIN_RUNNABLES = True
+except ImportError as e:
+    logger.warning(f"LangChain runnables not available: {e}")
+    Runnable = None
+    RunnableConfig = None
+    CallbackManager = None
 
 
 class ExecutionStatus(str, Enum):

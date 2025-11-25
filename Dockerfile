@@ -291,7 +291,11 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         langchain-chroma>=0.1.0 \
         langchain-milvus>=0.1.0 \
         langchain-text-splitters>=0.0.1 \
-        ollama>=0.1.0 || echo "Warning: Some LangChain packages failed to install, continuing..."
+        ollama>=0.1.0 && \
+    echo "✓ LangChain packages installed successfully" || \
+    (echo "❌ ERROR: Failed to install critical LangChain packages" && \
+     pip list | grep -E "langchain|ollama" && \
+     exit 1)
 
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \
@@ -458,7 +462,11 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         langchain-chroma>=0.1.0 \
         langchain-milvus>=0.1.0 \
         langchain-text-splitters>=0.0.1 \
-        ollama>=0.1.0 || echo "Warning: Some LangChain packages failed to install, continuing..."
+        ollama>=0.1.0 && \
+    echo "✓ LangChain packages installed successfully" || \
+    (echo "❌ ERROR: Failed to install critical LangChain packages" && \
+     pip list | grep -E "langchain|ollama" && \
+     exit 1)
 
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \

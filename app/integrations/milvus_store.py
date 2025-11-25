@@ -4,16 +4,39 @@ Production-grade vector database for RAG and semantic search
 Integrates with existing KnowledgeRetrievalEngine
 """
 from typing import List, Dict, Optional, Any
-from langchain_community.vectorstores import Milvus
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_core.documents import Document
-from langchain_core.embeddings import Embeddings
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
 import os
 from ..logging_config import get_logger
 from ..settings import settings
 
 logger = get_logger("cyrex.milvus_store")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN_MILVUS = False
+try:
+    from langchain_community.vectorstores import Milvus
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+    from langchain_core.documents import Document
+    from langchain_core.embeddings import Embeddings
+    HAS_LANGCHAIN_MILVUS = True
+except ImportError as e:
+    logger.warning(f"LangChain Milvus integration not available: {e}")
+    Milvus = None
+    HuggingFaceEmbeddings = None
+    Document = None
+    Embeddings = None
+
+try:
+    from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
+    HAS_PYMILVUS = True
+except ImportError as e:
+    logger.warning(f"pymilvus not available: {e}")
+    connections = None
+    Collection = None
+    FieldSchema = None
+    CollectionSchema = None
+    DataType = None
+    utility = None
+    HAS_PYMILVUS = False
 
 
 class MilvusVectorStore:

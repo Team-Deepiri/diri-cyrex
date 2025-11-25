@@ -3,14 +3,32 @@ Workflow Orchestrator
 Main orchestration engine that coordinates all components
 Integrates LangChain, local LLMs, RAG, tools, and state management
 """
-from typing import Dict, List, Optional, Any, Iterator
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda
-from langchain_core.runnables.utils import Input, Output
+from typing import Dict, List, Optional, Any, Iterator, Union
 import json
 from datetime import datetime
 from ..logging_config import get_logger
+
+logger = get_logger("cyrex.orchestrator")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN = False
+try:
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
+    from langchain_core.runnables import RunnablePassthrough, RunnableLambda
+    from langchain_core.runnables.utils import Input, Output
+    HAS_LANGCHAIN = True
+except ImportError as e:
+    logger.warning(f"LangChain core not available: {e}")
+    ChatPromptTemplate = None
+    MessagesPlaceholder = None
+    JsonOutputParser = None
+    StrOutputParser = None
+    RunnablePassthrough = None
+    RunnableLambda = None
+    Input = None
+    Output = None
+
 from .execution_engine import TaskExecutionEngine, get_execution_engine
 from .state_manager import WorkflowStateManager, get_state_manager
 from .tool_registry import ToolRegistry, get_tool_registry
@@ -20,13 +38,10 @@ from .monitoring import SystemMonitor, get_monitor
 from .prompt_manager import PromptVersionManager, get_prompt_manager
 from ..integrations.local_llm import LocalLLMProvider, get_local_llm, LLMBackend
 from ..integrations.openai_wrapper import OpenAIProvider, get_openai_provider
-from typing import Union
 from ..integrations.milvus_store import MilvusVectorStore, get_milvus_store
 from ..integrations.rag_bridge import RAGBridge, get_rag_bridge
 from ..services.knowledge_retrieval_engine import KnowledgeRetrievalEngine
 from ..settings import settings
-
-logger = get_logger("cyrex.orchestrator")
 
 
 class WorkflowOrchestrator:

@@ -3,7 +3,7 @@ Safety Guardrails
 Content filtering, prompt injection detection, output validation
 Enterprise-grade safety checks for AI interactions
 """
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Type
 from enum import Enum
 from dataclasses import dataclass
 import re

@@ -8,30 +8,62 @@ from typing import Dict, List, Optional
 import json
 import os
 from datetime import datetime
-try:
-    from langchain_openai import ChatOpenAI
-    HAS_OPENAI = True
-except ImportError:
-    HAS_OPENAI = False
-    ChatOpenAI = None
-
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import JsonOutputParser, PydanticOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from langchain_community.vectorstores import Chroma, Milvus
-try:
-    from langchain_community.embeddings import OpenAIEmbeddings, HuggingFaceEmbeddings
-except ImportError:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
-    OpenAIEmbeddings = None
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
 from pydantic import BaseModel, Field
 from ..logging_config import get_logger
 from ..settings import settings
 from .embedding_service import get_embedding_service
 
 logger = get_logger("cyrex.contextual_ability_engine")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN = False
+HAS_OPENAI = False
+
+try:
+    from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+    from langchain_core.output_parsers import JsonOutputParser, PydanticOutputParser
+    from langchain_core.runnables import RunnablePassthrough
+    from langchain_core.documents import Document
+    HAS_LANGCHAIN = True
+except ImportError as e:
+    logger.warning(f"LangChain core not available: {e}")
+    ChatPromptTemplate = None
+    MessagesPlaceholder = None
+    JsonOutputParser = None
+    PydanticOutputParser = None
+    RunnablePassthrough = None
+    Document = None
+
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    try:
+        from langchain.text_splitter import RecursiveCharacterTextSplitter
+    except ImportError:
+        logger.warning("Text splitter not available")
+        RecursiveCharacterTextSplitter = None
+
+try:
+    from langchain_community.vectorstores import Chroma, Milvus
+except ImportError:
+    logger.warning("LangChain community vectorstores not available")
+    Chroma = None
+    Milvus = None
+
+try:
+    from langchain_community.embeddings import HuggingFaceEmbeddings
+except ImportError:
+    logger.warning("HuggingFaceEmbeddings not available")
+    HuggingFaceEmbeddings = None
+
+try:
+    from langchain_openai import ChatOpenAI
+    from langchain_community.embeddings import OpenAIEmbeddings
+    HAS_OPENAI = True
+except ImportError:
+    logger.info("OpenAI LangChain packages not available, will use local LLM")
+    ChatOpenAI = None
+    OpenAIEmbeddings = None
 
 
 class AbilityDefinition(BaseModel):

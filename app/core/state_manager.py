@@ -306,3 +306,15 @@ class WorkflowStateManager:
         
         return workflows[:limit]
 
+
+# Singleton instance
+_state_manager: Optional[WorkflowStateManager] = None
+
+
+def get_state_manager() -> WorkflowStateManager:
+    """Get singleton instance of WorkflowStateManager"""
+    global _state_manager
+    if _state_manager is None:
+        _state_manager = WorkflowStateManager()
+    return _state_manager
+

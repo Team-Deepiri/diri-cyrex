@@ -4,12 +4,21 @@ Bridges existing KnowledgeRetrievalEngine with new LangChain orchestration
 Seamless integration between old and new systems
 """
 from typing import List, Dict, Optional, Any
-from langchain_core.documents import Document
-from ..services.knowledge_retrieval_engine import KnowledgeRetrievalEngine
-from .milvus_store import MilvusVectorStore
 from ..logging_config import get_logger
 
 logger = get_logger("cyrex.rag_bridge")
+
+# LangChain imports with graceful fallbacks
+try:
+    from langchain_core.documents import Document
+    HAS_LANGCHAIN = True
+except ImportError:
+    logger.warning("LangChain core documents not available")
+    Document = None
+    HAS_LANGCHAIN = False
+
+from ..services.knowledge_retrieval_engine import KnowledgeRetrievalEngine
+from .milvus_store import MilvusVectorStore
 
 
 class RAGBridge:

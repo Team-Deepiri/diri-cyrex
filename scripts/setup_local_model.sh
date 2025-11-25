@@ -98,7 +98,7 @@ fi
 
 echo ""
 echo "📥 Pulling recommended model: llama3:8b"
-echo "   This may take a few minutes depending on your internet connection..."
+echo "   This may take a few minutes depending on your internet connection...(4GB download)"
 ollama pull llama3:8b
 
 echo ""

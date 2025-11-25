@@ -6,17 +6,36 @@ Cost-effective alternative to OpenAI for development and production
 from typing import Optional, Dict, List, Any, Iterator
 from enum import Enum
 import os
-from langchain_community.llms import Ollama
-from langchain_community.llms import LlamaCpp
-from langchain_core.language_models.llms import BaseLLM
-from langchain_core.callbacks import CallbackManagerForLLMRun
-from langchain_core.outputs import LLMResult
 from pydantic import BaseModel, Field
 import httpx
 from ..logging_config import get_logger
 from ..settings import settings
 
 logger = get_logger("cyrex.local_llm")
+
+# LangChain imports with graceful fallbacks
+HAS_LANGCHAIN_COMMUNITY = False
+HAS_LANGCHAIN_CORE = False
+
+try:
+    from langchain_community.llms import Ollama
+    from langchain_community.llms import LlamaCpp
+    HAS_LANGCHAIN_COMMUNITY = True
+except ImportError as e:
+    logger.warning(f"LangChain community LLMs not available: {e}")
+    Ollama = None
+    LlamaCpp = None
+
+try:
+    from langchain_core.language_models.llms import BaseLLM
+    from langchain_core.callbacks import CallbackManagerForLLMRun
+    from langchain_core.outputs import LLMResult
+    HAS_LANGCHAIN_CORE = True
+except ImportError as e:
+    logger.warning(f"LangChain core not available: {e}")
+    BaseLLM = None
+    CallbackManagerForLLMRun = None
+    LLMResult = None
 
 
 class LLMBackend(str, Enum):
