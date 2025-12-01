@@ -25,7 +25,17 @@ type WorkflowState = {
   checkpoints: unknown[];
 };
 
-const defaultBaseUrl = (import.meta.env?.VITE_CYREX_BASE_URL as string) || 'http://localhost:8000';
+// Auto-detect if we're in browser and convert Docker hostnames to localhost
+const getDefaultBaseUrl = () => {
+  const envUrl = (import.meta.env?.VITE_CYREX_BASE_URL as string) || 'http://localhost:8000';
+  // If running in browser (not in Docker) and URL uses Docker hostname, convert to localhost
+  if (typeof window !== 'undefined' && envUrl.includes('cyrex:')) {
+    return envUrl.replace('cyrex:', 'localhost:');
+  }
+  return envUrl;
+};
+
+const defaultBaseUrl = getDefaultBaseUrl();
 
 export default function App() {
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
@@ -247,12 +257,15 @@ export default function App() {
   // Local LLM tests
   const testLocalLLM = async () => {
     try {
-      // Use orchestration endpoint with local LLM
+      // Use orchestration endpoint with local LLM forced
       const result = await callEndpoint('/orchestration/process', {
         user_input: llmPrompt,
         user_id: 'llm-test',
         use_rag: false,
-        use_tools: false
+        use_tools: false,
+        force_local_llm: true,
+        llm_backend: llmBackend,
+        llm_model: llmModel
       });
       setLlmResult(pretty(result));
     } catch (err: any) {

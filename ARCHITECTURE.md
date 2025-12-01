@@ -1,12 +1,5 @@
-# Deepiri AI System - Three-Tier Architecture
 
-## 🎯 Overview
-
-Deepiri implements a three-tier AI system for maximum reliability, creativity, and adaptive learning. All tiers are fully integrated with LangChain for orchestration.
-
----
-
-## 🏗️ Architecture
+Architecture
 
 ### Tier 1: Command Routing (Maximum Reliability)
 **Service**: `command_router.py`  
@@ -29,7 +22,7 @@ Deepiri implements a three-tier AI system for maximum reliability, creativity, a
 
 ---
 
-## 📡 API Endpoints
+## API Endpoints
 
 Base URL: `/agent/intelligence`
 
