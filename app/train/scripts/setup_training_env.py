@@ -28,11 +28,15 @@ def check_package(package_name, import_name=None):
 
 def install_requirements():
     """Install requirements from requirements.txt"""
-    requirements_file = Path("app/train/requirements.txt")
+    # Try root requirements.txt first, fallback to train-specific if needed
+    requirements_file = Path("requirements.txt")
     
     if not requirements_file.exists():
-        print(f"❌ Requirements file not found: {requirements_file}")
-        return False
+        # Fallback to train-specific requirements if root doesn't exist
+        requirements_file = Path("app/train/requirements.txt")
+        if not requirements_file.exists():
+            print(f"❌ Requirements file not found: {requirements_file}")
+            return False
     
     print(f"\nInstalling dependencies from {requirements_file}...")
     print("This may take a few minutes...\n")
@@ -136,7 +140,7 @@ def main():
                 return False
         else:
             print("\n❌ Setup cancelled: Dependencies required")
-            print(f"   Run: pip install -r app/train/requirements.txt")
+            print(f"   Run: pip install -r requirements.txt")
             return False
     
     # Check CUDA

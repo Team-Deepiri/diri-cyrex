@@ -1,9 +1,5 @@
 # Cyrex Build Guide - GPU Detection & CPU Fallback
 
-## Problem Solved
-- **Before**: Builds froze at step 113/120 downloading 1.5GB+ CUDA packages, causing WiFi disconnections
-- **After**: Automatic GPU detection with CPU fallback, using prebuilt PyTorch images
-
 ## Automatic GPU Detection
 
 The build system automatically detects if you have a suitable GPU and chooses the appropriate base image:
