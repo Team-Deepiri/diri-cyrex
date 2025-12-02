@@ -6,8 +6,56 @@ Fine-tunes DeBERTa for maximum reliability
 import os
 import sys
 import json
+import types
+import importlib.util
 from pathlib import Path
+
+# IMPORTANT: Set environment variables BEFORE importing torch/transformers
+# This prevents DeepSpeed from trying to compile CUDA ops when using CPU
+# Check if we should use CPU mode early
+_force_cpu = os.environ.get('FORCE_CPU', '').lower() == 'true'
+
+def _disable_deepspeed_features():
+    """
+    Disable CUDA/DeepSpeed features to avoid MissingCUDAException.
+    Uses a more robust approach: prevents deepspeed from being imported
+    by making importlib think it doesn't exist, rather than creating a fake module.
+    """
+    os.environ['ACCELERATE_USE_CPU'] = 'true'
+    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+    os.environ['DS_SKIP_CUDA_CHECK'] = '1'
+    os.environ['ACCELERATE_USE_DEEPSPEED'] = 'false'
+    os.environ.setdefault('CUDA_HOME', '')
+    
+    # Monkey-patch importlib.util.find_spec to return None for deepspeed
+    # This makes transformers think deepspeed is not available
+    # This is cleaner than creating a fake module
+    original_find_spec = importlib.util.find_spec
+    
+    def patched_find_spec(name, package=None):
+        if name == 'deepspeed' or (isinstance(name, str) and name.startswith('deepspeed.')):
+            return None  # Tell transformers deepspeed doesn't exist
+        return original_find_spec(name, package)
+    
+    # Only patch if not already patched
+    if importlib.util.find_spec is not patched_find_spec:
+        importlib.util.find_spec = patched_find_spec
+
 import torch
+
+# If CUDA is available, check compatibility for environment setup
+if torch.cuda.is_available() and not _force_cpu:
+    try:
+        cuda_capability = torch.cuda.get_device_capability(0)
+        if cuda_capability[0] < 7:
+            _force_cpu = True
+            _disable_deepspeed_features()
+    except Exception:
+        _force_cpu = True
+        _disable_deepspeed_features()
+else:
+    _disable_deepspeed_features()
+
 from transformers import (
     AutoTokenizer,
     AutoModelForSequenceClassification,
@@ -21,6 +69,90 @@ import numpy as np
 
 # Add parent to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+
+def disable_deepspeed_env():
+    """Public helper to disable DeepSpeed/CUDA features."""
+    _disable_deepspeed_features()
+
+def detect_device(force_cpu: bool = False) -> dict:
+    """
+    Detect and return detailed device information.
+    Returns dict with keys:
+      - device (str): "cuda" or "cpu"
+      - use_gpu (bool)
+      - gpu_name (str | None)
+      - capability (tuple | None)
+      - reason (str)
+    """
+    info = {
+        "device": "cpu",
+        "use_gpu": False,
+        "gpu_name": None,
+        "capability": None,
+        "reason": ""
+    }
+    
+    if force_cpu or not torch.cuda.is_available():
+        reason = "forced_cpu" if force_cpu else "cuda_unavailable"
+        if not torch.cuda.is_available():
+            print("ℹ️  CUDA not available, using CPU")
+        info["reason"] = reason
+        return info
+    
+    try:
+        gpu_name = torch.cuda.get_device_name(0)
+        cuda_capability = torch.cuda.get_device_capability(0)
+        info["gpu_name"] = gpu_name
+        info["capability"] = cuda_capability
+        
+        print(f"ℹ️  Detected GPU: {gpu_name}")
+        print(f"   CUDA Capability: {cuda_capability[0]}.{cuda_capability[1]}")
+        
+        if cuda_capability[0] < 7:
+            print(f"⚠️  GPU has CUDA capability {cuda_capability[0]}.{cuda_capability[1]}")
+            print("   PyTorch requires 7.0+, falling back to CPU")
+            info["reason"] = "capability_too_low"
+            return info
+        
+        # Try a simple tensor operation to verify GPU works
+        test_tensor = torch.tensor([1.0]).cuda()
+        _ = test_tensor * 2
+        del test_tensor
+        torch.cuda.empty_cache()
+        
+        print("✓ GPU is compatible, using CUDA")
+        info["device"] = "cuda"
+        info["use_gpu"] = True
+        info["reason"] = "gpu_compatible"
+        return info
+    except Exception as e:
+        print(f"⚠️  GPU detected but not compatible: {e}")
+        print("   Falling back to CPU")
+        info["reason"] = f"gpu_error:{e}"
+        return info
+
+def prepare_device_environment(force_cpu: bool = False) -> dict:
+    """
+    Prepare environment variables and return device information.
+    Ensures DeepSpeed stays disabled when falling back to CPU.
+    """
+    info = detect_device(force_cpu=force_cpu)
+    if not info["use_gpu"]:
+        disable_deepspeed_env()
+    return info
+
+
+class DeviceAwareTrainer(Trainer):
+    """Trainer subclass that enforces detected device configuration."""
+    
+    def __init__(self, *args, device_info=None, force_cpu=False, **kwargs):
+        self.device_info = device_info or prepare_device_environment(force_cpu=force_cpu)
+        training_args = kwargs.get("args")
+        if training_args is not None:
+            training_args.no_cuda = not self.device_info["use_gpu"]
+            if hasattr(training_args, "use_cpu"):
+                training_args.use_cpu = not self.device_info["use_gpu"]
+        super().__init__(*args, **kwargs)
 
 def compute_metrics(eval_pred):
     """Compute accuracy and F1 score"""
@@ -44,10 +176,10 @@ def train_intent_classifier(
     train_file: str = "app/train/data/classification_train.jsonl",
     val_file: str = "app/train/data/classification_val.jsonl",
     output_dir: str = "app/train/models/intent_classifier",
-    num_abilities: int = 8,  # 8 task categories
-    num_epochs: int = 3,
+    num_abilities: int = 31,  # 31 task categories
+    num_epochs: int = 2,  # Reduced from 3
     batch_size: int = 16,
-    learning_rate: float = 2e-5
+    learning_rate: float = 1e-5  # Reduced from 2e-5
 ):
     """Train intent classifier"""
     
@@ -55,7 +187,13 @@ def train_intent_classifier(
     print("Training Tier 1: Task Category Classifier")
     print("=" * 60)
     print(f"Model: {model_name}")
-    print(f"Categories: {num_abilities} (coding, writing, fitness, cleaning, learning, creative, administrative, social)")
+    print(f"Categories: {num_abilities}")
+    print(f"  Coding: debugging, refactoring, writing_code, programming, running_code, inspecting")
+    print(f"  Core: writing, learning_research, learning_study, learning_training, learning_practice")
+    print(f"  Team: creative, administrative, team_organization, team_collaboration, team_planning")
+    print(f"  Work: research, planning, communication, big_data_analytics, data_processing, design")
+    print(f"  Quality: qa, testing, validation, reporting, documentation, system_admin")
+    print(f"  Specialized: ux_ui, security, data_privacy")
     print(f"Epochs: {num_epochs}")
     print()
     
@@ -121,6 +259,17 @@ def train_intent_classifier(
         remove_columns=[col for col in dataset['train'].column_names if col != 'label']
     )
     
+    # Detect device (GPU or CPU) via trainer detection layer
+    print("\n🔍 Detecting device (trainer-managed)...")
+    device_info = prepare_device_environment(force_cpu=_force_cpu)
+    device = device_info["device"]
+    use_gpu = device_info["use_gpu"]
+    if use_gpu:
+        print(f"   ✓ Using GPU: {device_info.get('gpu_name')}")
+    else:
+        print(f"   ℹ️  Using CPU (reason: {device_info.get('reason', 'cpu_fallback')})")
+    print()
+    
     # Training arguments
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -143,13 +292,17 @@ def train_intent_classifier(
         greater_is_better=True,
         push_to_hub=False,
         report_to="none",  # Disable wandb/tensorboard by default
+        no_cuda=not use_gpu,
     )
+    if hasattr(training_args, "use_cpu"):
+        training_args.use_cpu = not use_gpu
     
     # Data collator
     data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
     
-    # Trainer
-    trainer = Trainer(
+    # Trainer with detection layer
+    trainer = DeviceAwareTrainer(
+        device_info=device_info,
         model=model,
         args=training_args,
         train_dataset=tokenized_dataset['train'],
@@ -160,7 +313,9 @@ def train_intent_classifier(
     
     # Train
     print("\n🚀 Starting training...")
-    print(f"   Device: {training_args.device}")
+    print(f"   Device: {device.upper()} ({'GPU' if use_gpu else 'CPU'})")
+    if use_gpu:
+        print(f"   GPU: {torch.cuda.get_device_name(0)}")
     print(f"   Batch size: {batch_size}")
     print(f"   Learning rate: {learning_rate}")
     print()
@@ -187,16 +342,14 @@ def train_intent_classifier(
     trainer.save_model()
     tokenizer.save_pretrained(output_dir)
     
-    # Save category mapping
+    # Save category mapping (31 categories)
     category_map = {
-        0: "coding",
-        1: "writing",
-        2: "fitness",
-        3: "cleaning",
-        4: "learning",
-        5: "creative",
-        6: "administrative",
-        7: "social"
+        0: "debugging", 1: "refactoring", 2: "writing_code", 3: "programming", 4: "running_code", 5: "inspecting",
+        6: "writing", 7: "learning_research", 8: "learning_study", 9: "learning_training", 10: "learning_practice",
+        11: "creative", 12: "administrative", 13: "team_organization", 14: "team_collaboration", 15: "team_planning",
+        16: "research", 17: "planning", 18: "communication", 19: "big_data_analytics", 20: "data_processing",
+        21: "design", 22: "qa", 23: "testing", 24: "validation", 25: "reporting",
+        26: "documentation", 27: "system_admin", 28: "ux_ui", 29: "security", 30: "data_privacy"
     }
     id_to_label = {i: category_map.get(i, f"category_{i}") for i in range(num_abilities)}
     label_to_id = {v: k for k, v in id_to_label.items()}
@@ -241,14 +394,14 @@ if __name__ == "__main__":
                        help="Validation data file")
     parser.add_argument("--output-dir", default="app/train/models/intent_classifier",
                        help="Output directory for model")
-    parser.add_argument("--num-abilities", type=int, default=8,
-                       help="Number of task categories (default: 8)")
-    parser.add_argument("--epochs", type=int, default=3,
-                       help="Number of training epochs")
+    parser.add_argument("--num-abilities", type=int, default=31,
+                       help="Number of task categories (default: 31)")
+    parser.add_argument("--epochs", type=int, default=2,
+                       help="Number of training epochs (default: 2)")
     parser.add_argument("--batch-size", type=int, default=16,
                        help="Batch size")
-    parser.add_argument("--learning-rate", type=float, default=2e-5,
-                       help="Learning rate")
+    parser.add_argument("--learning-rate", type=float, default=1e-5,
+                       help="Learning rate (default: 1e-5)")
     
     args = parser.parse_args()
     
