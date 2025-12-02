@@ -9,7 +9,7 @@ echo ""
 
 # Step 1: Export data
 echo "Step 1: Exporting collected data..."
-python -c "
+python3 -c "
 from app.train.pipelines.data_collection_pipeline import get_data_collector
 from pathlib import Path
 
@@ -34,7 +34,7 @@ if [ ! -f "app/train/data/exported/classification_training.jsonl" ]; then
     echo ""
     echo "No collected data found. Generating synthetic data..."
     if [ -f "app/train/scripts/generate_synthetic_data.py" ]; then
-        python app/train/scripts/generate_synthetic_data.py
+        python3 app/train/scripts/generate_synthetic_data.py
     else
         echo "⚠ Synthetic data generator not found"
         echo "  Create some training data first!"
@@ -45,7 +45,7 @@ fi
 # Step 3: Prepare data
 echo ""
 echo "Step 2: Preparing training data..."
-python app/train/scripts/prepare_training_data.py
+python3 app/train/scripts/prepare_training_data.py
 
 # Step 4: Train
 echo ""
@@ -53,7 +53,7 @@ echo "Step 3: Training intent classifier..."
 echo "  This may take 10-30 minutes depending on your hardware..."
 echo ""
 
-python app/train/scripts/train_intent_classifier.py \
+python3 app/train/scripts/train_intent_classifier.py \
     --epochs 3 \
     --batch-size 16
 

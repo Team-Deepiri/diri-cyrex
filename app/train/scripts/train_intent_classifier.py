@@ -40,7 +40,7 @@ def compute_metrics(eval_pred):
     }
 
 def train_intent_classifier(
-    model_name: str = "microsoft/deberta-v3-base",
+    model_name: str = "bert-base-uncased",
     train_file: str = "app/train/data/classification_train.jsonl",
     val_file: str = "app/train/data/classification_val.jsonl",
     output_dir: str = "app/train/models/intent_classifier",
@@ -233,7 +233,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Train Tier 1 Intent Classifier")
-    parser.add_argument("--model", default="microsoft/deberta-v3-base",
+    parser.add_argument("--model", default="bert-base-uncased",
                        help="Base model to fine-tune")
     parser.add_argument("--train-file", default="app/train/data/classification_train.jsonl",
                        help="Training data file")
@@ -262,4 +262,3 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         learning_rate=args.learning_rate
     )
-

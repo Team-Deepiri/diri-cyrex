@@ -121,6 +121,26 @@ Thumbs.db
 .idea/
 *.iml
 
+# Windows executables
+*.exe
+*.exe.*
+
+# ========================================
+# TRAINING & ML DATA
+# ========================================
+# Training data and models
+app/train/data/
+app/train/models/
+**/data/
+**/models/
+*.jsonl
+synthetic_*.jsonl
+
+# Test files
+test_*.py
+*_test.py
+test_model_load.py
+
 # ========================================
 # MISC
 # ========================================
@@ -142,3 +162,8 @@ skaffold
 binary/
 # Kubernetes binary (should be installed globally)
 kubectl
+.cfg
+*venv
+venv/
+.venv
+.venv*
