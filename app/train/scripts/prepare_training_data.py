@@ -10,56 +10,74 @@ import random
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 def map_ability_to_id(ability_name: str) -> int:
-    """Map ability name to ID (0-49 for 50 abilities)"""
-    # Default ability mapping - update with your actual abilities
-    ability_map = {
-        "summarize_text": 0,
-        "create_objective": 1,
-        "activate_focus_boost": 2,
-        "activate_velocity_boost": 3,
-        "generate_code_review": 4,
-        "refactor_suggest": 5,
-        "create_odyssey": 6,
-        "schedule_break": 7,
-        # Add all 50 abilities here...
+    """Map ability name to ID (0-7 for 8 task categories)"""
+    # Task category mapping (8 categories)
+    category_map = {
+        "coding": 0,
+        "writing": 1,
+        "fitness": 2,
+        "cleaning": 3,
+        "learning": 4,
+        "creative": 5,
+        "administrative": 6,
+        "social": 7
     }
     
     # If ability_name is already a number, return it
     try:
         ability_id = int(ability_name)
-        if 0 <= ability_id < 50:
+        if 0 <= ability_id < 8:
             return ability_id
     except ValueError:
         pass
     
     # Try to find in map
-    if ability_name in ability_map:
-        return ability_map[ability_name]
+    if ability_name in category_map:
+        return category_map[ability_name]
     
     # Try lowercase
-    if ability_name.lower() in ability_map:
-        return ability_map[ability_name.lower()]
+    if ability_name.lower() in category_map:
+        return category_map[ability_name.lower()]
     
     # Default to 0 if not found
-    print(f"⚠ Warning: Unknown ability '{ability_name}', mapping to 0")
+    print(f"⚠ Warning: Unknown category '{ability_name}', mapping to 0 (coding)")
     return 0
 
 def prepare_classification_data():
     """Prepare Tier 1 classification data"""
-    input_file = Path("app/train/data/exported/classification_training.jsonl")
+    # Check multiple possible input locations
+    possible_inputs = [
+        Path("app/train/data/classification_train.jsonl"),  # Already prepared
+        Path("app/train/data/exported/classification_training.jsonl"),  # Exported data
+        Path("app/train/data/synthetic_classification_train.jsonl"),  # Synthetic full format
+    ]
+    
+    input_file = None
+    for path in possible_inputs:
+        if path.exists():
+            input_file = path
+            break
+    
     output_train = Path("app/train/data/classification_train.jsonl")
     output_val = Path("app/train/data/classification_val.jsonl")
     
     # Create directories
     output_train.parent.mkdir(parents=True, exist_ok=True)
     
-    if not input_file.exists():
-        print(f"⚠ {input_file} not found.")
+    if not input_file:
+        print(f"⚠ No training data found. Checking for existing prepared data...")
+        # Check if data is already prepared
+        if output_train.exists() and output_val.exists():
+            print(f"✓ Training data already prepared!")
+            print(f"  Train: {output_train}")
+            print(f"  Val: {output_val}")
+            return True
+        
         print("   Options:")
-        print("   1. Export collected data:")
-        print("      python -c \"from app.train.pipelines.data_collection_pipeline import get_data_collector; c = get_data_collector(); c.export_for_training('app/train/data/exported/classification_training.jsonl', 'classification')\"")
-        print("   2. Generate synthetic data:")
+        print("   1. Generate synthetic data:")
         print("      python app/train/scripts/generate_synthetic_data.py")
+        print("   2. Export collected data:")
+        print("      python -c \"from app.train.pipelines.data_collection_pipeline import get_data_collector; c = get_data_collector(); c.export_for_training('app/train/data/exported/classification_training.jsonl', 'classification')\"")
         return False
     
     # Load and format data
@@ -75,13 +93,30 @@ def prepare_classification_data():
                 # Extract text and label
                 text = item.get('text', '')
                 label = item.get('label', '')
+                label_id = item.get('label_id', None)
                 
-                if not text or not label:
-                    print(f"⚠ Skipping line {line_num}: missing text or label")
+                if not text:
+                    print(f"⚠ Skipping line {line_num}: missing text")
                     continue
                 
-                # Map ability to ID
-                ability_id = map_ability_to_id(label)
+                # Handle label - could be string category or integer ID
+                if label_id is not None:
+                    # Already has label_id
+                    ability_id = int(label_id)
+                elif isinstance(label, int):
+                    # Label is already an integer
+                    ability_id = label
+                elif isinstance(label, str):
+                    # Label is a string category, map it
+                    ability_id = map_ability_to_id(label)
+                else:
+                    print(f"⚠ Skipping line {line_num}: invalid label format")
+                    continue
+                
+                # Validate label_id is in range [0, 7]
+                if not (0 <= ability_id < 8):
+                    print(f"⚠ Skipping line {line_num}: label_id {ability_id} out of range [0, 7]")
+                    continue
                 
                 data.append({
                     "text": text,

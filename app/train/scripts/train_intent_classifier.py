@@ -44,7 +44,7 @@ def train_intent_classifier(
     train_file: str = "app/train/data/classification_train.jsonl",
     val_file: str = "app/train/data/classification_val.jsonl",
     output_dir: str = "app/train/models/intent_classifier",
-    num_abilities: int = 50,
+    num_abilities: int = 8,  # 8 task categories
     num_epochs: int = 3,
     batch_size: int = 16,
     learning_rate: float = 2e-5
@@ -52,10 +52,10 @@ def train_intent_classifier(
     """Train intent classifier"""
     
     print("=" * 60)
-    print("Training Tier 1: Intent Classifier")
+    print("Training Tier 1: Task Category Classifier")
     print("=" * 60)
     print(f"Model: {model_name}")
-    print(f"Abilities: {num_abilities}")
+    print(f"Categories: {num_abilities} (coding, writing, fitness, cleaning, learning, creative, administrative, social)")
     print(f"Epochs: {num_epochs}")
     print()
     
@@ -187,12 +187,25 @@ def train_intent_classifier(
     trainer.save_model()
     tokenizer.save_pretrained(output_dir)
     
-    # Save ability mapping (placeholder - update with real mapping)
-    ability_map = {
-        i: f"ability_{i}" for i in range(num_abilities)
+    # Save category mapping
+    category_map = {
+        0: "coding",
+        1: "writing",
+        2: "fitness",
+        3: "cleaning",
+        4: "learning",
+        5: "creative",
+        6: "administrative",
+        7: "social"
     }
-    with open(f"{output_dir}/ability_map.json", 'w') as f:
-        json.dump(ability_map, f, indent=2)
+    id_to_label = {i: category_map.get(i, f"category_{i}") for i in range(num_abilities)}
+    label_to_id = {v: k for k, v in id_to_label.items()}
+    
+    with open(f"{output_dir}/category_map.json", 'w') as f:
+        json.dump({
+            "id2label": id_to_label,
+            "label2id": label_to_id
+        }, f, indent=2)
     
     # Save training info
     training_info = {
@@ -228,8 +241,8 @@ if __name__ == "__main__":
                        help="Validation data file")
     parser.add_argument("--output-dir", default="app/train/models/intent_classifier",
                        help="Output directory for model")
-    parser.add_argument("--num-abilities", type=int, default=50,
-                       help="Number of predefined abilities")
+    parser.add_argument("--num-abilities", type=int, default=8,
+                       help="Number of task categories (default: 8)")
     parser.add_argument("--epochs", type=int, default=3,
                        help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=16,
