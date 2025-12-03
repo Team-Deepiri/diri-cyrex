@@ -134,6 +134,41 @@ The following tests intentionally use real connections (they're marked as integr
        task.cancel()
    ```
 
+## Additional Fixes for Intermittent Hanging
+
+### 5. ✅ Milvus Connections Not Being Closed
+
+**Problem**: Milvus connections created during tests weren't being closed, causing intermittent hangs.
+
+**File Fixed**: `tests/conftest.py`
+
+**Solution**: 
+1. Added Milvus connection cleanup in `cleanup_async_resources` fixture
+2. Disabled Milvus by default in test environment (set `MILVUS_HOST=""` and `MILVUS_PORT=""`)
+3. Ensured `get_orchestrator()` tests mock Milvus connections
+
+**Added**:
+```python
+# In setup_test_env fixture
+monkeypatch.setenv("MILVUS_HOST", "")
+monkeypatch.setenv("MILVUS_PORT", "")
+
+# In cleanup_async_resources fixture
+try:
+    from pymilvus import connections
+    if connections and hasattr(connections, 'has_connection'):
+        if connections.has_connection("default"):
+            connections.disconnect("default")
+except Exception:
+    pass
+```
+
+### 6. ✅ Simplified Cleanup Fixture
+
+**Problem**: Complex cleanup logic was interfering with pytest-asyncio's event loop management.
+
+**Solution**: Simplified cleanup to only close connections (Milvus), letting pytest-asyncio handle event loop cleanup automatically.
+
 ## Test Results
 
 After fixes:
@@ -141,6 +176,7 @@ After fixes:
 - ✅ All async resources properly cleaned up
 - ✅ Tests complete in reasonable time
 - ✅ No unclosed connections warnings
+- ✅ Intermittent hangs resolved by disabling Milvus by default
 
 ## Files Modified
 

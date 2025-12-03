@@ -66,6 +66,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# CORS middleware handles OPTIONS requests automatically
+# No explicit handler needed - FastAPI's CORSMiddleware will return 204 for OPTIONS
+
 
 @app.middleware("http")
 async def add_request_id_and_metrics(request: Request, call_next):
@@ -171,6 +174,13 @@ def health():
     
     logger.info("Health check requested", **health_status)
     return health_status
+
+
+@app.options("/health")
+async def health_options():
+    """Handle OPTIONS request for health endpoint (CORS preflight)."""
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @app.get("/metrics")

@@ -55,11 +55,25 @@ class ToolRegistry:
     Manages tool registration, validation, and execution
     """
     
-    def __init__(self):
+    def __init__(self, load_defaults: bool = True):
         self.tools: Dict[str, BaseTool] = {}
         self.metadata: Dict[str, ToolMetadata] = {}
         self.call_counts: Dict[str, int] = {}
         self.logger = logger
+        if load_defaults:
+            self._load_default_tools()
+    
+    def _load_default_tools(self):
+        """Load default tools (can be overridden in tests)."""
+        # Default tools are loaded lazily or can be added here
+        # For now, we don't auto-load any tools to allow test isolation
+        pass
+    
+    def reset(self):
+        """Reset registry to empty state (useful for tests)."""
+        self.tools = {}
+        self.metadata = {}
+        self.call_counts = {}
     
     def register_tool(
         self,

@@ -21,20 +21,21 @@ os.environ["LANGSMITH_API_KEY"] = ""
 def cleanup_async_resources():
     """
     Cleanup async resources after each test.
-    Cancels any pending tasks to prevent hanging.
+    Closes connections to prevent hanging.
+    Note: pytest-asyncio handles event loop cleanup automatically.
     """
     yield
-    # After test completes, clean up any pending tasks
+    # Close any Milvus connections that might be open
+    # This is the most common source of hanging connections
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # If loop is running, schedule cleanup
-            pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
-            if pending:
-                for task in pending:
-                    task.cancel()
-    except RuntimeError:
-        # No event loop, nothing to clean up
+        from pymilvus import connections
+        if connections and hasattr(connections, 'has_connection'):
+            try:
+                if connections.has_connection("default"):
+                    connections.disconnect("default")
+            except Exception:
+                pass
+    except (ImportError, AttributeError, Exception):
         pass
 
 
@@ -49,6 +50,9 @@ def setup_test_env(monkeypatch):
     # Disable LangSmith tracing during tests
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     monkeypatch.setenv("LANGSMITH_API_KEY", "")
+    # Disable Milvus by default to prevent connection attempts
+    monkeypatch.setenv("MILVUS_HOST", "")
+    monkeypatch.setenv("MILVUS_PORT", "")
 
 
 @pytest.fixture
@@ -95,9 +99,19 @@ def mock_vector_store():
 
 @pytest.fixture
 def clean_tool_registry():
-    """Fixture that provides a clean tool registry"""
+    """Fixture that provides a clean tool registry without default tools"""
     from app.core.tool_registry import ToolRegistry
-    return ToolRegistry()
+    return ToolRegistry(load_defaults=False)
+
+
+@pytest.fixture(autouse=True)
+def reset_tool_registry():
+    """Reset tool registry before each test to ensure isolation"""
+    from app.core.tool_registry import get_tool_registry
+    yield
+    # After test, reset the global registry
+    registry = get_tool_registry()
+    registry.reset()
 
 
 @pytest.fixture
