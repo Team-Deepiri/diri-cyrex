@@ -57,7 +57,7 @@ def main(
     
     # Step 1: Generate synthetic data
     if generate_data:
-        cmd = f"python app/train/scripts/generate_synthetic_data.py"
+        cmd = f"python3 app/train/scripts/generate_synthetic_data.py"
         if examples_per_class:
             cmd += f" --examples-per-class {examples_per_class}"
         else:
@@ -68,7 +68,7 @@ def main(
             return False
     
     # Step 2: Prepare training data
-    cmd = "python app/train/scripts/prepare_training_data.py"
+    cmd = "python3 app/train/scripts/prepare_training_data.py"
     if not run_command(cmd, "Prepare Training Data"):
         print("\n❌ Failed to prepare training data")
         print("   Note: If data was already generated, this might be okay")
@@ -76,7 +76,7 @@ def main(
     
     # Step 3: Train the model
     if not skip_training:
-        cmd = f"python app/train/scripts/train_intent_classifier.py"
+        cmd = f"python3 app/train/scripts/train_intent_classifier.py"
         cmd += f" --epochs {epochs}"
         cmd += f" --batch-size {batch_size}"
         cmd += f" --learning-rate {learning_rate}"
@@ -89,7 +89,7 @@ def main(
     print("\n" + "=" * 60)
     print("🎯 Evaluating Model Performance")
     print("=" * 60)
-    cmd = "python app/train/scripts/evaluate_trained_model.py"
+    cmd = "python3 app/train/scripts/evaluate_trained_model.py"
     if not run_command(cmd, "Evaluate Model on Test Set"):
         print("\n⚠️  Evaluation failed, but model is still trained")
     
@@ -104,7 +104,7 @@ def main(
     print("📊 Evaluation report: app/train/models/intent_classifier/evaluation_report.json")
     print()
     print("🧪 Test the model interactively:")
-    print("   python app/train/scripts/test_model_inference.py")
+    print("   python3 app/train/scripts/test_model_inference.py")
     print()
     print("📈 Use in production:")
     print("   from app.services.command_router import get_command_router")

@@ -199,12 +199,12 @@ def evaluate_model(
     
     if not model_path_obj.exists():
         print(f"❌ Model not found: {model_path}")
-        print("   Train a model first: python app/train/scripts/train_intent_classifier.py")
+        print("   Train a model first: python3 app/train/scripts/train_intent_classifier.py")
         return False
     
     if not test_file_obj.exists():
         print(f"❌ Test data not found: {test_file}")
-        print("   Generate data: python app/train/scripts/generate_synthetic_data.py")
+        print("   Generate data: python3 app/train/scripts/generate_synthetic_data.py")
         return False
     
     # Load test data

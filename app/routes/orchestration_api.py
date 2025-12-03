@@ -77,9 +77,14 @@ async def process_request(
                             use_tools=input.use_tools,
                         )
                         return result
+                    except TimeoutError as e:
+                        raise HTTPException(
+                            status_code=504,
+                            detail=f"Local LLM ({backend_str}) request timed out. The LLM may be slow or unresponsive. Error: {str(e)}"
+                        )
                     except Exception as e:
                         error_msg = str(e)
-                        if "Connection" in error_msg or "connect" in error_msg.lower():
+                        if "Connection" in error_msg or "connect" in error_msg.lower() or "timeout" in error_msg.lower():
                             raise HTTPException(
                                 status_code=503,
                                 detail=f"Local LLM ({backend_str}) connection failed. Make sure Ollama is running at the configured URL. Error: {error_msg}"

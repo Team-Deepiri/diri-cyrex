@@ -6,7 +6,8 @@ Cost-effective alternative to OpenAI for development and production
 from typing import Optional, Dict, List, Any, Iterator
 from enum import Enum
 import os
-from pydantic import BaseModel, Field
+import asyncio
+from pydantic import BaseModel, Field, ConfigDict
 import httpx
 from ..logging_config import get_logger
 from ..settings import settings
@@ -47,6 +48,10 @@ class LLMBackend(str, Enum):
 
 class LocalLLMConfig(BaseModel):
     """Configuration for local LLM"""
+    model_config = ConfigDict(
+        protected_namespaces=()  # Allow model_name field without conflict
+    )
+    
     backend: LLMBackend = Field(default=LLMBackend.OLLAMA)
     model_name: str = Field(default="llama3:8b")
     base_url: Optional[str] = Field(default=None)  # For Ollama, defaults to http://localhost:11434
@@ -133,6 +138,8 @@ class LocalLLMProvider:
                 f"Make sure Ollama is running and accessible."
             )
         
+        # Set timeout to prevent hanging on socket I/O
+        # This applies to the underlying requests library
         return Ollama(
             model=self.config.model_name,
             base_url=final_url,
@@ -142,6 +149,7 @@ class LocalLLMProvider:
             top_k=self.config.top_k,
             repeat_penalty=self.config.repeat_penalty,
             num_ctx=self.config.n_ctx,
+            timeout=settings.REQUEST_TIMEOUT,  # Socket-level timeout for requests
         )
     
     def _initialize_llama_cpp(self) -> LlamaCpp:
@@ -239,14 +247,27 @@ class LocalLLMProvider:
         if not self.llm:
             raise RuntimeError("LLM not initialized")
         
+        # Get timeout from settings, default to 30 seconds
+        timeout = kwargs.pop('timeout', settings.REQUEST_TIMEOUT)
+        
         try:
             if hasattr(self.llm, 'ainvoke'):
-                result = await self.llm.ainvoke(prompt, **kwargs)
+                # Wrap in timeout to prevent hanging
+                result = await asyncio.wait_for(
+                    self.llm.ainvoke(prompt, **kwargs),
+                    timeout=timeout
+                )
             else:
-                # Fallback to sync with asyncio
-                import asyncio
-                result = await asyncio.to_thread(self.llm.invoke, prompt, **kwargs)
+                # Fallback to sync with asyncio, also with timeout
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self.llm.invoke, prompt, **kwargs),
+                    timeout=timeout
+                )
             return result
+        except asyncio.TimeoutError:
+            error_msg = f"LLM invocation timed out after {timeout} seconds"
+            logger.error(error_msg)
+            raise TimeoutError(error_msg)
         except Exception as e:
             logger.error(f"Async LLM invocation failed: {e}", exc_info=True)
             raise

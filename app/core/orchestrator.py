@@ -245,17 +245,34 @@ If a tool fails, explain what happened and suggest alternatives."""),
             # Use ReAct agent for local LLMs or if OpenAI agent failed
             if create_react_agent:
                 try:
-                    # Try to pull ReAct prompt from hub, fallback to default
+                    # Try to pull ReAct prompt from hub with timeout, fallback to default
+                    react_prompt = None
                     if HAS_HUB and hub:
-                        try:
-                            react_prompt = hub.pull("hwchase17/react")
-                        except:
+                        # Use thread-based timeout to prevent hanging on network requests
+                        import threading
+                        import queue
+                        
+                        result_queue = queue.Queue()
+                        def pull_prompt():
+                            try:
+                                prompt = hub.pull("hwchase17/react")
+                                result_queue.put(prompt)
+                            except Exception as e:
+                                self.logger.debug(f"Failed to pull prompt from hub: {e}")
+                                result_queue.put(None)
+                        
+                        thread = threading.Thread(target=pull_prompt, daemon=True)
+                        thread.start()
+                        thread.join(timeout=2.0)  # 2 second timeout for hub pull
+                        
+                        if thread.is_alive():
+                            self.logger.warning("LangChain Hub pull timed out, using fallback prompt")
                             react_prompt = None
-                    else:
-                        react_prompt = None
+                        elif not result_queue.empty():
+                            react_prompt = result_queue.get()
                     
                     if not react_prompt:
-                        # Fallback prompt
+                        # Fallback prompt - use this by default to avoid network calls
                         react_prompt = ChatPromptTemplate.from_messages([
                             ("system", """You are a helpful AI assistant with access to tools.
 Use the following format:

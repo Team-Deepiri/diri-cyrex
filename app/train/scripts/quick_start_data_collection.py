@@ -179,8 +179,8 @@ def show_next_steps():
     print("\n📋 QUICK INTEGRATION:")
     print("   1. See examples: app/train/examples/deepiri_integration_example.py")
     print("   2. Add feedback endpoints for user labeling")
-    print("   3. Export data weekly: python app/train/scripts/export_training_data.py")
-    print("   4. Generate synthetic data: python app/train/scripts/generate_synthetic_data.py")
+    print("   3. Export data weekly: python3 app/train/scripts/export_training_data.py")
+    print("   4. Generate synthetic data: python3 app/train/scripts/generate_synthetic_data.py")
     
     print("\n" + "="*60)
     print("DATA COLLECTION IS NOW ACTIVE FOR DEEPIRI PLATFORM!")

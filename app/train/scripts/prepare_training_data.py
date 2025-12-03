@@ -75,7 +75,7 @@ def prepare_classification_data():
         
         print("   Options:")
         print("   1. Generate synthetic data:")
-        print("      python app/train/scripts/generate_synthetic_data.py")
+        print("      python3 app/train/scripts/generate_synthetic_data.py")
         print("   2. Export collected data:")
         print("      python -c \"from app.train.pipelines.data_collection_pipeline import get_data_collector; c = get_data_collector(); c.export_for_training('app/train/data/exported/classification_training.jsonl', 'classification')\"")
         return False
@@ -162,7 +162,7 @@ def prepare_classification_data():
     print(f"  Train: {output_train}")
     print(f"  Val: {output_val}")
     print(f"\n  Next step: Run training")
-    print(f"  python app/train/scripts/train_intent_classifier.py")
+    print(f"  python3 app/train/scripts/train_intent_classifier.py")
     
     return True
 

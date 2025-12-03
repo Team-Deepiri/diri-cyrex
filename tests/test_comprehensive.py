@@ -63,7 +63,7 @@ class TestHealthEndpoint:
         
         data = response.json()
         assert data["status"] == "healthy"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "3.0.0"
         assert "timestamp" in data
         assert "services" in data
         assert "configuration" in data
@@ -97,8 +97,8 @@ class TestRootEndpoint:
         assert response.status_code == 200
         
         data = response.json()
-        assert data["message"] == "tripblip Python Agent API"
-        assert data["version"] == "0.1.0"
+        assert data["message"] == "Deepiri AI Challenge Service API"
+        assert data["version"] == "3.0.0"
         assert "docs" in data
         assert "health" in data
         assert "metrics" in data
@@ -194,7 +194,7 @@ class TestAgentMessageStreamEndpoint:
     def test_agent_message_stream_success(self, client, mock_openai_client):
         """Test successful agent message streaming."""
         with patch.object(settings, 'OPENAI_API_KEY', 'test-key'):
-            # Mock streaming response
+            # Mock streaming response - create an iterable generator
             mock_chunk1 = Mock()
             mock_chunk1.choices = [Mock()]
             mock_chunk1.choices[0].delta.content = "Hello"
@@ -203,16 +203,22 @@ class TestAgentMessageStreamEndpoint:
             mock_chunk2.choices = [Mock()]
             mock_chunk2.choices[0].delta.content = " World"
             
-            mock_openai_client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2]
+            # Create a generator that yields chunks
+            def mock_stream():
+                yield mock_chunk1
+                yield mock_chunk2
             
-            response = client.post(
-                "/agent/message/stream",
-                json={"content": "Hello, AI!"}
-            )
-            
-            assert response.status_code == 200
-            assert response.headers["content-type"] == "text/plain"
-            assert "X-Request-ID" in response.headers
+            # Mock asyncio.to_thread to return our mock stream
+            with patch('asyncio.to_thread', return_value=mock_stream()):
+                response = client.post(
+                    "/agent/message/stream",
+                    json={"content": "Hello, AI!"}
+                )
+                
+                assert response.status_code == 200
+                assert response.headers["content-type"] == "text/plain"
+                # Check for request ID header (can be x-request-id or X-Request-ID)
+                assert "x-request-id" in response.headers or "X-Request-ID" in response.headers
     
     def test_agent_message_stream_without_openai_key(self, client):
         """Test agent message streaming when OpenAI key is not configured."""

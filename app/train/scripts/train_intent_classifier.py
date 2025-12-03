@@ -65,7 +65,7 @@ def train_intent_classifier(
     
     if not train_path.exists():
         print(f"❌ Training file not found: {train_file}")
-        print("   Run: python app/train/scripts/prepare_training_data.py")
+        print("   Run: python3 app/train/scripts/prepare_training_data.py")
         print("   Or generate synthetic data first")
         return
     

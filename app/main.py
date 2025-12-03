@@ -113,6 +113,8 @@ async def add_request_id_and_metrics(request: Request, call_next):
                     raise HTTPException(status_code=401, detail="Invalid API key")
         
         response = await call_next(request)
+        # Add request ID to response headers
+        response.headers["x-request-id"] = request_id
         return response
         
     except Exception as e:

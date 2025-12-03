@@ -429,7 +429,7 @@ def generate_synthetic_dataset(
     print(f"  Label mapping: {label_map_file}")
     print(f"  Metadata: {metadata_file}")
     print(f"\nNext step: Run training")
-    print(f"  python app/train/scripts/train_intent_classifier.py")
+    print(f"  python3 app/train/scripts/train_intent_classifier.py")
     
     return {
         "train": train_data,

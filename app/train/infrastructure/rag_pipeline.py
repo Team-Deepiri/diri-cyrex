@@ -41,7 +41,8 @@ class RAGPipeline:
             connections.connect(
                 alias="default",
                 host=self.milvus_host,
-                port=self.milvus_port
+                port=self.milvus_port,
+                timeout=5.0  # 5 second timeout to prevent hanging
             )
             
             if utility.has_collection(self.collection_name):
