@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 import json
 
 from app.main import app
@@ -238,7 +238,8 @@ class TestProxyEndpoints:
     async def test_proxy_adventure_data_success(self, mock_httpx_client):
         """Test successful adventure data proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/adventure-data",
                     params={"lat": 40.7128, "lng": -74.0060, "radius": 5000}
@@ -256,7 +257,8 @@ class TestProxyEndpoints:
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
             mock_httpx_client.get.side_effect = TimeoutException("Request timeout")
             
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/adventure-data",
                     params={"lat": 40.7128, "lng": -74.0060}
@@ -269,7 +271,8 @@ class TestProxyEndpoints:
     async def test_proxy_directions_success(self, mock_httpx_client):
         """Test successful directions proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/directions",
                     params={
@@ -287,7 +290,8 @@ class TestProxyEndpoints:
     async def test_proxy_weather_current_success(self, mock_httpx_client):
         """Test successful current weather proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/weather/current",
                     params={"lat": 40.7128, "lng": -74.0060}
@@ -301,7 +305,8 @@ class TestProxyEndpoints:
     async def test_proxy_weather_forecast_success(self, mock_httpx_client):
         """Test successful weather forecast proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/weather/forecast",
                     params={"lat": 40.7128, "lng": -74.0060, "days": 3}
@@ -340,7 +345,7 @@ class TestErrorHandling:
         """Test handling of invalid JSON."""
         response = client.post(
             "/agent/message",
-            data="invalid json",
+            content="invalid json",
             headers={"content-type": "application/json"}
         )
         assert response.status_code == 422

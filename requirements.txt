@@ -67,6 +67,7 @@ langchain-community>=0.0.20
 langchain-chroma>=0.1.0
 langchain-milvus>=0.1.0
 langchain-text-splitters>=0.0.1
+langchain-huggingface>=0.0.1  # Modern HuggingFace embeddings (replaces deprecated langchain_community.embeddings)
 langsmith>=0.0.60  # Optional: for LangSmith monitoring and debugging
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)

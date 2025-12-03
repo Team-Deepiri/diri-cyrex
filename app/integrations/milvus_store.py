@@ -14,16 +14,28 @@ logger = get_logger("cyrex.milvus_store")
 HAS_LANGCHAIN_MILVUS = False
 try:
     from langchain_community.vectorstores import Milvus
-    from langchain_community.embeddings import HuggingFaceEmbeddings
     from langchain_core.documents import Document
     from langchain_core.embeddings import Embeddings
     HAS_LANGCHAIN_MILVUS = True
 except ImportError as e:
     logger.warning(f"LangChain Milvus integration not available: {e}")
     Milvus = None
-    HuggingFaceEmbeddings = None
     Document = None
     Embeddings = None
+
+# Try modern langchain-huggingface first, fallback to deprecated langchain_community
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+    HAS_HUGGINGFACE_EMBEDDINGS = True
+except ImportError:
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        HAS_HUGGINGFACE_EMBEDDINGS = True
+        logger.warning("Using deprecated langchain_community.embeddings.HuggingFaceEmbeddings. Install langchain-huggingface for future compatibility.")
+    except ImportError:
+        HuggingFaceEmbeddings = None
+        HAS_HUGGINGFACE_EMBEDDINGS = False
+        logger.warning("HuggingFaceEmbeddings not available. Install langchain-huggingface.")
 
 try:
     from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
@@ -62,10 +74,14 @@ class MilvusVectorStore:
             self.embeddings = embedding_model
         else:
             if not HuggingFaceEmbeddings:
-                raise ImportError("HuggingFaceEmbeddings not available. Install langchain-community.")
+                raise ImportError("HuggingFaceEmbeddings not available. Install langchain-huggingface (recommended) or langchain-community.")
             model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
             self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
-            logger.info(f"Using embedding model: {model_name}")
+            # Log which version is being used
+            if HAS_HUGGINGFACE_EMBEDDINGS:
+                logger.info(f"Using embedding model: {model_name} (langchain-huggingface)")
+            else:
+                logger.info(f"Using embedding model: {model_name} (deprecated langchain-community)")
         
         # Get embedding dimension
         if dimension:
