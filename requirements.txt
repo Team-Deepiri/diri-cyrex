@@ -1,7 +1,7 @@
 fastapi==0.112.2
 uvicorn[standard]==0.30.6
 pydantic==2.8.2
-openai==1.43.0
+openai==1.109.1
 python-dotenv==1.0.1
 httpx==0.27.2
 pytest==8.3.2
@@ -59,16 +59,18 @@ tensorboard>=2.15.0  # For visualization (optional)
 sentence-transformers>=2.2.0
 
 # LangChain for AI orchestration and RAG
-# Note: langchain-core must be installed before other langchain packages
-langchain-core>=0.1.23
-langchain>=0.1.0
-langchain-openai>=0.0.5
-langchain-community>=0.0.20
-langchain-chroma>=0.1.0
-langchain-milvus>=0.1.0
-langchain-text-splitters>=0.0.1
-langchain-huggingface>=0.0.1  # Modern HuggingFace embeddings (replaces deprecated langchain_community.embeddings)
-langsmith>=0.0.60  # Optional: for LangSmith monitoring and debugging
+# Note: Using compatible version set that works together (tested and verified)
+# langchain-core must be >= 0.2.33 to satisfy langchain-openai 0.1.22 requirement
+# All packages require: langchain-core >= 0.2.33 and < 0.3.0
+langchain==0.2.12
+langchain-core==0.2.43  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
+langchain-community==0.2.10
+langchain-text-splitters==0.2.2
+langchain-openai==0.1.22
+langchain-milvus==0.1.4
+langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
+langchain-ollama>=0.1.0  # Ollama LLM support
+langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
 ollama>=0.1.0  # Ollama API client for local models

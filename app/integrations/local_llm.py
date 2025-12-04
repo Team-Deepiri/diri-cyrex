@@ -19,13 +19,35 @@ HAS_LANGCHAIN_COMMUNITY = False
 HAS_LANGCHAIN_CORE = False
 
 try:
-    from langchain_community.llms import Ollama
-    from langchain_community.llms import LlamaCpp
-    HAS_LANGCHAIN_COMMUNITY = True
+    # LangChain 1.x: Ollama moved to langchain-ollama, LlamaCpp still in community
+    Ollama = None
+    try:
+        # Try langchain-ollama first (LangChain 1.x)
+        from langchain_ollama import OllamaLLM
+        # Use OllamaLLM as Ollama for compatibility
+        Ollama = OllamaLLM
+    except ImportError:
+        try:
+            # Fallback: try langchain-ollama with different import
+            from langchain_ollama import Ollama
+        except ImportError:
+            try:
+                # Fallback to community if langchain-ollama not available
+                from langchain_community.llms import Ollama
+            except ImportError:
+                Ollama = None
+    
+    try:
+        from langchain_community.llms import LlamaCpp
+    except ImportError:
+        LlamaCpp = None
+    
+    HAS_LANGCHAIN_COMMUNITY = (Ollama is not None) or (LlamaCpp is not None)
 except ImportError as e:
     logger.warning(f"LangChain community LLMs not available: {e}")
     Ollama = None
     LlamaCpp = None
+    HAS_LANGCHAIN_COMMUNITY = False
 
 try:
     from langchain_core.language_models.llms import BaseLLM

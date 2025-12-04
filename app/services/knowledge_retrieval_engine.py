@@ -5,10 +5,20 @@ Integrates with vector stores and LLMs for context-aware generation
 """
 from typing import List, Dict, Optional
 from langchain_community.vectorstores import Chroma, Milvus
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.retrievers import BaseRetriever
+
+# Try modern langchain-huggingface first, fallback to deprecated
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except ImportError:
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+    except ImportError:
+        HuggingFaceEmbeddings = None
+
+# Retrievers and compression (LangChain 0.2.x compatible)
 try:
     from langchain.retrievers import ContextualCompressionRetriever
     from langchain.retrievers.document_compressors import LLMChainExtractor
@@ -17,9 +27,9 @@ except ImportError:
     HAS_COMPRESSION = False
     ContextualCompressionRetriever = None
     LLMChainExtractor = None
+
 try:
-    from langchain_openai import ChatOpenAI
-    from langchain_community.embeddings import OpenAIEmbeddings
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     HAS_OPENAI = True
 except ImportError:
     HAS_OPENAI = False

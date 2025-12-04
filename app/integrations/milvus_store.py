@@ -23,15 +23,16 @@ except ImportError as e:
     Document = None
     Embeddings = None
 
-# Try modern langchain-huggingface first, fallback to deprecated langchain_community
+# Use modern langchain-huggingface (eliminates deprecation warnings)
 try:
     from langchain_huggingface import HuggingFaceEmbeddings
     HAS_HUGGINGFACE_EMBEDDINGS = True
 except ImportError:
+    # Fallback to deprecated version if langchain-huggingface not available
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
         HAS_HUGGINGFACE_EMBEDDINGS = True
-        logger.warning("Using deprecated langchain_community.embeddings.HuggingFaceEmbeddings. Install langchain-huggingface for future compatibility.")
+        logger.warning("Using deprecated langchain_community.embeddings.HuggingFaceEmbeddings. Install langchain-huggingface.")
     except ImportError:
         HuggingFaceEmbeddings = None
         HAS_HUGGINGFACE_EMBEDDINGS = False
@@ -77,11 +78,7 @@ class MilvusVectorStore:
                 raise ImportError("HuggingFaceEmbeddings not available. Install langchain-huggingface (recommended) or langchain-community.")
             model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
             self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
-            # Log which version is being used
-            if HAS_HUGGINGFACE_EMBEDDINGS:
-                logger.info(f"Using embedding model: {model_name} (langchain-huggingface)")
-            else:
-                logger.info(f"Using embedding model: {model_name} (deprecated langchain-community)")
+            logger.info(f"Using embedding model: {model_name} (langchain-huggingface)")
         
         # Get embedding dimension
         if dimension:

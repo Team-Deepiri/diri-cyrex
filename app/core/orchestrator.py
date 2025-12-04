@@ -30,9 +30,16 @@ except ImportError as e:
     Input = None
     Output = None
 
-# Agent imports with graceful fallbacks
+# Agent imports with graceful fallbacks (LangChain 1.x compatible)
 try:
-    from langchain.agents import create_openai_functions_agent, create_react_agent, AgentExecutor
+    # Try LangChain 1.x imports first
+    try:
+        from langchain.agents import create_openai_functions_agent, create_react_agent, AgentExecutor
+    except ImportError:
+        # Fallback for different 1.x structure
+        from langchain.agents import AgentExecutor
+        from langchain.agents.openai_functions import create_openai_functions_agent
+        from langchain.agents.react import create_react_agent
     HAS_AGENTS = True
 except ImportError as e:
     logger.warning(f"LangChain agents not available: {e}")
