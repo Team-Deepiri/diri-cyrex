@@ -38,6 +38,24 @@ class TestRAGPipeline:
     
     def test_retrieve(self, rag):
         """Test challenge retrieval."""
+        # Add some challenges first
+        challenges = [
+            {
+                'id': '1',
+                'task_type': 'code',
+                'challenge_text': 'Write a function to sort an array',
+                'metadata': {'difficulty': 'medium'}
+            },
+            {
+                'id': '2',
+                'task_type': 'study',
+                'challenge_text': 'Answer quiz questions about machine learning',
+                'metadata': {'difficulty': 'easy'}
+            }
+        ]
+        rag.add_challenges(challenges)
+        
+        # Now retrieve
         query = "I need to write code"
         results = rag.retrieve(query, top_k=5)
         

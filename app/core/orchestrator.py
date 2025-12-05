@@ -176,13 +176,22 @@ class WorkflowOrchestrator:
             if self.vector_store:
                 retriever = self.vector_store.get_retriever(k=4)
                 
-                # Format documents function
+                # Format documents function - must be wrapped in RunnableLambda for pipe operator
                 def format_docs(docs):
                     return "\n\n".join([f"Document {i+1}:\n{doc.page_content}" 
                                       for i, doc in enumerate(docs)])
                 
+                # Wrap format_docs in RunnableLambda to make it compatible with pipe operator
+                # The pipe operator (|) requires both operands to be Runnable objects
+                if RunnableLambda:
+                    format_docs_runnable = RunnableLambda(format_docs)
+                else:
+                    # Fallback: create a simple lambda wrapper if RunnableLambda not available
+                    # This shouldn't happen if LangChain is properly installed
+                    raise RuntimeError("RunnableLambda not available - LangChain core must be installed")
+                
                 self.rag_chain = (
-                    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+                    {"context": retriever | format_docs_runnable, "question": RunnablePassthrough()}
                     | ChatPromptTemplate.from_messages([
                         ("system", "Use the following context to answer the question:\n\n{context}"),
                         ("human", "{question}")
@@ -330,6 +339,7 @@ Final Answer: the final answer to the original input question"""),
         workflow_id: Optional[str] = None,
         use_rag: bool = True,
         use_tools: bool = True,
+        max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -404,7 +414,7 @@ Final Answer: the final answer to the original input question"""),
                         "input": f"Context:\n{context}\n\nQuestion: {user_input}\n\nAnswer:" if context else user_input
                     }
                     
-                    # Execute agent
+                    # Execute agent (using ainvoke instead of deprecated arun)
                     result = await self.agent_executor.ainvoke(agent_input)
                     
                     # Extract response from agent result
@@ -427,10 +437,36 @@ Final Answer: the final answer to the original input question"""),
                 except Exception as e:
                     self.logger.warning(f"Agent executor failed: {e}, falling back to direct LLM", exc_info=True)
                     # Fallback to direct LLM call
-                    response = await self.llm_provider.ainvoke(prompt)
+                    # If max_tokens is specified, temporarily update config
+                    if max_tokens and hasattr(self.llm_provider, 'config'):
+                        original_max = self.llm_provider.config.max_tokens
+                        self.llm_provider.config.max_tokens = max_tokens
+                        # Reinitialize with new max_tokens
+                        if hasattr(self.llm_provider, '_initialize_llm'):
+                            self.llm_provider._initialize_llm()
+                        response = await self.llm_provider.ainvoke(prompt)
+                        # Restore original
+                        self.llm_provider.config.max_tokens = original_max
+                        if hasattr(self.llm_provider, '_initialize_llm'):
+                            self.llm_provider._initialize_llm()
+                    else:
+                        response = await self.llm_provider.ainvoke(prompt)
             else:
                 # Direct LLM call (no tools or agent not available)
-                response = await self.llm_provider.ainvoke(prompt)
+                # If max_tokens is specified, temporarily update config
+                if max_tokens and hasattr(self.llm_provider, 'config'):
+                    original_max = self.llm_provider.config.max_tokens
+                    self.llm_provider.config.max_tokens = max_tokens
+                    # Reinitialize with new max_tokens
+                    if hasattr(self.llm_provider, '_initialize_llm'):
+                        self.llm_provider._initialize_llm()
+                    response = await self.llm_provider.ainvoke(prompt)
+                    # Restore original
+                    self.llm_provider.config.max_tokens = original_max
+                    if hasattr(self.llm_provider, '_initialize_llm'):
+                        self.llm_provider._initialize_llm()
+                else:
+                    response = await self.llm_provider.ainvoke(prompt)
             
             # Safety check on output
             output_safety = self.guardrails.check_output(response)

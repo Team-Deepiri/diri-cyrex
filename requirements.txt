@@ -62,6 +62,8 @@ sentence-transformers>=2.2.0
 # Note: Using compatible version set that works together (tested and verified)
 # langchain-core must be >= 0.2.33 to satisfy langchain-openai 0.1.22 requirement
 # All packages require: langchain-core >= 0.2.33 and < 0.3.0
+# IMPORTANT: langchain-ollama 0.1.x is compatible with langchain-core 0.2.x
+# Do NOT upgrade to langchain-ollama 0.2.x+ as it requires langchain-core >= 0.3.x
 langchain==0.2.12
 langchain-core==0.2.43  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
 langchain-community==0.2.10
@@ -69,7 +71,7 @@ langchain-text-splitters==0.2.2
 langchain-openai==0.1.22
 langchain-milvus==0.1.4
 langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
-langchain-ollama>=0.1.0  # Ollama LLM support
+langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
