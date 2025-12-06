@@ -6,7 +6,8 @@ Cost-effective alternative to OpenAI for development and production
 from typing import Optional, Dict, List, Any, Iterator
 from enum import Enum
 import os
-from pydantic import BaseModel, Field
+import asyncio
+from pydantic import BaseModel, Field, ConfigDict
 import httpx
 from ..logging_config import get_logger
 from ..settings import settings
@@ -18,13 +19,35 @@ HAS_LANGCHAIN_COMMUNITY = False
 HAS_LANGCHAIN_CORE = False
 
 try:
-    from langchain_community.llms import Ollama
-    from langchain_community.llms import LlamaCpp
-    HAS_LANGCHAIN_COMMUNITY = True
+    # LangChain 1.x: Ollama moved to langchain-ollama, LlamaCpp still in community
+    Ollama = None
+    try:
+        # Try langchain-ollama first (LangChain 1.x)
+        from langchain_ollama import OllamaLLM
+        # Use OllamaLLM as Ollama for compatibility
+        Ollama = OllamaLLM
+    except ImportError:
+        try:
+            # Fallback: try langchain-ollama with different import
+            from langchain_ollama import Ollama
+        except ImportError:
+            try:
+                # Fallback to community if langchain-ollama not available
+                from langchain_community.llms import Ollama
+            except ImportError:
+                Ollama = None
+    
+    try:
+        from langchain_community.llms import LlamaCpp
+    except ImportError:
+        LlamaCpp = None
+    
+    HAS_LANGCHAIN_COMMUNITY = (Ollama is not None) or (LlamaCpp is not None)
 except ImportError as e:
     logger.warning(f"LangChain community LLMs not available: {e}")
     Ollama = None
     LlamaCpp = None
+    HAS_LANGCHAIN_COMMUNITY = False
 
 try:
     from langchain_core.language_models.llms import BaseLLM
@@ -47,11 +70,15 @@ class LLMBackend(str, Enum):
 
 class LocalLLMConfig(BaseModel):
     """Configuration for local LLM"""
+    model_config = ConfigDict(
+        protected_namespaces=()  # Allow model_name field without conflict
+    )
+    
     backend: LLMBackend = Field(default=LLMBackend.OLLAMA)
     model_name: str = Field(default="llama3:8b")
     base_url: Optional[str] = Field(default=None)  # For Ollama, defaults to http://localhost:11434
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int = Field(default=2000, ge=1, le=8192)
+    max_tokens: int = Field(default=300, ge=1, le=8192)  # Reduced default for CPU inference speed (300 tokens ~ 225 words)
     top_p: float = Field(default=0.9, ge=0.0, le=1.0)
     top_k: int = Field(default=40, ge=1, le=100)
     repeat_penalty: float = Field(default=1.1, ge=0.0, le=2.0)
@@ -69,7 +96,32 @@ class LocalLLMProvider:
     def __init__(self, config: Optional[LocalLLMConfig] = None):
         self.config = config or LocalLLMConfig()
         self.llm: Optional[BaseLLM] = None
+        self.ollama_alternative_urls: list[str] = []  # Store alternative URLs for retries
         self._initialize_llm()
+    
+    def _initialize_ollama_with_url(self, base_url: str) -> Ollama:
+        """Initialize Ollama LLM with a specific base URL"""
+        # Only pass parameters that are supported by Ollama API
+        # Some LangChain versions try to pass unsupported parameters (tfs_z, mirostat, etc.)
+        # which cause warnings but don't break functionality
+        ollama_params = {
+            "model": self.config.model_name,
+            "base_url": base_url,
+            "temperature": self.config.temperature,
+            "num_predict": self.config.max_tokens,
+            "top_p": self.config.top_p,
+            "top_k": self.config.top_k,
+            "repeat_penalty": self.config.repeat_penalty,
+            "num_ctx": self.config.n_ctx,
+            "timeout": settings.REQUEST_TIMEOUT,
+        }
+        
+        # Remove None values to avoid passing invalid parameters
+        ollama_params = {k: v for k, v in ollama_params.items() if v is not None}
+        
+        # Note: Warnings about tfs_z, mirostat, mirostat_eta, mirostat_tau are harmless
+        # They come from LangChain's internal parameter handling and don't affect functionality
+        return Ollama(**ollama_params)
     
     def _initialize_ollama(self) -> Ollama:
         """Initialize Ollama LLM"""
@@ -79,70 +131,116 @@ class LocalLLMProvider:
         # Get base URL from config or environment
         base_url = self.config.base_url or os.getenv("OLLAMA_BASE_URL")
         
-        # If not explicitly set, detect Docker and use appropriate hostname
-        if not base_url:
-            if is_docker:
-                # In Docker, always try host.docker.internal first (works on Windows/Mac/Linux with Docker Desktop)
-                # This is the most common case for development
-                base_url = "http://host.docker.internal:11434"
-            else:
-                # Not in Docker, use localhost
-                base_url = "http://localhost:11434"
-        
-        # Try to verify Ollama is accessible, but don't fail initialization if check fails
-        # The actual invocation will handle connection errors
-        tried_urls = [base_url]
-        verified_url = None
-        
-        # Define alternative URLs to try (in order of preference)
+        # Define all possible URLs to try (in order of preference)
         if is_docker:
-            alternatives = [
-                base_url,
+            # In Docker, try multiple hostnames
+            if base_url:
+                alternatives = [base_url]
+            else:
+                alternatives = []
+            
+            # Try to detect WSL host IP
+            wsl_host_ip = None
+            try:
+                # Method 1: In WSL, the host IP is typically in /etc/resolv.conf
+                if os.path.exists("/etc/resolv.conf"):
+                    with open("/etc/resolv.conf", "r") as f:
+                        for line in f:
+                            if line.startswith("nameserver"):
+                                ip = line.split()[1]
+                                # Check if it's a valid IP (not 127.0.0.1)
+                                if ip and ip != "127.0.0.1" and "." in ip:
+                                    wsl_host_ip = ip
+                                    logger.info(f"Detected WSL host IP from resolv.conf: {wsl_host_ip}")
+                                    break
+                
+                # Method 2: Try to get default gateway (often the host IP in Docker/WSL)
+                if not wsl_host_ip:
+                    import subprocess
+                    try:
+                        result = subprocess.run(
+                            ["ip", "route", "show", "default"],
+                            capture_output=True,
+                            text=True,
+                            timeout=2
+                        )
+                        if result.returncode == 0:
+                            # Extract IP from "default via 172.x.x.x"
+                            parts = result.stdout.strip().split()
+                            if "via" in parts:
+                                idx = parts.index("via")
+                                if idx + 1 < len(parts):
+                                    ip = parts[idx + 1]
+                                    if ip and ip != "127.0.0.1" and "." in ip:
+                                        wsl_host_ip = ip
+                                        logger.info(f"Detected host IP from default gateway: {wsl_host_ip}")
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.debug(f"Could not detect WSL host IP: {e}")
+            
+            # Add Docker-specific alternatives
+            docker_alternatives = [
                 "http://host.docker.internal:11434",  # Works on Windows/Mac Docker Desktop
-                "http://172.17.0.1:11434",             # Linux Docker bridge
+                "http://172.17.0.1:11434",             # Linux Docker bridge (default)
                 "http://gateway.docker.internal:11434", # Alternative gateway
             ]
+            
+            # If WSL host IP detected, add it first (most likely to work in WSL)
+            if wsl_host_ip:
+                alternatives.insert(0, f"http://{wsl_host_ip}:11434")
+            
+            alternatives.extend(docker_alternatives)
+            
+            # Also try localhost in case Ollama is in the same network
+            if "localhost" not in str(alternatives):
+                alternatives.append("http://localhost:11434")
         else:
-            alternatives = [base_url]
+            # Not in Docker, use localhost
+            alternatives = [base_url] if base_url else ["http://localhost:11434"]
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_alternatives = []
+        for url in alternatives:
+            if url and url not in seen:
+                seen.add(url)
+                unique_alternatives.append(url)
+        
+        # Store alternatives for retry logic
+        self.ollama_alternative_urls = unique_alternatives.copy()
         
         # Try to find a working URL
-        for url in alternatives:
-            if url in tried_urls:
-                continue
+        verified_url = None
+        tried_urls = []
+        
+        for url in unique_alternatives:
             tried_urls.append(url)
-            
             try:
                 logger.info(f"Trying to connect to Ollama at {url}")
                 response = httpx.get(f"{url}/api/tags", timeout=5.0)
                 if response.status_code == 200:
                     verified_url = url
-                    base_url = url
                     logger.info(f"Successfully verified Ollama connection at {url}")
                     break
             except Exception as e:
                 logger.debug(f"Ollama connection check failed at {url}: {e}")
                 continue
         
-        # Use the verified URL if found, otherwise use the last tried URL
-        final_url = verified_url or base_url
+        # Use the verified URL if found, otherwise use the first URL
+        final_url = verified_url or unique_alternatives[0] if unique_alternatives else "http://localhost:11434"
         
         if not verified_url:
             logger.warning(
-                f"Could not verify Ollama connection at {final_url}. "
-                f"Will attempt to use it anyway. Tried URLs: {tried_urls}. "
-                f"Make sure Ollama is running and accessible."
+                f"Could not verify Ollama connection. Tried URLs: {tried_urls}. "
+                f"Will attempt to use: {final_url}. "
+                f"Make sure Ollama is running and accessible. "
+                f"You can set OLLAMA_BASE_URL environment variable to specify the correct URL."
             )
         
-        return Ollama(
-            model=self.config.model_name,
-            base_url=final_url,
-            temperature=self.config.temperature,
-            num_predict=self.config.max_tokens,
-            top_p=self.config.top_p,
-            top_k=self.config.top_k,
-            repeat_penalty=self.config.repeat_penalty,
-            num_ctx=self.config.n_ctx,
-        )
+        # Set timeout to prevent hanging on socket I/O
+        # This applies to the underlying requests library
+        return self._initialize_ollama_with_url(final_url)
     
     def _initialize_llama_cpp(self) -> LlamaCpp:
         """Initialize llama.cpp LLM"""
@@ -239,14 +337,105 @@ class LocalLLMProvider:
         if not self.llm:
             raise RuntimeError("LLM not initialized")
         
+        # Local LLMs (especially on CPU) need more time than cloud APIs
+        # Use longer timeout for local LLMs, default to 600 seconds (10 minutes) for CPU inference
+        local_llm_timeout = getattr(settings, 'LOCAL_LLM_TIMEOUT', 600)
+        timeout = kwargs.pop('timeout', local_llm_timeout)
+        
+        # Ensure prompt is a string
+        if not isinstance(prompt, str):
+            prompt = str(prompt)
+        
+        # For Ollama, try alternative URLs if connection fails
+        if self.config.backend == LLMBackend.OLLAMA and self.ollama_alternative_urls:
+            last_error = None
+            current_url_index = 0
+            
+            # Try the current URL first
+            try:
+                if hasattr(self.llm, 'ainvoke'):
+                    result = await asyncio.wait_for(
+                        self.llm.ainvoke(prompt, **kwargs),
+                        timeout=timeout
+                    )
+                else:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(self.llm.invoke, prompt, **kwargs),
+                        timeout=timeout
+                    )
+                # Ensure result is always a string to prevent "unsupported operand type" errors
+                if not isinstance(result, str):
+                    result = str(result) if result is not None else ""
+                return result
+            except (ConnectionError, OSError, Exception) as e:
+                last_error = e
+                error_str = str(e).lower()
+                # Check if it's a connection error that warrants retrying
+                if any(keyword in error_str for keyword in ['cannot connect', 'name or service not known', 'connection refused', 'network is unreachable']):
+                    logger.warning(f"Ollama connection failed: {e}. Trying alternative URLs...")
+                    # Try alternative URLs
+                    for url in self.ollama_alternative_urls[1:]:  # Skip first (already tried)
+                        try:
+                            logger.info(f"Retrying Ollama connection with {url}")
+                            # Reinitialize with new URL
+                            self.llm = self._initialize_ollama_with_url(url)
+                            
+                            if hasattr(self.llm, 'ainvoke'):
+                                result = await asyncio.wait_for(
+                                    self.llm.ainvoke(prompt, **kwargs),
+                                    timeout=timeout
+                                )
+                            else:
+                                result = await asyncio.wait_for(
+                                    asyncio.to_thread(self.llm.invoke, prompt, **kwargs),
+                                    timeout=timeout
+                                )
+                            # Ensure result is always a string to prevent "unsupported operand type" errors
+                            if not isinstance(result, str):
+                                result = str(result) if result is not None else ""
+                            logger.info(f"Successfully connected to Ollama at {url}")
+                            return result
+                        except (ConnectionError, OSError, Exception) as retry_error:
+                            last_error = retry_error
+                            logger.debug(f"Ollama connection failed at {url}: {retry_error}")
+                            continue
+                        except asyncio.TimeoutError:
+                            error_msg = f"LLM invocation timed out after {timeout} seconds"
+                            logger.error(error_msg)
+                            raise TimeoutError(error_msg)
+                elif isinstance(e, asyncio.TimeoutError):
+                    error_msg = f"LLM invocation timed out after {timeout} seconds"
+                    logger.error(error_msg)
+                    raise TimeoutError(error_msg)
+                else:
+                    # Not a connection error, re-raise
+                    raise
+            
+            # All URLs failed
+            if last_error:
+                logger.error(f"All Ollama URLs failed. Tried: {self.ollama_alternative_urls}. Last error: {last_error}")
+                raise ConnectionError(f"Could not connect to Ollama. Tried URLs: {self.ollama_alternative_urls}. Last error: {last_error}")
+        
+        # Normal invocation for non-Ollama or if no alternatives
         try:
             if hasattr(self.llm, 'ainvoke'):
-                result = await self.llm.ainvoke(prompt, **kwargs)
+                result = await asyncio.wait_for(
+                    self.llm.ainvoke(prompt, **kwargs),
+                    timeout=timeout
+                )
             else:
-                # Fallback to sync with asyncio
-                import asyncio
-                result = await asyncio.to_thread(self.llm.invoke, prompt, **kwargs)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self.llm.invoke, prompt, **kwargs),
+                    timeout=timeout
+                )
+            # Ensure result is always a string to prevent "unsupported operand type" errors
+            if not isinstance(result, str):
+                result = str(result) if result is not None else ""
             return result
+        except asyncio.TimeoutError:
+            error_msg = f"LLM invocation timed out after {timeout} seconds"
+            logger.error(error_msg)
+            raise TimeoutError(error_msg)
         except Exception as e:
             logger.error(f"Async LLM invocation failed: {e}", exc_info=True)
             raise

@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 import os
 
@@ -24,6 +25,7 @@ class Settings(BaseSettings):
     # Performance Configuration
     MAX_CONCURRENT_REQUESTS: int = 10
     REQUEST_TIMEOUT: int = 30
+    LOCAL_LLM_TIMEOUT: int = 600  # Longer timeout for local LLMs (CPU inference can be very slow, 10 minutes)
     
     # AI Configuration
     AI_TEMPERATURE: float = 0.7
@@ -53,9 +55,10 @@ class Settings(BaseSettings):
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True
+    )
 
 
 # Initialize settings

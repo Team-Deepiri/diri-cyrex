@@ -5,10 +5,20 @@ Integrates with vector stores and LLMs for context-aware generation
 """
 from typing import List, Dict, Optional
 from langchain_community.vectorstores import Chroma, Milvus
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.retrievers import BaseRetriever
+
+# Try modern langchain-huggingface first, fallback to deprecated
+try:
+    from langchain_huggingface import HuggingFaceEmbeddings
+except ImportError:
+    try:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+    except ImportError:
+        HuggingFaceEmbeddings = None
+
+# Retrievers and compression (LangChain 0.2.x compatible)
 try:
     from langchain.retrievers import ContextualCompressionRetriever
     from langchain.retrievers.document_compressors import LLMChainExtractor
@@ -17,9 +27,9 @@ except ImportError:
     HAS_COMPRESSION = False
     ContextualCompressionRetriever = None
     LLMChainExtractor = None
+
 try:
-    from langchain_openai import ChatOpenAI
-    from langchain_community.embeddings import OpenAIEmbeddings
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
     HAS_OPENAI = True
 except ImportError:
     HAS_OPENAI = False
@@ -57,14 +67,19 @@ class KnowledgeRetrievalEngine:
             else:
                 self.embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY)
         
-        # Initialize knowledge bases
-        self.knowledge_bases = {
-            "user_patterns": self._init_kb("user_patterns"),
-            "project_context": self._init_kb("project_context"),
-            "ability_templates": self._init_kb("ability_templates"),
-            "rules_knowledge": self._init_kb("rules_knowledge"),
-            "historical_abilities": self._init_kb("historical_abilities")
-        }
+        # Initialize knowledge bases - handle failures gracefully
+        self.knowledge_bases = {}
+        for kb_name in ["user_patterns", "project_context", "ability_templates", 
+                        "rules_knowledge", "historical_abilities"]:
+            try:
+                kb = self._init_kb(kb_name)
+                if kb is not None:
+                    self.knowledge_bases[kb_name] = kb
+                else:
+                    logger.warning(f"Knowledge base '{kb_name}' not initialized (connection failed)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize knowledge base '{kb_name}': {e}")
+                # Continue with other knowledge bases
         
         # Initialize compressor if enabled - prefer OpenAI, fallback to local LLM
         self.compressor = None
@@ -122,11 +137,52 @@ class KnowledgeRetrievalEngine:
         elif self.vector_store_type == "milvus":
             milvus_host = os.getenv("MILVUS_HOST", "localhost")
             milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
-            return Milvus(
-                embedding_function=self.embeddings,
-                connection_args={"host": milvus_host, "port": milvus_port},
-                collection_name=collection_name
-            )
+            
+            # Use thread-based timeout since Milvus connection can hang
+            import threading
+            import queue
+            
+            result_queue = queue.Queue()
+            error_queue = queue.Queue()
+            
+            def init_milvus():
+                try:
+                    kb = Milvus(
+                        embedding_function=self.embeddings,
+                        connection_args={
+                            "host": milvus_host,
+                            "port": milvus_port,
+                            "timeout": 5.0
+                        },
+                        collection_name=collection_name
+                    )
+                    result_queue.put(kb)
+                except Exception as e:
+                    error_queue.put(e)
+            
+            # Run initialization in thread with timeout
+            thread = threading.Thread(target=init_milvus, daemon=True)
+            thread.start()
+            thread.join(timeout=5.0)  # 5 second timeout
+            
+            if thread.is_alive():
+                # Thread is still running = timeout
+                logger.warning(f"Milvus initialization for '{collection_name}' timed out after 5 seconds")
+                return None
+            
+            # Check for errors
+            if not error_queue.empty():
+                e = error_queue.get()
+                logger.warning(f"Failed to initialize Milvus knowledge base '{collection_name}': {e}")
+                return None
+            
+            # Get result
+            if not result_queue.empty():
+                return result_queue.get()
+            
+            # No result and no error = something went wrong
+            logger.warning(f"Failed to initialize Milvus knowledge base '{collection_name}': Unknown error")
+            return None
         else:
             raise ValueError(f"Unknown vector store type: {self.vector_store_type}")
     

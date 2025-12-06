@@ -1,12 +1,6 @@
-# 🚀 RUN TRAINING NOW - FINAL INSTRUCTIONS
+# TRAINING 
 
-## YOU ARE READY FOR LIFTOFF 🔥
-
-Everything is set up. Here's how to launch:
-
----
-
-## 🎯 OPTION 1: ONE COMMAND (RECOMMENDED)
+## OPTION 1: ONE COMMAND (RECOMMENDED)
 
 ### Open Terminal/PowerShell and run:
 
@@ -25,7 +19,7 @@ python app/train/scripts/run_training_pipeline.py
 
 ---
 
-## 🎯 OPTION 2: STEP BY STEP
+##  OPTION 2: STEP BY STEP
 
 ### 1. Setup Environment (First Time Only)
 ```bash
@@ -54,7 +48,7 @@ python app/train/scripts/test_model_inference.py
 
 ---
 
-## 📊 WHAT YOU'LL GET
+##  WHAT YOU'LL GET
 
 ### ✅ Trained Model
 - Location: `app/train/models/intent_classifier`
@@ -77,7 +71,7 @@ python app/train/scripts/test_model_inference.py
 
 ---
 
-## 🔥 ADVANCED OPTIONS
+## ADVANCED OPTIONS
 
 ### More Training Data
 ```bash
@@ -101,7 +95,7 @@ python app/train/scripts/train_intent_classifier.py --model microsoft/deberta-v3
 
 ---
 
-## 💻 USE THE MODEL
+## USING THE MODEL
 
 After training, use it like this:
 
@@ -148,7 +142,7 @@ print(result)  # {"category": "coding", "confidence": 0.95}
 
 ### "Module not found"
 ```bash
-pip install -r app/train/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### "CUDA out of memory"

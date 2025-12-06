@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from 'react';
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -97,7 +97,29 @@ export default function App() {
   // Chat state
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  
+
+  // Testing state
+  const [testCategories, setTestCategories] = useState<Record<string, any>>({});
+  const [testFiles, setTestFiles] = useState<Record<string, string>>({});
+  const [selectedTestCategory, setSelectedTestCategory] = useState<string>('');
+  const [selectedTestFile, setSelectedTestFile] = useState<string>('');
+  const [selectedTestPath, setSelectedTestPath] = useState<string>('');
+  const [testVerbose, setTestVerbose] = useState(true);
+  const [testCoverage, setTestCoverage] = useState(false);
+  const [testSkipSlow, setTestSkipSlow] = useState(false);
+  const [testTimeout, setTestTimeout] = useState(15);
+  const [testOutput, setTestOutput] = useState<string[]>([]);
+  const [testRunning, setTestRunning] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; return_code: number } | null>(null);
+  const [testStatus, setTestStatus] = useState<Record<string, any> | null>(null);
+  const [testSummary, setTestSummary] = useState<{
+    passed: number;
+    failed: number;
+    warnings: number;
+    duration: string;
+    failures: Array<{ test: string; error: string }>;
+  } | null>(null);
+
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -420,15 +442,222 @@ export default function App() {
     } catch (err: any) {
       setChatHistory(prev => [...prev, {
         role: 'system',
-        content: `⚠️ Error: ${err.message}`,
+        content: `Error: ${err.message}`,
         timestamp: new Date().toISOString()
       }]);
+    }
+  };
+
+  // Testing functions
+  const loadTestList = async () => {
+    try {
+      const result = await callEndpoint('/testing/list', {}, 'GET');
+      setTestCategories((result as any).categories || {});
+      setTestFiles((result as any).files || {});
+    } catch (err: any) {
+      setError(`Failed to load test list: ${err.message}`);
+    }
+  };
+
+  const loadTestStatus = async () => {
+    try {
+      const status = await callEndpoint('/testing/status', {}, 'GET');
+      setTestStatus(status);
+    } catch (err: any) {
+      setError(`Failed to load test status: ${err.message}`);
+    }
+  };
+
+  const runTestsStream = async () => {
+    setTestRunning(true);
+    setTestOutput([]);
+    setTestResult(null);
+    setTestSummary(null);
+    setError(null);
+
+    try {
+      const payload: any = {
+        verbose: testVerbose,
+        coverage: testCoverage,
+        skip_slow: testSkipSlow,
+        timeout: testTimeout,
+        output_format: 'json'
+      };
+
+      if (selectedTestCategory) {
+        payload.category = selectedTestCategory;
+      } else if (selectedTestFile) {
+        payload.file = selectedTestFile;
+        if (selectedTestPath) {
+          payload.test_path = selectedTestPath;
+        }
+      }
+
+      const response = await fetch(`${baseUrl}/testing/run/stream`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+
+      if (!reader) throw new Error('No response body');
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              
+              if (data.type === 'start') {
+                setTestOutput(prev => [...prev, `Starting tests: ${data.command}`]);
+              } else if (data.type === 'output') {
+                setTestOutput(prev => [...prev, data.line]);
+              } else if (data.type === 'complete') {
+                setTestResult({
+                  success: data.success,
+                  return_code: data.return_code
+                });
+                setTestOutput(prev => {
+                  const updated = [...prev, `\nTests completed with return code: ${data.return_code}`];
+                  return updated;
+                });
+                // Parse summary after a brief delay to ensure all output is captured
+                setTimeout(() => {
+                  setTestOutput(current => {
+                    parseTestSummary(current);
+                    return current;
+                  });
+                }, 200);
+              } else if (data.type === 'error') {
+                setError(data.message);
+                setTestOutput(prev => [...prev, `Error: ${data.message}`]);
+              }
+            } catch (e) {
+              // Ignore JSON parse errors for malformed chunks
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      setError(`Test execution failed: ${err.message}`);
+      setTestOutput(prev => [...prev, `Error: ${err.message}`]);
+    } finally {
+      setTestRunning(false);
+    }
+  };
+
+  const parseTestSummary = (output: string[]) => {
+    const outputText = output.join('\n');
+    
+    // Parse pytest summary line: "1 failed, 103 passed, 1 warning in 83.16s"
+    const summaryMatch = outputText.match(/(\d+)\s+failed[,\s]+(\d+)\s+passed[,\s]+(\d+)\s+warning[^]*?in\s+([\d.]+)s/);
+    if (summaryMatch) {
+      const [, failed, passed, warnings, duration] = summaryMatch;
+      
+      // Extract failure details
+      const failures: Array<{ test: string; error: string }> = [];
+      const failureSections = outputText.split('=================================== FAILURES ===================================');
+      if (failureSections.length > 1) {
+        const failureText = failureSections[1];
+        const testMatches = failureText.matchAll(/^([^\s]+::[^\s]+::[^\s]+)\s+([\s\S]*?)(?=^===|$)/gm);
+        for (const match of testMatches) {
+          failures.push({
+            test: match[1],
+            error: match[2].trim().substring(0, 500) // Limit error length
+          });
+        }
+      }
+      
+      setTestSummary({
+        passed: parseInt(passed),
+        failed: parseInt(failed),
+        warnings: parseInt(warnings),
+        duration: `${duration}s`,
+        failures
+      });
+    } else {
+      // Try alternative format
+      const altMatch = outputText.match(/(\d+)\s+passed[,\s]+(\d+)\s+failed/);
+      if (altMatch) {
+        setTestSummary({
+          passed: parseInt(altMatch[1]),
+          failed: parseInt(altMatch[2]),
+          warnings: 0,
+          duration: 'N/A',
+          failures: []
+        });
+      }
+    }
+  };
+
+  const runTestsSync = async () => {
+    setTestRunning(true);
+    setTestOutput([]);
+    setTestResult(null);
+    setTestSummary(null);
+    setError(null);
+
+    try {
+      const payload: any = {
+        verbose: testVerbose,
+        coverage: testCoverage,
+        skip_slow: testSkipSlow,
+        timeout: testTimeout,
+        output_format: 'json'
+      };
+
+      if (selectedTestCategory) {
+        payload.category = selectedTestCategory;
+      } else if (selectedTestFile) {
+        payload.file = selectedTestFile;
+        if (selectedTestPath) {
+          payload.test_path = selectedTestPath;
+        }
+      }
+
+      setTestOutput(['Starting tests...']);
+      const result = await callEndpoint('/testing/run', payload);
+      
+      setTestResult({
+        success: (result as any).success,
+        return_code: (result as any).return_code
+      });
+
+      // Split stdout into lines for display
+      const outputLines = (result as any).stdout?.split('\n') || [];
+      const errorLines = (result as any).stderr?.split('\n') || [];
+      const allLines = [
+        ...outputLines.filter((l: string) => l.trim()),
+        ...errorLines.filter((l: string) => l.trim())
+      ];
+      
+      setTestOutput(allLines);
+      parseTestSummary(allLines);
+    } catch (err: any) {
+      setError(`Test execution failed: ${err.message}`);
+      setTestOutput(prev => [...prev, `Error: ${err.message}`]);
+    } finally {
+      setTestRunning(false);
     }
   };
 
   useEffect(() => {
     loadSystemStatus();
     loadTools();
+    loadTestList();
+    loadTestStatus();
     const interval = setInterval(loadSystemStatus, 10000); // Refresh every 10s
     return () => clearInterval(interval);
   }, [baseUrl, apiKey]);
@@ -445,7 +674,7 @@ export default function App() {
         top: 0,
         zIndex: 100
       }}>
-        <h1 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 600 }}>🧪 Cyrex Testing Interface</h1>
+        <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 600 }}>Cyrex Testing Interface</h1>
         <p style={{ margin: '0.5rem 0 0', color: '#999', fontSize: '0.9rem' }}>
           Comprehensive testing dashboard for orchestration, local LLMs, RAG, tools, and workflows
         </p>
@@ -508,23 +737,24 @@ export default function App() {
           {isLoading('/orchestration/status') ? 'Loading...' : '🔄 Refresh Status'}
         </button>
         {error && (
-          <span style={{ color: '#ff4444', fontSize: '0.9rem' }}>⚠️ {error}</span>
+          <span style={{ color: '#ff4444', fontSize: '0.9rem' }}>{error}</span>
         )}
       </section>
 
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid #333', background: '#151515' }}>
         {[
-          { id: 'orchestration', label: '🎯 Orchestration', icon: '🎯' },
-          { id: 'workflow', label: '⚙️ Workflows', icon: '⚙️' },
-          { id: 'llm', label: '🤖 Local LLM', icon: '🤖' },
-          { id: 'rag', label: '📚 RAG/Vector Store', icon: '📚' },
-          { id: 'tools', label: '🛠️ Tools', icon: '🛠️' },
-          { id: 'state', label: '💾 State Management', icon: '💾' },
-          { id: 'monitoring', label: '📊 Monitoring', icon: '📊' },
-          { id: 'safety', label: '🛡️ Safety/Guardrails', icon: '🛡️' },
-          { id: 'chat', label: '💬 Chat', icon: '💬' },
-          { id: 'history', label: '📜 Test History', icon: '📜' }
+          { id: 'testing', label: 'Testing', icon: '' },
+          { id: 'orchestration', label: 'Orchestration', icon: '' },
+          { id: 'workflow', label: 'Workflows', icon: '' },
+          { id: 'llm', label: 'Local LLM', icon: '' },
+          { id: 'rag', label: 'RAG/Vector Store', icon: '' },
+          { id: 'tools', label: 'Tools', icon: '' },
+          { id: 'state', label: 'State Management', icon: '' },
+          { id: 'monitoring', label: 'Monitoring', icon: '' },
+          { id: 'safety', label: 'Safety/Guardrails', icon: '' },
+          { id: 'chat', label: 'Chat', icon: '' },
+          { id: 'history', label: 'Test History', icon: '' }
         ].map(tab => (
           <button
             key={tab.id}
@@ -547,10 +777,417 @@ export default function App() {
 
       {/* Tab Content */}
       <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto' }}>
-        {/* Orchestration Tab */}
-        {activeTab === 'orchestration' && (
-          <div>
-            <h2 style={{ marginTop: 0 }}>Orchestration Testing</h2>
+        <React.Fragment>
+          {/* Testing Tab */}
+          {activeTab === 'testing' && (
+            <div>
+              <h2 style={{ marginTop: 0 }}>Test Runner</h2>
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+              {/* Test Selection */}
+              <div style={{
+                background: '#1a1a1a',
+                padding: '1.5rem',
+                borderRadius: '8px',
+                border: '1px solid #333'
+              }}>
+                <h3 style={{ marginTop: 0, color: '#999' }}>Test Selection</h3>
+                <div style={{ display: 'grid', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                      Run by Category
+                    </label>
+                    <select
+                      value={selectedTestCategory}
+                      onChange={(e) => {
+                        setSelectedTestCategory(e.target.value);
+                        setSelectedTestFile('');
+                        setSelectedTestPath('');
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        background: '#222',
+                        border: '1px solid #444',
+                        borderRadius: '4px',
+                        color: '#e0e0e0'
+                      }}
+                    >
+                      <option value="">-- Select Category --</option>
+                      {Object.entries(testCategories).map(([key, cat]: [string, any]) => (
+                        <option key={key} value={key}>
+                          {cat.name} - {cat.description}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  <div style={{ textAlign: 'center', color: '#666' }}>OR</div>
+                  
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                      Run by File
+                    </label>
+                    <select
+                      value={selectedTestFile}
+                      onChange={(e) => {
+                        setSelectedTestFile(e.target.value);
+                        setSelectedTestCategory('');
+                        setSelectedTestPath('');
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem',
+                        background: '#222',
+                        border: '1px solid #444',
+                        borderRadius: '4px',
+                        color: '#e0e0e0'
+                      }}
+                    >
+                      <option value="">-- Select File --</option>
+                      {Object.entries(testFiles).map(([key, path]) => (
+                        <option key={key} value={key}>
+                          {key} - {path}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {selectedTestFile && (
+                    <div>
+                      <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                        Specific Test (optional, e.g., TestClass::test_method)
+                      </label>
+                      <input
+                        value={selectedTestPath}
+                        onChange={(e) => setSelectedTestPath(e.target.value)}
+                        placeholder="TestClass::test_method"
+                        style={{
+                          width: '100%',
+                          padding: '0.75rem',
+                          background: '#222',
+                          border: '1px solid #444',
+                          borderRadius: '4px',
+                          color: '#e0e0e0'
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Test Options */}
+              <div style={{
+                background: '#1a1a1a',
+                padding: '1.5rem',
+                borderRadius: '8px',
+                border: '1px solid #333'
+              }}>
+                <h3 style={{ marginTop: 0, color: '#999' }}>Test Options</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={testVerbose}
+                      onChange={(e) => setTestVerbose(e.target.checked)}
+                    />
+                    <span>Verbose Output</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={testCoverage}
+                      onChange={(e) => setTestCoverage(e.target.checked)}
+                    />
+                    <span>Coverage Report</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={testSkipSlow}
+                      onChange={(e) => setTestSkipSlow(e.target.checked)}
+                    />
+                    <span>Skip Slow Tests</span>
+                  </label>
+                  <div>
+                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999', fontSize: '0.9rem' }}>
+                      Timeout (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      value={testTimeout}
+                      onChange={(e) => setTestTimeout(Number(e.target.value))}
+                      min="0"
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        background: '#222',
+                        border: '1px solid #444',
+                        borderRadius: '4px',
+                        color: '#e0e0e0'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Test Controls */}
+              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                <button
+                  onClick={runTestsStream}
+                  disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: testRunning ? '#444' : '#0066ff',
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: '#fff',
+                    cursor: testRunning ? 'not-allowed' : 'pointer',
+                    fontWeight: 600,
+                    fontSize: '1rem'
+                  }}
+                >
+                  {testRunning ? 'Running...' : 'Run Tests (Streaming)'}
+                </button>
+                <button
+                  onClick={runTestsSync}
+                  disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: testRunning ? '#444' : '#00aa00',
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: '#fff',
+                    cursor: testRunning ? 'not-allowed' : 'pointer',
+                    fontWeight: 600
+                  }}
+                >
+                  {testRunning ? 'Running...' : 'Run Tests (Sync)'}
+                </button>
+                <button
+                  onClick={() => {
+                    setTestOutput([]);
+                    setTestResult(null);
+                    setTestSummary(null);
+                    setError(null);
+                  }}
+                  disabled={testRunning}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    background: '#666',
+                    border: 'none',
+                    borderRadius: '4px',
+                    color: '#fff',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Clear Output
+                </button>
+                {testResult && (
+                  <div style={{
+                    padding: '0.5rem 1rem',
+                    background: testResult.success ? '#00aa0020' : '#ff444420',
+                    border: `1px solid ${testResult.success ? '#00aa00' : '#ff4444'}`,
+                    borderRadius: '4px',
+                    color: testResult.success ? '#00aa00' : '#ff4444',
+                    fontWeight: 600
+                  }}>
+                    {testResult.success ? 'PASSED' : 'FAILED'} (Code: {testResult.return_code})
+                  </div>
+                )}
+              </div>
+
+              {/* Test Summary */}
+              {testSummary && (
+                <div style={{
+                  background: '#1a1a1a',
+                  padding: '1.5rem',
+                  borderRadius: '8px',
+                  border: `1px solid ${testSummary.failed > 0 ? '#ff4444' : '#00aa00'}`,
+                  display: 'grid',
+                  gap: '1rem'
+                }}>
+                  <h3 style={{ marginTop: 0, color: '#999' }}>Test Summary</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem' }}>
+                    <div style={{
+                      padding: '1rem',
+                      background: '#00aa0020',
+                      border: '1px solid #00aa00',
+                      borderRadius: '4px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 600, color: '#00aa00' }}>
+                        {testSummary.passed}
+                      </div>
+                      <div style={{ color: '#999', fontSize: '0.9rem' }}>Passed</div>
+                    </div>
+                    <div style={{
+                      padding: '1rem',
+                      background: testSummary.failed > 0 ? '#ff444420' : '#222',
+                      border: `1px solid ${testSummary.failed > 0 ? '#ff4444' : '#444'}`,
+                      borderRadius: '4px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 600, color: testSummary.failed > 0 ? '#ff4444' : '#999' }}>
+                        {testSummary.failed}
+                      </div>
+                      <div style={{ color: '#999', fontSize: '0.9rem' }}>Failed</div>
+                    </div>
+                    {testSummary.warnings > 0 && (
+                      <div style={{
+                        padding: '1rem',
+                        background: '#ffaa0020',
+                        border: '1px solid #ffaa00',
+                        borderRadius: '4px',
+                        textAlign: 'center'
+                      }}>
+                        <div style={{ fontSize: '2rem', fontWeight: 600, color: '#ffaa00' }}>
+                          {testSummary.warnings}
+                        </div>
+                        <div style={{ color: '#999', fontSize: '0.9rem' }}>Warnings</div>
+                      </div>
+                    )}
+                    <div style={{
+                      padding: '1rem',
+                      background: '#222',
+                      border: '1px solid #444',
+                      borderRadius: '4px',
+                      textAlign: 'center'
+                    }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 600, color: '#00aaff' }}>
+                        {testSummary.duration}
+                      </div>
+                      <div style={{ color: '#999', fontSize: '0.9rem' }}>Duration</div>
+                    </div>
+                  </div>
+                  
+                  {testSummary.failures.length > 0 && (
+                    <div>
+                      <h4 style={{ color: '#ff4444', marginBottom: '0.5rem' }}>Failed Tests:</h4>
+                      <div style={{ display: 'grid', gap: '0.5rem' }}>
+                        {testSummary.failures.map((failure, idx) => (
+                          <details key={idx} style={{
+                            background: '#ff444410',
+                            border: '1px solid #ff4444',
+                            borderRadius: '4px',
+                            padding: '0.75rem'
+                          }}>
+                            <summary style={{ cursor: 'pointer', color: '#ff4444', fontWeight: 600 }}>
+                              {failure.test}
+                            </summary>
+                            <pre style={{
+                              marginTop: '0.5rem',
+                              padding: '0.5rem',
+                              background: '#0a0a0a',
+                              borderRadius: '4px',
+                              fontSize: '0.8rem',
+                              overflow: 'auto',
+                              maxHeight: '200px',
+                              color: '#ff8888'
+                            }}>
+                              {failure.error}
+                            </pre>
+                          </details>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              </div>
+
+              {/* Test Output */}
+              <div style={{
+                background: '#0a0a0a',
+                padding: '1rem',
+                borderRadius: '8px',
+                border: '1px solid #333',
+                minHeight: '400px',
+                maxHeight: '600px',
+                overflow: 'auto',
+                fontFamily: 'monospace',
+                fontSize: '0.85rem',
+                lineHeight: '1.5'
+              }}>
+                {testOutput.length === 0 ? (
+                  <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                    No test output yet. Select tests and click "Run Tests" to start.
+                  </div>
+                ) : (
+                  <div style={{ color: '#e0e0e0' }}>
+                    {testOutput.map((line, idx) => {
+                      // Color code different types of output
+                      let color = '#e0e0e0';
+                      if (line.includes('PASSED') || line.includes('passed')) {
+                        color = '#00aa00';
+                      } else if (line.includes('FAILED') || line.includes('FAILED') || line.includes('Error')) {
+                        color = '#ff4444';
+                      } else if (line.includes('WARNING')) {
+                        color = '#ffaa00';
+                      } else if (line.includes('test_') || line.includes('::')) {
+                        color = '#00aaff';
+                      }
+                      
+                      return (
+                        <div key={idx} style={{ color, marginBottom: '0.25rem', whiteSpace: 'pre-wrap' }}>
+                          {line}
+                        </div>
+                      );
+                    })}
+                    {testRunning && (
+                      <div style={{ color: '#00aaff', marginTop: '0.5rem' }}>
+                        Running...
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Test Status */}
+              {testStatus && (
+                <div style={{
+                  background: '#1a1a1a',
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  border: '1px solid #333'
+                }}>
+                  <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <div>
+                      <span style={{ color: '#666' }}>Tests Dir:</span>{' '}
+                      <span style={{ color: testStatus.tests_dir_exists ? '#00aa00' : '#ff4444' }}>
+                        {testStatus.tests_dir_exists ? 'Exists' : 'Missing'}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#666' }}>Categories:</span>{' '}
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories?.length || 0}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#666' }}>Files:</span>{' '}
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_files?.length || 0}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div style={{
+                  background: '#ff444420',
+                  border: '1px solid #ff4444',
+                  borderRadius: '4px',
+                  padding: '1rem',
+                  color: '#ff4444'
+                }}>
+                  <strong>Error:</strong> {error}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Orchestration Tab */}
+          {activeTab === 'orchestration' && (
+            <div>
+              <h2 style={{ marginTop: 0 }}>Orchestration Testing</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
@@ -601,7 +1238,7 @@ export default function App() {
                     fontWeight: 600
                   }}
                 >
-                  {isLoading('/orchestration/process') ? 'Processing...' : '🚀 Process Request'}
+                  {isLoading('/orchestration/process') ? 'Processing...' : 'Process Request'}
                 </button>
                 <button
                   onClick={testStreaming}
@@ -651,11 +1288,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Workflow Tab */}
-        {activeTab === 'workflow' && (
-          <div>
+          {/* Workflow Tab */}
+          {activeTab === 'workflow' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>Workflow Execution</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div>
@@ -708,7 +1345,7 @@ export default function App() {
                   fontWeight: 600
                 }}
               >
-                {isLoading('/orchestration/workflow') ? 'Executing...' : '▶️ Execute Workflow'}
+                {isLoading('/orchestration/workflow') ? 'Executing...' : 'Execute Workflow'}
               </button>
               {workflowResult && (
                 <div>
@@ -727,11 +1364,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Local LLM Tab */}
-        {activeTab === 'llm' && (
-          <div>
+          {/* Local LLM Tab */}
+          {activeTab === 'llm' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>Local LLM Testing</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -807,7 +1444,7 @@ export default function App() {
                   fontWeight: 600
                 }}
               >
-                {isLoading('/orchestration/process') ? 'Generating...' : '🤖 Generate Response'}
+                {isLoading('/orchestration/process') ? 'Generating...' : 'Generate Response'}
               </button>
               {llmResult && (
                 <div>
@@ -827,11 +1464,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* RAG Tab */}
-        {activeTab === 'rag' && (
-          <div>
+          {/* RAG Tab */}
+          {activeTab === 'rag' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>RAG / Vector Store Testing</h2>
             <div style={{ display: 'grid', gap: '1.5rem' }}>
               <div>
@@ -947,11 +1584,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Tools Tab */}
-        {activeTab === 'tools' && (
-          <div>
+          {/* Tools Tab */}
+          {activeTab === 'tools' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>Tool Registry Testing</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
@@ -1055,7 +1692,7 @@ export default function App() {
                       cursor: 'pointer'
                     }}
                   >
-                    {isLoading('/orchestration/process') ? 'Executing...' : '▶️ Execute Tool'}
+                    {isLoading('/orchestration/process') ? 'Executing...' : 'Execute Tool'}
                   </button>
                 </div>
               </div>
@@ -1077,11 +1714,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* State Management Tab */}
-        {activeTab === 'state' && (
-          <div>
+          {/* State Management Tab */}
+          {activeTab === 'state' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>State Management</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div>
@@ -1152,7 +1789,7 @@ export default function App() {
                     cursor: 'pointer'
                   }}
                 >
-                  💾 Create State
+                  Create State
                 </button>
                 <button
                   onClick={testCheckpoint}
@@ -1200,11 +1837,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Monitoring Tab */}
-        {activeTab === 'monitoring' && (
-          <div>
+          {/* Monitoring Tab */}
+          {activeTab === 'monitoring' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>System Monitoring</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               {systemStatus && (
@@ -1239,11 +1876,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Safety Tab */}
-        {activeTab === 'safety' && (
-          <div>
+          {/* Safety Tab */}
+          {activeTab === 'safety' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>Safety & Guardrails Testing</h2>
             <div style={{ display: 'grid', gap: '1rem' }}>
               <div>
@@ -1277,7 +1914,7 @@ export default function App() {
                   fontWeight: 600
                 }}
               >
-                {isLoading('/orchestration/process') ? 'Checking...' : '🛡️ Test Safety'}
+                {isLoading('/orchestration/process') ? 'Checking...' : 'Test Safety'}
               </button>
               {safetyResult && (
                 <div>
@@ -1296,11 +1933,11 @@ export default function App() {
               )}
             </div>
           </div>
-        )}
+          )}
 
-        {/* Chat Tab */}
-        {activeTab === 'chat' && (
-          <div>
+          {/* Chat Tab */}
+          {activeTab === 'chat' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>Interactive Chat</h2>
             <div style={{
               background: '#1a1a1a',
@@ -1392,11 +2029,11 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+          )}
 
-        {/* Test History Tab */}
-        {activeTab === 'history' && (
-          <div>
+          {/* Test History Tab */}
+          {activeTab === 'history' && (
+            <div>
             <h2 style={{ marginTop: 0 }}>Test History</h2>
             <div style={{ display: 'grid', gap: '0.5rem' }}>
               {testHistory.length === 0 && (
@@ -1416,7 +2053,7 @@ export default function App() {
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                     <strong style={{ color: test.success ? '#00aa00' : '#ff4444' }}>
-                      {test.success ? '✅' : '❌'} {test.endpoint}
+                      {test.endpoint}
                     </strong>
                     <span style={{ color: '#999', fontSize: '0.85rem' }}>
                       {test.duration}ms | {new Date(test.timestamp).toLocaleTimeString()}
@@ -1464,7 +2101,8 @@ export default function App() {
               ))}
             </div>
           </div>
-        )}
+          )}
+        </React.Fragment>
       </div>
     </div>
   );

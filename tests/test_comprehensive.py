@@ -5,7 +5,7 @@ import pytest
 import asyncio
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 import json
 
 from app.main import app
@@ -63,7 +63,7 @@ class TestHealthEndpoint:
         
         data = response.json()
         assert data["status"] == "healthy"
-        assert data["version"] == "0.1.0"
+        assert data["version"] == "3.0.0"
         assert "timestamp" in data
         assert "services" in data
         assert "configuration" in data
@@ -97,8 +97,8 @@ class TestRootEndpoint:
         assert response.status_code == 200
         
         data = response.json()
-        assert data["message"] == "tripblip Python Agent API"
-        assert data["version"] == "0.1.0"
+        assert data["message"] == "Deepiri AI Challenge Service API"
+        assert data["version"] == "3.0.0"
         assert "docs" in data
         assert "health" in data
         assert "metrics" in data
@@ -194,7 +194,7 @@ class TestAgentMessageStreamEndpoint:
     def test_agent_message_stream_success(self, client, mock_openai_client):
         """Test successful agent message streaming."""
         with patch.object(settings, 'OPENAI_API_KEY', 'test-key'):
-            # Mock streaming response
+            # Mock streaming response - create an iterable generator
             mock_chunk1 = Mock()
             mock_chunk1.choices = [Mock()]
             mock_chunk1.choices[0].delta.content = "Hello"
@@ -203,16 +203,22 @@ class TestAgentMessageStreamEndpoint:
             mock_chunk2.choices = [Mock()]
             mock_chunk2.choices[0].delta.content = " World"
             
-            mock_openai_client.chat.completions.create.return_value = [mock_chunk1, mock_chunk2]
+            # Create a generator that yields chunks
+            def mock_stream():
+                yield mock_chunk1
+                yield mock_chunk2
             
-            response = client.post(
-                "/agent/message/stream",
-                json={"content": "Hello, AI!"}
-            )
-            
-            assert response.status_code == 200
-            assert response.headers["content-type"] == "text/plain"
-            assert "X-Request-ID" in response.headers
+            # Mock asyncio.to_thread to return our mock stream
+            with patch('asyncio.to_thread', return_value=mock_stream()):
+                response = client.post(
+                    "/agent/message/stream",
+                    json={"content": "Hello, AI!"}
+                )
+                
+                assert response.status_code == 200
+                assert response.headers["content-type"] == "text/plain"
+                # Check for request ID header (can be x-request-id or X-Request-ID)
+                assert "x-request-id" in response.headers or "X-Request-ID" in response.headers
     
     def test_agent_message_stream_without_openai_key(self, client):
         """Test agent message streaming when OpenAI key is not configured."""
@@ -232,7 +238,8 @@ class TestProxyEndpoints:
     async def test_proxy_adventure_data_success(self, mock_httpx_client):
         """Test successful adventure data proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/adventure-data",
                     params={"lat": 40.7128, "lng": -74.0060, "radius": 5000}
@@ -250,7 +257,8 @@ class TestProxyEndpoints:
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
             mock_httpx_client.get.side_effect = TimeoutException("Request timeout")
             
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/adventure-data",
                     params={"lat": 40.7128, "lng": -74.0060}
@@ -263,7 +271,8 @@ class TestProxyEndpoints:
     async def test_proxy_directions_success(self, mock_httpx_client):
         """Test successful directions proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/directions",
                     params={
@@ -281,7 +290,8 @@ class TestProxyEndpoints:
     async def test_proxy_weather_current_success(self, mock_httpx_client):
         """Test successful current weather proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/weather/current",
                     params={"lat": 40.7128, "lng": -74.0060}
@@ -295,7 +305,8 @@ class TestProxyEndpoints:
     async def test_proxy_weather_forecast_success(self, mock_httpx_client):
         """Test successful weather forecast proxy."""
         with patch.object(settings, 'NODE_BACKEND_URL', 'http://test-backend'):
-            async with AsyncClient(app=app, base_url="http://test") as ac:
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 response = await ac.get(
                     "/agent/tools/external/weather/forecast",
                     params={"lat": 40.7128, "lng": -74.0060, "days": 3}
@@ -334,7 +345,7 @@ class TestErrorHandling:
         """Test handling of invalid JSON."""
         response = client.post(
             "/agent/message",
-            data="invalid json",
+            content="invalid json",
             headers={"content-type": "application/json"}
         )
         assert response.status_code == 422
