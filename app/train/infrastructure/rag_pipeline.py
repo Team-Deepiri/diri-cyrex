@@ -41,13 +41,19 @@ class RAGPipeline:
             connections.connect(
                 alias="default",
                 host=self.milvus_host,
-                port=self.milvus_port
+                port=self.milvus_port,
+                timeout=5.0  # 5 second timeout to prevent hanging
             )
             
             if utility.has_collection(self.collection_name):
                 self.collection = Collection(self.collection_name)
             else:
                 self._create_collection()
+            
+            # Load collection into memory for searching
+            if self.collection:
+                self.collection.load()
+                logger.info("Collection loaded into memory", collection=self.collection_name)
             
             self._milvus_available = True
             logger.info("Milvus connection established", collection=self.collection_name, host=self.milvus_host, port=self.milvus_port)
@@ -91,7 +97,7 @@ class RAGPipeline:
             index_params=index_params
         )
         
-        logger.info("Milvus collection created", collection=self.collection_name)
+        logger.info("Milvus collection created with index", collection=self.collection_name)
     
     def _load_reranker(self):
         """Load cross-encoder reranker for top-K refinement."""
@@ -163,11 +169,20 @@ class RAGPipeline:
         
         retrieved = []
         for hit in results[0]:
+            # Handle metadata - Milvus JSON fields may return as dict or string
+            metadata_raw = hit.entity.get("metadata", {})
+            if isinstance(metadata_raw, dict):
+                metadata = metadata_raw
+            elif isinstance(metadata_raw, str):
+                metadata = json.loads(metadata_raw) if metadata_raw else {}
+            else:
+                metadata = {}
+            
             retrieved.append({
                 "challenge_id": hit.entity.get("challenge_id"),
                 "challenge_text": hit.entity.get("challenge_text"),
                 "task_type": hit.entity.get("task_type"),
-                "metadata": json.loads(hit.entity.get("metadata", "{}")),
+                "metadata": metadata,
                 "score": hit.distance
             })
         

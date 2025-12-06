@@ -12,6 +12,7 @@ logger = get_logger("cyrex.orchestrator")
 
 # LangChain imports with graceful fallbacks
 HAS_LANGCHAIN = False
+HAS_AGENTS = False
 try:
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
     from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
@@ -28,6 +29,33 @@ except ImportError as e:
     RunnableLambda = None
     Input = None
     Output = None
+
+# Agent imports with graceful fallbacks (LangChain 1.x compatible)
+try:
+    # Try LangChain 1.x imports first
+    try:
+        from langchain.agents import create_openai_functions_agent, create_react_agent, AgentExecutor
+    except ImportError:
+        # Fallback for different 1.x structure
+        from langchain.agents import AgentExecutor
+        from langchain.agents.openai_functions import create_openai_functions_agent
+        from langchain.agents.react import create_react_agent
+    HAS_AGENTS = True
+except ImportError as e:
+    logger.warning(f"LangChain agents not available: {e}")
+    create_openai_functions_agent = None
+    create_react_agent = None
+    AgentExecutor = None
+    HAS_AGENTS = False
+
+# LangChain hub for ReAct prompts (optional)
+try:
+    from langchain import hub
+    HAS_HUB = True
+except ImportError:
+    logger.debug("langchain-hub not available, will use fallback ReAct prompt")
+    hub = None
+    HAS_HUB = False
 
 from .execution_engine import TaskExecutionEngine, get_execution_engine
 from .state_manager import WorkflowStateManager, get_state_manager
@@ -138,18 +166,32 @@ class WorkflowOrchestrator:
         if not self.llm_provider:
             self.logger.warning("LLM provider not available, chains not initialized")
             self.rag_chain = None
-            self.tool_chain = None
+            self.agent_executor = None
             return
         
         try:
             llm = self.llm_provider.get_llm()
             
-            # RAG chain
+            # RAG chain with proper document formatting
             if self.vector_store:
                 retriever = self.vector_store.get_retriever(k=4)
                 
+                # Format documents function - must be wrapped in RunnableLambda for pipe operator
+                def format_docs(docs):
+                    return "\n\n".join([f"Document {i+1}:\n{doc.page_content}" 
+                                      for i, doc in enumerate(docs)])
+                
+                # Wrap format_docs in RunnableLambda to make it compatible with pipe operator
+                # The pipe operator (|) requires both operands to be Runnable objects
+                if RunnableLambda:
+                    format_docs_runnable = RunnableLambda(format_docs)
+                else:
+                    # Fallback: create a simple lambda wrapper if RunnableLambda not available
+                    # This shouldn't happen if LangChain is properly installed
+                    raise RuntimeError("RunnableLambda not available - LangChain core must be installed")
+                
                 self.rag_chain = (
-                    {"context": retriever, "question": RunnablePassthrough()}
+                    {"context": retriever | format_docs_runnable, "question": RunnablePassthrough()}
                     | ChatPromptTemplate.from_messages([
                         ("system", "Use the following context to answer the question:\n\n{context}"),
                         ("human", "{question}")
@@ -159,28 +201,136 @@ class WorkflowOrchestrator:
                 )
             else:
                 self.rag_chain = None
+            
+            # Agent executor for tool usage
+            tools = self.tool_registry.get_tools()
+            if tools and HAS_AGENTS:
+                self.agent_executor = self._create_agent_executor(llm, tools)
+            else:
+                self.agent_executor = None
+                if tools:
+                    self.logger.warning(f"Tools available but agents not available or no tools registered")
+                    
         except Exception as e:
-            self.logger.warning(f"Failed to setup chains: {e}")
+            self.logger.warning(f"Failed to setup chains: {e}", exc_info=True)
             self.rag_chain = None
-        
-        # Tool-using chain
-        tools = self.tool_registry.get_tools()
-        if tools:
-            # Create tool-using chain with LangChain's agent executor
-            from langchain.agents import create_openai_functions_agent, AgentExecutor
-            from langchain_core.prompts import ChatPromptTemplate
+            self.agent_executor = None
+    
+    def _create_agent_executor(self, llm, tools):
+        """Create agent executor based on LLM type"""
+        try:
+            # Check if LLM supports function calling (OpenAI-compatible)
+            is_openai_compatible = (
+                hasattr(llm, 'bind_tools') or 
+                hasattr(llm, '_is_openai') or
+                'openai' in str(type(llm)).lower() or
+                'chatopenai' in str(type(llm)).lower()
+            )
             
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", "You are a helpful AI assistant with access to tools."),
-                ("human", "{input}"),
-                MessagesPlaceholder(variable_name="agent_scratchpad"),
-            ])
+            if is_openai_compatible and create_openai_functions_agent:
+                # Use OpenAI functions agent
+                try:
+                    prompt = ChatPromptTemplate.from_messages([
+                        ("system", """You are a helpful AI assistant with access to tools.
+When you need to use a tool, use it. Always provide clear, helpful responses.
+If a tool fails, explain what happened and suggest alternatives."""),
+                        ("human", "{input}"),
+                        MessagesPlaceholder(variable_name="agent_scratchpad"),
+                    ])
+                    
+                    agent = create_openai_functions_agent(llm, tools, prompt)
+                    executor = AgentExecutor(
+                        agent=agent,
+                        tools=tools,
+                        verbose=self.logger.level <= 10,  # Verbose if debug
+                        max_iterations=10,
+                        handle_parsing_errors=True,
+                        return_intermediate_steps=True,
+                    )
+                    
+                    self.logger.info(f"Created OpenAI functions agent with {len(tools)} tools")
+                    return executor
+                    
+                except ImportError as e:
+                    self.logger.warning(f"OpenAI agent creation failed: {e}, trying ReAct")
+                    # Fall through to ReAct
+                except Exception as e:
+                    self.logger.warning(f"OpenAI agent creation error: {e}, trying ReAct")
+                    # Fall through to ReAct
             
-            # Note: This requires OpenAI-compatible LLM
-            # For local models, we'll use a simpler approach
-            self.tool_chain = None  # Will be set up per-request if needed
-        else:
-            self.tool_chain = None
+            # Use ReAct agent for local LLMs or if OpenAI agent failed
+            if create_react_agent:
+                try:
+                    # Try to pull ReAct prompt from hub with timeout, fallback to default
+                    react_prompt = None
+                    if HAS_HUB and hub:
+                        # Use thread-based timeout to prevent hanging on network requests
+                        import threading
+                        import queue
+                        
+                        result_queue = queue.Queue()
+                        def pull_prompt():
+                            try:
+                                prompt = hub.pull("hwchase17/react")
+                                result_queue.put(prompt)
+                            except Exception as e:
+                                self.logger.debug(f"Failed to pull prompt from hub: {e}")
+                                result_queue.put(None)
+                        
+                        thread = threading.Thread(target=pull_prompt, daemon=True)
+                        thread.start()
+                        thread.join(timeout=2.0)  # 2 second timeout for hub pull
+                        
+                        if thread.is_alive():
+                            self.logger.warning("LangChain Hub pull timed out, using fallback prompt")
+                            react_prompt = None
+                        elif not result_queue.empty():
+                            react_prompt = result_queue.get()
+                    
+                    if not react_prompt:
+                        # Fallback prompt - use this by default to avoid network calls
+                        react_prompt = ChatPromptTemplate.from_messages([
+                            ("system", """You are a helpful AI assistant with access to tools.
+Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer
+Final Answer: the final answer to the original input question"""),
+                            ("human", "{input}"),
+                            MessagesPlaceholder(variable_name="agent_scratchpad"),
+                        ])
+                    
+                    agent = create_react_agent(llm, tools, react_prompt)
+                    executor = AgentExecutor(
+                        agent=agent,
+                        tools=tools,
+                        verbose=self.logger.level <= 10,
+                        max_iterations=10,
+                        handle_parsing_errors=True,
+                        return_intermediate_steps=True,
+                    )
+                    
+                    self.logger.info(f"Created ReAct agent with {len(tools)} tools")
+                    return executor
+                    
+                except ImportError as e:
+                    self.logger.error(f"Failed to create ReAct agent: {e}")
+                    return None
+                except Exception as e:
+                    self.logger.error(f"ReAct agent creation error: {e}", exc_info=True)
+                    return None
+            else:
+                self.logger.warning("ReAct agent creation not available")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Agent executor creation failed: {e}", exc_info=True)
+            return None
     
     async def process_request(
         self,
@@ -189,6 +339,7 @@ class WorkflowOrchestrator:
         workflow_id: Optional[str] = None,
         use_rag: bool = True,
         use_tools: bool = True,
+        max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -252,8 +403,70 @@ class WorkflowOrchestrator:
                     question=user_input,
                 )
             
-            # Generate response
-            response = await self.llm_provider.ainvoke(prompt)
+            # Generate response - use agent executor if tools are requested
+            if use_tools and self.agent_executor:
+                try:
+                    # Use agent executor for tool-using requests
+                    self.logger.info(f"Using agent executor with tools for request")
+                    
+                    # Prepare input for agent (include context if available)
+                    agent_input = {
+                        "input": f"Context:\n{context}\n\nQuestion: {user_input}\n\nAnswer:" if context else user_input
+                    }
+                    
+                    # Execute agent (using ainvoke instead of deprecated arun)
+                    result = await self.agent_executor.ainvoke(agent_input)
+                    
+                    # Extract response from agent result
+                    if isinstance(result, dict):
+                        if "output" in result:
+                            response = result["output"]
+                        elif "answer" in result:
+                            response = result["answer"]
+                        else:
+                            response = str(result)
+                    else:
+                        response = str(result)
+                    
+                    # Log tool usage
+                    intermediate_steps = result.get("intermediate_steps", []) if isinstance(result, dict) else []
+                    tool_calls = len(intermediate_steps)
+                    if tool_calls > 0:
+                        self.logger.info(f"Agent executor completed with {tool_calls} tool calls")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Agent executor failed: {e}, falling back to direct LLM", exc_info=True)
+                    # Fallback to direct LLM call
+                    # If max_tokens is specified, temporarily update config
+                    if max_tokens and hasattr(self.llm_provider, 'config'):
+                        original_max = self.llm_provider.config.max_tokens
+                        self.llm_provider.config.max_tokens = max_tokens
+                        # Reinitialize with new max_tokens
+                        if hasattr(self.llm_provider, '_initialize_llm'):
+                            self.llm_provider._initialize_llm()
+                        response = await self.llm_provider.ainvoke(prompt)
+                        # Restore original
+                        self.llm_provider.config.max_tokens = original_max
+                        if hasattr(self.llm_provider, '_initialize_llm'):
+                            self.llm_provider._initialize_llm()
+                    else:
+                        response = await self.llm_provider.ainvoke(prompt)
+            else:
+                # Direct LLM call (no tools or agent not available)
+                # If max_tokens is specified, temporarily update config
+                if max_tokens and hasattr(self.llm_provider, 'config'):
+                    original_max = self.llm_provider.config.max_tokens
+                    self.llm_provider.config.max_tokens = max_tokens
+                    # Reinitialize with new max_tokens
+                    if hasattr(self.llm_provider, '_initialize_llm'):
+                        self.llm_provider._initialize_llm()
+                    response = await self.llm_provider.ainvoke(prompt)
+                    # Restore original
+                    self.llm_provider.config.max_tokens = original_max
+                    if hasattr(self.llm_provider, '_initialize_llm'):
+                        self.llm_provider._initialize_llm()
+                else:
+                    response = await self.llm_provider.ainvoke(prompt)
             
             # Safety check on output
             output_safety = self.guardrails.check_output(response)

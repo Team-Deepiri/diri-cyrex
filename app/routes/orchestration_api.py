@@ -24,6 +24,7 @@ class ProcessRequestInput(BaseModel):
     force_local_llm: bool = Field(False, description="Force use of local LLM instead of OpenAI")
     llm_backend: Optional[str] = Field(None, description="Local LLM backend (ollama, llama_cpp, transformers)")
     llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., llama3:8b)")
+    max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate (default: 500 for local LLM, 2000 for OpenAI)")
 
 
 class WorkflowStep(BaseModel):
@@ -58,10 +59,13 @@ async def process_request(
             
             try:
                 backend = LLMBackend(backend_str)
+                # Pass max_tokens if provided, otherwise use default (300 for local LLM on CPU)
+                max_tokens_for_llm = input.max_tokens if input.max_tokens else 300
                 local_llm = get_local_llm(
                     backend=backend.value,
                     model_name=model_str,
                     base_url=settings.OLLAMA_BASE_URL if backend == LLMBackend.OLLAMA else None,
+                    max_tokens=max_tokens_for_llm,
                 )
                 
                 if local_llm:
@@ -75,11 +79,25 @@ async def process_request(
                             workflow_id=input.workflow_id,
                             use_rag=input.use_rag,
                             use_tools=input.use_tools,
+                            max_tokens=max_tokens_for_llm,
                         )
                         return result
+                    except TimeoutError as e:
+                        raise HTTPException(
+                            status_code=504,
+                            detail=f"Local LLM ({backend_str}) request timed out. The LLM may be slow or unresponsive. Error: {str(e)}"
+                        )
                     except Exception as e:
                         error_msg = str(e)
-                        if "Connection" in error_msg or "connect" in error_msg.lower():
+                        error_lower = error_msg.lower()
+                        
+                        # Check for specific error types
+                        if "404" in error_msg or "not found" in error_lower or "model" in error_lower and "not found" in error_lower:
+                            raise HTTPException(
+                                status_code=404,
+                                detail=f"Model '{input.llm_model or 'llama3:8b'}' not found in Ollama. Please pull the model first: docker exec -it deepiri-ollama-ai ollama pull {input.llm_model or 'llama3:8b'}"
+                            )
+                        elif "Connection" in error_msg or "connect" in error_lower or "timeout" in error_lower:
                             raise HTTPException(
                                 status_code=503,
                                 detail=f"Local LLM ({backend_str}) connection failed. Make sure Ollama is running at the configured URL. Error: {error_msg}"

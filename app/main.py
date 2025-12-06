@@ -66,6 +66,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# CORS middleware handles OPTIONS requests automatically
+# No explicit handler needed - FastAPI's CORSMiddleware will return 204 for OPTIONS
+
 
 @app.middleware("http")
 async def add_request_id_and_metrics(request: Request, call_next):
@@ -113,6 +116,8 @@ async def add_request_id_and_metrics(request: Request, call_next):
                     raise HTTPException(status_code=401, detail="Invalid API key")
         
         response = await call_next(request)
+        # Add request ID to response headers
+        response.headers["x-request-id"] = request_id
         return response
         
     except Exception as e:
@@ -169,6 +174,13 @@ def health():
     
     logger.info("Health check requested", **health_status)
     return health_status
+
+
+@app.options("/health")
+async def health_options():
+    """Handle OPTIONS request for health endpoint (CORS preflight)."""
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @app.get("/metrics")
@@ -280,6 +292,7 @@ from .routes.session import router as session_router
 from .routes.monitoring import router as monitoring_router
 from .routes.intelligence_api import router as intelligence_api_router
 from .routes.orchestration_api import router as orchestration_router
+from .routes.testing_api import router as testing_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
 
@@ -297,6 +310,7 @@ app.include_router(session_router, prefix="/agent", tags=["session"])
 app.include_router(monitoring_router, prefix="/agent", tags=["monitoring"])
 app.include_router(intelligence_api_router, prefix="/agent", tags=["intelligence"])
 app.include_router(orchestration_router, tags=["orchestration"])
+app.include_router(testing_router, tags=["testing"])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ Reproducibility, dataset versioning, model registry
 import mlflow
 import mlflow.pytorch
 from mlflow.tracking import MlflowClient
-import wandb
 from pathlib import Path
 import json
 import yaml
@@ -15,6 +14,15 @@ from typing import Dict, Optional, List
 from ...logging_config import get_logger
 
 logger = get_logger("experiment.tracker")
+
+# Optional wandb import - handle version conflicts gracefully
+try:
+    import wandb
+    HAS_WANDB = True
+except (ImportError, Exception) as e:
+    HAS_WANDB = False
+    wandb = None
+    logger.warning(f"wandb not available: {e}. W&B features will be disabled.")
 
 
 class ExperimentTracker:
@@ -35,7 +43,10 @@ class ExperimentTracker:
         mlflow.set_experiment(experiment_name)
         
         if use_wandb and wandb_project:
-            wandb.init(project=wandb_project, name=experiment_name)
+            if not HAS_WANDB:
+                logger.warning("wandb requested but not available. Continuing without W&B.")
+            else:
+                wandb.init(project=wandb_project, name=experiment_name)
         
         self.client = MlflowClient()
         self.current_run = None
@@ -46,7 +57,7 @@ class ExperimentTracker:
         
         self.current_run = mlflow.start_run(run_name=run_name, tags=tags or {})
         
-        if self.use_wandb:
+        if self.use_wandb and HAS_WANDB:
             wandb.run.name = run_name
         
         logger.info("Experiment run started", run_name=run_name)
@@ -55,13 +66,13 @@ class ExperimentTracker:
     def log_params(self, params: Dict):
         """Log hyperparameters."""
         mlflow.log_params(params)
-        if self.use_wandb:
+        if self.use_wandb and HAS_WANDB:
             wandb.config.update(params)
     
     def log_metrics(self, metrics: Dict, step: Optional[int] = None):
         """Log metrics."""
         mlflow.log_metrics(metrics, step=step)
-        if self.use_wandb:
+        if self.use_wandb and HAS_WANDB:
             wandb.log(metrics, step=step)
     
     def log_dataset(self, dataset_path: str, dataset_hash: Optional[str] = None):
@@ -72,7 +83,7 @@ class ExperimentTracker:
         mlflow.log_param("dataset_path", dataset_path)
         mlflow.log_param("dataset_hash", dataset_hash)
         
-        if self.use_wandb:
+        if self.use_wandb and HAS_WANDB:
             wandb.config.update({"dataset_path": dataset_path, "dataset_hash": dataset_hash})
     
     def log_model(self, model, artifact_path: str = "model"):
@@ -91,7 +102,7 @@ class ExperimentTracker:
         """End current run."""
         if self.current_run:
             mlflow.end_run(status=status)
-            if self.use_wandb:
+            if self.use_wandb and HAS_WANDB:
                 wandb.finish()
             logger.info("Experiment run ended", status=status)
     

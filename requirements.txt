@@ -1,12 +1,13 @@
 fastapi==0.112.2
 uvicorn[standard]==0.30.6
 pydantic==2.8.2
-openai==1.43.0
+openai==1.109.1
 python-dotenv==1.0.1
 httpx==0.27.2
 pytest==8.3.2
 pytest-asyncio==0.23.5
 pytest-cov==4.1.0
+pytest-timeout==2.3.1
 structlog==24.1.0
 python-json-logger==2.0.7
 prometheus-client==0.20.0
@@ -15,9 +16,9 @@ pydantic-settings==2.2.1
 
 # AI Training Dependencies
 torch>=2.0.0
-transformers>=4.30.0
+transformers>=4.35.0
 datasets>=2.14.0
-accelerate>=0.20.0
+accelerate>=0.24.0
 deepspeed>=0.12.0  # For distributed training
 mlflow>=2.7.0
 wandb>=0.15.0
@@ -26,6 +27,11 @@ notebook>=6.5.0
 scikit-learn>=1.3.0
 numpy>=1.24.0
 pandas>=2.0.0
+# Training pipeline visualization and utilities
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+ipython>=8.0.0
 
 # New AI Service Dependencies
 peft>=0.7.0  # For LoRA adapters
@@ -53,15 +59,20 @@ tensorboard>=2.15.0  # For visualization (optional)
 sentence-transformers>=2.2.0
 
 # LangChain for AI orchestration and RAG
-# Note: langchain-core must be installed before other langchain packages
-langchain-core>=0.1.23
-langchain>=0.1.0
-langchain-openai>=0.0.5
-langchain-community>=0.0.20
-langchain-chroma>=0.1.0
-langchain-milvus>=0.1.0
-langchain-text-splitters>=0.0.1
-langsmith>=0.0.60  # Optional: for LangSmith monitoring and debugging
+# Note: Using compatible version set that works together (tested and verified)
+# langchain-core must be >= 0.2.33 to satisfy langchain-openai 0.1.22 requirement
+# All packages require: langchain-core >= 0.2.33 and < 0.3.0
+# IMPORTANT: langchain-ollama 0.1.x is compatible with langchain-core 0.2.x
+# Do NOT upgrade to langchain-ollama 0.2.x+ as it requires langchain-core >= 0.3.x
+langchain==0.2.12
+langchain-core==0.2.43  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
+langchain-community==0.2.10
+langchain-text-splitters==0.2.2
+langchain-openai==0.1.22
+langchain-milvus==0.1.4
+langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
+langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
+langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
 ollama>=0.1.0  # Ollama API client for local models

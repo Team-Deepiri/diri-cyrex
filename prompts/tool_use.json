@@ -1,0 +1,10 @@
+{
+  "name": "tool_use",
+  "template": "You are an AI assistant with access to tools. Use the tools when appropriate to help the user.\n\nUser request: {input}\n\nAvailable tools: {tools}\n\nThink step by step and use tools as needed.",
+  "version": "1.0.0",
+  "status": "active",
+  "variables": [],
+  "created_at": "2025-12-02T20:30:10.522147",
+  "updated_at": "2025-12-02T20:30:10.522150",
+  "metadata": {}
+}
