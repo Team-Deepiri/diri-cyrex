@@ -167,3 +167,4 @@ kubectl
 venv/
 .venv
 .venv*
+.gitconfig
