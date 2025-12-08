@@ -69,6 +69,113 @@ LABEL_MAPPING = {
 
 ID_TO_LABEL = {v: k for k, v in LABEL_MAPPING.items()}
 
+# Common bare verbs that should not appear at the end of a sentence
+BARE_VERBS = {
+    "write", "create", "implement", "generate", "process", "review", 
+    "run", "test", "validate", "inspect", "organize", "schedule", 
+    "plan", "design", "debug", "fix", "troubleshoot", "develop",
+    "build", "deploy", "configure", "setup", "install", "update",
+    "analyze", "evaluate", "assess", "monitor", "track", "measure",
+    "prepare", "collect", "gather", "compile", "document", "refactor"
+}
+
+def fix_bare_verb_at_end(text: str) -> str:
+    """
+    If the sentence ends with a bare verb, rewrite it into natural English.
+    
+    Examples:
+      "A white paper on industry trends write" -> "Write a white paper on industry trends"
+      "Inventory data process" -> "Process inventory data"
+      "Team workflows organize" -> "Organize team workflows"
+      "A design system create" -> "Create a design system"
+    
+    Args:
+        text: The text to check and potentially fix
+        
+    Returns:
+        The corrected text with proper verb-object order
+    """
+    if not text or not text.strip():
+        return text
+    
+    # Strip and split into words
+    text = text.strip()
+    words = text.split()
+    
+    if len(words) < 2:
+        return text
+    
+    # Get the last word (strip punctuation)
+    last_word = words[-1].rstrip('.,!?;:').lower()
+    
+    # Check if it ends with a bare verb
+    if last_word in BARE_VERBS:
+        # Extract the verb and the rest of the phrase
+        verb = words[-1].rstrip('.,!?;:')
+        
+        # Get punctuation if any
+        punctuation = ''.join(c for c in words[-1] if c in '.,!?;:')
+        
+        # Get the object phrase (everything before the verb)
+        object_phrase = ' '.join(words[:-1])
+        
+        # Remove leading articles if present (to avoid "a the system" issues)
+        # and lowercase the object phrase for consistency
+        object_phrase_lower = object_phrase.lower()
+        if object_phrase_lower.startswith('a '):
+            object_phrase = object_phrase_lower[2:]
+        elif object_phrase_lower.startswith('an '):
+            object_phrase = object_phrase_lower[3:]
+        elif object_phrase_lower.startswith('the '):
+            object_phrase = object_phrase_lower[4:]
+        else:
+            object_phrase = object_phrase_lower
+        
+        # Rebuild: Verb (capitalized) + object phrase + punctuation
+        # Capitalize the verb
+        verb_capitalized = verb.capitalize()
+        
+        # Construct the new sentence
+        fixed_text = f"{verb_capitalized} {object_phrase}{punctuation}".strip()
+        
+        # Check if the verb already appears at the start of the object phrase
+        # to avoid "Write write a document" situations
+        object_words = object_phrase.split()
+        if object_words and object_words[0] == verb.lower():
+            # Already has verb at start, just return object phrase capitalized
+            return object_phrase.capitalize() + punctuation
+        
+        return fixed_text
+    
+    return text
+
+def is_valid_sentence(text: str) -> bool:
+    """
+    Validate that a sentence follows natural English order.
+    Returns False if the sentence ends with a bare verb.
+    
+    Args:
+        text: The text to validate
+        
+    Returns:
+        True if the sentence is valid, False otherwise
+    """
+    if not text or not text.strip():
+        return False
+    
+    # Get the last word (lowercase, stripped of punctuation)
+    words = text.strip().rstrip('.!?').split()
+    if not words:
+        return False
+    
+    last_word = words[-1].lower().strip('.,!?;:')
+    
+    # Check if the last word is a bare verb
+    if last_word in BARE_VERBS:
+        return False
+    
+    return True
+
 # Task templates for each category
 TASK_TEMPLATES = {
     "debugging": [
@@ -943,7 +1050,7 @@ def generate_variations(
             for prefix in prefixes[:min(3, num_variations - 1)]:
                 for suffix in suffixes[:1]:  # Use first suffix only for templates
                     variation = f"{prefix} {base_text.lower()}{suffix}".strip()
-                    if variation != base_text and variation not in template_variations:
+                    if variation != base_text and variation not in template_variations and is_valid_sentence(variation):
                         template_variations.append(variation)
             
             variations.extend(template_variations[:num_variations - 1])
@@ -958,7 +1065,10 @@ def generate_variations(
                         category, 
                         min(2, num_variations - len(variations))  # Limit to 2 paraphrases max
                     )
-                    variations.extend(paraphrases)
+                    # Validate paraphrases before adding
+                    for paraphrase in paraphrases:
+                        if is_valid_sentence(paraphrase):
+                            variations.append(paraphrase)
                 except Exception as e:
                     pass  # Skip paraphrases if Ollama fails, continue with what we have
             
@@ -972,7 +1082,7 @@ def generate_variations(
                         for verb in semantic_verbs[:min(3, num_variations - len(variations))]:
                             if verb.lower() != words[0].lower():
                                 new_text = f"{verb} {' '.join(words[1:])}"
-                                if new_text not in variations:
+                                if new_text not in variations and is_valid_sentence(new_text):
                                     variations.append(new_text)
                                     if len(variations) >= num_variations:
                                         break
@@ -1011,7 +1121,7 @@ def generate_variations(
         for prefix in default_prefixes[:min(3, num_variations - len(variations))]:
             for suffix in default_suffixes[:1]:
                 variation = f"{prefix} {base_text.lower()}{suffix}".strip()
-                if variation != base_text and variation not in variations:
+                if variation != base_text and variation not in variations and is_valid_sentence(variation):
                     template_variations.append(variation)
         
         variations.extend(template_variations)
@@ -1021,19 +1131,33 @@ def generate_variations(
     max_attempts = 10
     while len(variations) < num_variations and attempts < max_attempts:
         attempts += 1
-        # Simple word order variation as last resort
+        # Generate additional variations using simple transformations
+        # that maintain proper sentence structure
         words = base_text.split()
-        if len(words) > 2:
-            # Try reordering
-            new_words = words[1:] + [words[0]]
-            new_text = " ".join(new_words).capitalize()
-            if new_text not in variations:
-                variations.append(new_text)
-        else:
-            # Can't create more variations, break
-            break
+        
+        # Try adding contextual modifiers to the beginning (keeping verb structure intact)
+        if len(words) >= 2:
+            modifiers = ["Quickly", "Carefully", "Thoroughly", "Efficiently"]
+            for modifier in modifiers:
+                # Add modifier after the first word (verb) to maintain structure
+                # e.g., "Review the code" -> "Carefully review the code"
+                if words[0][0].isupper():  # If it starts with a capital (likely a verb)
+                    new_text = f"{modifier} {base_text.lower()}".strip()
+                else:
+                    new_text = f"{modifier} {base_text}".strip()
+                
+                if new_text not in variations and is_valid_sentence(new_text):
+                    variations.append(new_text)
+                    if len(variations) >= num_variations:
+                        break
+            
+            if len(variations) >= num_variations:
+                break
+        
+        # If still need more, just break instead of creating malformed sentences
+        break
     
-    # If still not enough, pad with the base text (better than hanging)
+    # If still not enough, pad with the base text (better than malformed sentences)
     while len(variations) < num_variations:
         variations.append(base_text)
     
@@ -1146,15 +1270,24 @@ def generate_synthetic_dataset(
                 if len(category_data) >= num_examples:
                     break
                 
+                # Apply post-processing to fix any bare verbs at the end
+                # This transforms malformed text like "Inventory data process" 
+                # into "Process inventory data"
+                fixed_text = fix_bare_verb_at_end(variation)
+                
+                # Final validation: skip truly invalid sentences
+                if not is_valid_sentence(fixed_text):
+                    continue
+                
                 task_id = f"task_{len(all_data) + len(category_data):06d}"
                 
                 example = {
                     "id": task_id,
-                    "text": variation,
+                    "text": fixed_text,
                     "label": category,
                     "label_id": label_id,
                     "metadata": {
-                        "length": len(variation),
+                        "length": len(fixed_text),
                         "difficulty": random.choice(["beginner", "intermediate", "advanced"]),
                         "source": "synthetic"
                     }
