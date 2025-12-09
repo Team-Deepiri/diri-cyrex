@@ -385,14 +385,10 @@ export default function App() {
       const tools = (status as any)?.tools || (status as any)?.available_tools || [];
       setToolsList(Array.isArray(tools) ? tools : []);
     } catch (err: any) {
-      // If that fails, try the agent tools endpoint
-      try {
-        const result = await callEndpoint('/agent/tools/external/adventure-data', {}, 'GET');
-        setToolsList([{ name: 'adventure-data', description: 'Adventure data tool' }]);
-      } catch (e: any) {
-        setError(`Failed to load tools: ${err.message}`);
-        setToolsList([]);
-      }
+      // If that fails, just set empty list - don't try adventure-data endpoint
+      // as it requires lat/lng parameters which we don't have here
+      setError(`Failed to load tools: ${err.message}`);
+      setToolsList([]);
     }
   };
 
