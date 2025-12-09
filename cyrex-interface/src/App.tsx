@@ -128,6 +128,21 @@ export default function App() {
     failures: Array<{ test: string; error: string }>;
   } | null>(null);
 
+  // Debug state for each tab
+  type DebugInfo = {
+    request?: unknown;
+    response?: unknown;
+    logs?: string[];
+    timestamp?: string;
+    duration?: number;
+    error?: string;
+  };
+  const [debugInfo, setDebugInfo] = useState<Record<string, DebugInfo>>({});
+  const [showDebug, setShowDebug] = useState<Record<string, boolean>>({});
+  
+  // Abort controller for stopping tests
+  const [testAbortController, setTestAbortController] = useState<AbortController | null>(null);
+
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -142,7 +157,7 @@ export default function App() {
   }, [apiKey]);
 
   const callEndpoint = useCallback(
-    async (path: string, payload: unknown, method = 'POST') => {
+    async (path: string, payload: unknown, method = 'POST', tabId?: string) => {
       const startTime = Date.now();
       setLoading(path);
       setError(null);
@@ -161,6 +176,18 @@ export default function App() {
       // Status/health checks should be fast
       else if (path.includes('/status') || path.includes('/health') || path.includes('/list')) {
         timeoutMs = 30 * 1000; // 30 seconds for status checks
+      }
+      
+      // Initialize debug info for this tab
+      if (tabId) {
+        setDebugInfo(prev => ({
+          ...prev,
+          [tabId]: {
+            request: payload,
+            logs: [`[${new Date().toISOString()}] Starting request to ${path}`],
+            timestamp: new Date().toISOString()
+          }
+        }));
       }
       
       try {
@@ -194,6 +221,23 @@ export default function App() {
         
         const json = text ? JSON.parse(text) : {};
         
+        // Update debug info
+        if (tabId) {
+          setDebugInfo(prev => ({
+            ...prev,
+            [tabId]: {
+              ...prev[tabId],
+              response: json,
+              duration,
+              logs: [
+                ...(prev[tabId]?.logs || []),
+                `[${new Date().toISOString()}] Response received (${res.status})`,
+                `[${new Date().toISOString()}] Duration: ${duration}ms`
+              ]
+            }
+          }));
+        }
+        
         // Record test result
         const testResult: TestResult = {
           endpoint: path,
@@ -225,6 +269,22 @@ export default function App() {
         
         setError(errorMsg);
         
+        // Update debug info with error
+        if (tabId) {
+          setDebugInfo(prev => ({
+            ...prev,
+            [tabId]: {
+              ...prev[tabId],
+              error: errorMsg,
+              duration,
+              logs: [
+                ...(prev[tabId]?.logs || []),
+                `[${new Date().toISOString()}] ERROR: ${errorMsg}`
+              ]
+            }
+          }));
+        }
+        
         // Record failed test
         const testResult: TestResult = {
           endpoint: path,
@@ -255,7 +315,7 @@ export default function App() {
         user_id: 'test-user',
         use_rag: useRAG,
         use_tools: useTools
-      });
+      }, 'POST', 'orchestration');
       setOrchestrationResult(pretty(result));
     } catch (err: any) {
       setOrchestrationResult(`Error: ${err.message}`);
@@ -307,7 +367,7 @@ export default function App() {
         workflow_id: wfId,
         steps,
         initial_state: {}
-      });
+      }, 'POST', 'workflow');
       
       setWorkflowResult(pretty(result));
       setWorkflowId(wfId);
@@ -341,7 +401,7 @@ export default function App() {
         force_local_llm: true,
         llm_backend: llmBackend,
         llm_model: llmModel
-      });
+      }, 'POST', 'llm');
       setLlmResult(pretty(result));
     } catch (err: any) {
       setLlmResult(`Error: ${err.message}`);
@@ -355,7 +415,7 @@ export default function App() {
         query: ragQuery,
         top_k: ragTopK,
         rerank: true
-      });
+      }, 'POST', 'rag');
       setRagResult(pretty(result));
     } catch (err: any) {
       setRagResult(`Error: ${err.message}`);
@@ -370,7 +430,7 @@ export default function App() {
           content: documentContent,
           metadata: metadata
         }]
-      });
+      }, 'POST', 'rag');
       setRagResult(pretty(result));
     } catch (err: any) {
       setRagResult(`Error: ${err.message}`);
@@ -399,7 +459,7 @@ export default function App() {
         user_input: `Execute tool ${toolName} with input: ${toolInput}`,
         user_id: 'test-user',
         use_tools: true
-      });
+      }, 'POST', 'tools');
       setToolResult(pretty(result));
     } catch (err: any) {
       setToolResult(`Error: ${err.message}`);
@@ -415,7 +475,7 @@ export default function App() {
         workflow_id: wfId,
         steps: [],
         initial_state: data
-      });
+      }, 'POST', 'state');
       setStateResult(pretty(result));
       setStateWorkflowId(wfId);
     } catch (err: any) {
@@ -431,7 +491,7 @@ export default function App() {
       const result = await callEndpoint(`/orchestration/workflow/${stateWorkflowId}/checkpoint`, {
         step_name: checkpointName || 'test_checkpoint',
         state_data: JSON.parse(stateData)
-      });
+      }, 'POST', 'state');
       setStateResult(pretty(result));
     } catch (err: any) {
       setStateResult(`Error: ${err.message}`);
@@ -441,7 +501,7 @@ export default function App() {
   // Monitoring
   const loadSystemStatus = async () => {
     try {
-      const status = await callEndpoint('/orchestration/status', {}, 'GET');
+      const status = await callEndpoint('/orchestration/status', {}, 'GET', 'monitoring');
       setSystemStatus(status);
     } catch (err: any) {
       setError(`Failed to load status: ${err.message}`);
@@ -454,7 +514,7 @@ export default function App() {
       const result = await callEndpoint('/orchestration/process', {
         user_input: safetyInput,
         user_id: 'test-user'
-      });
+      }, 'POST', 'safety');
       setSafetyResult(pretty(result));
     } catch (err: any) {
       setSafetyResult(`Error: ${err.message}`);
@@ -494,7 +554,7 @@ export default function App() {
         }
       }
       
-      const result = await callEndpoint('/orchestration/process', payload);
+      const result = await callEndpoint('/orchestration/process', payload, 'POST', 'chat');
       
       // Handle different response formats
       let responseText = 'No response';
@@ -608,36 +668,58 @@ export default function App() {
   const loadTestStatus = useCallback(async () => {
     try {
       // Use Promise.race with timeout instead of AbortController to avoid "signal is aborted" errors
-      const fetchPromise = fetch(`${baseUrl}/testing/status`, {
-        method: 'GET',
-        headers: headers || { 'Content-Type': 'application/json' }
-      });
+      // Create a completely independent fetch that won't be affected by test abort controllers
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4 * 1000); // 4 second timeout (backend has 3s)
       
-      const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('Request timeout')), 5 * 1000)
-      );
-      
-      const res = await Promise.race([fetchPromise, timeoutPromise]);
-      
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      try {
+        const res = await fetch(`${baseUrl}/testing/status`, {
+          method: 'GET',
+          headers: headers || { 'Content-Type': 'application/json' },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+        
+        const status = await res.json();
+        setTestStatus(status);
+      } catch (fetchErr: any) {
+        clearTimeout(timeoutId);
+        // Handle abort errors gracefully
+        if (fetchErr.name === 'AbortError' || fetchErr.message?.includes('aborted')) {
+          throw new Error('Status check timed out');
+        }
+        throw fetchErr;
       }
-      
-      const status = await res.json();
-      setTestStatus(status);
     } catch (err: any) {
       // Don't set error for status checks - they're optional
-      // Just set a default status
+      // Just set a default status with helpful message
       console.warn('Failed to load test status:', err.message);
+      const errorMsg = err.message || 'Failed to load status';
       setTestStatus({
         tests_dir_exists: false,
         available_categories: 0,
         available_files: 0,
         status: 'error',
-        error: err.message || 'Failed to load status'
+        error: errorMsg.includes('timeout') || errorMsg.includes('aborted') 
+          ? 'Status check timed out (this is normal if tests are running)' 
+          : errorMsg
       });
     }
   }, [baseUrl, headers]);
+
+  const stopTests = () => {
+    if (testAbortController) {
+      testAbortController.abort();
+      setTestAbortController(null);
+      setTestRunning(false);
+      setTestOutput(prev => [...prev, '\n[STOPPED] Test execution was stopped by user']);
+    }
+  };
 
   const runTestsStream = async () => {
     setTestRunning(true);
@@ -645,6 +727,28 @@ export default function App() {
     setTestResult(null);
     setTestSummary(null);
     setError(null);
+
+    // Create abort controller for stop functionality
+    const controller = new AbortController();
+    setTestAbortController(controller);
+
+    // Initialize debug info for testing tab
+    setDebugInfo(prev => ({
+      ...prev,
+      testing: {
+        request: {
+          verbose: testVerbose,
+          coverage: testCoverage,
+          skip_slow: testSkipSlow,
+          timeout: testTimeout,
+          category: selectedTestCategory,
+          file: selectedTestFile,
+          test_path: selectedTestPath
+        },
+        logs: [`[${new Date().toISOString()}] Starting test execution`],
+        timestamp: new Date().toISOString()
+      }
+    }));
 
     try {
       const payload: any = {
@@ -667,7 +771,8 @@ export default function App() {
       const response = await fetch(`${baseUrl}/testing/run/stream`, {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
 
       if (!response.ok) {
@@ -693,6 +798,13 @@ export default function App() {
               
               if (data.type === 'start') {
                 setTestOutput(prev => [...prev, `Starting tests: ${data.command}`]);
+                setDebugInfo(prev => ({
+                  ...prev,
+                  testing: {
+                    ...prev.testing,
+                    logs: [...(prev.testing?.logs || []), `[${new Date().toISOString()}] ${data.command}`]
+                  }
+                }));
               } else if (data.type === 'output') {
                 setTestOutput(prev => [...prev, data.line]);
               } else if (data.type === 'complete') {
@@ -704,6 +816,19 @@ export default function App() {
                   const updated = [...prev, `\nTests completed with return code: ${data.return_code}`];
                   return updated;
                 });
+                setDebugInfo(prev => {
+                  const startTime = prev.testing?.timestamp ? new Date(prev.testing.timestamp).getTime() : Date.now();
+                  const duration = Date.now() - startTime;
+                  return {
+                    ...prev,
+                    testing: {
+                      ...prev.testing,
+                      response: { success: data.success, return_code: data.return_code },
+                      duration,
+                      logs: [...(prev.testing?.logs || []), `[${new Date().toISOString()}] Tests completed (${data.return_code})`]
+                    }
+                  };
+                });
                 // Parse summary after a brief delay to ensure all output is captured
                 setTimeout(() => {
                   setTestOutput(current => {
@@ -714,6 +839,14 @@ export default function App() {
               } else if (data.type === 'error') {
                 setError(data.message);
                 setTestOutput(prev => [...prev, `Error: ${data.message}`]);
+                setDebugInfo(prev => ({
+                  ...prev,
+                  testing: {
+                    ...prev.testing,
+                    error: data.message,
+                    logs: [...(prev.testing?.logs || []), `[${new Date().toISOString()}] ERROR: ${data.message}`]
+                  }
+                }));
               }
             } catch (e) {
               // Ignore JSON parse errors for malformed chunks
@@ -722,10 +855,31 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      setError(`Test execution failed: ${err.message}`);
-      setTestOutput(prev => [...prev, `Error: ${err.message}`]);
+      if (err.name === 'AbortError') {
+        setTestOutput(prev => [...prev, '\n[STOPPED] Test execution was stopped']);
+        setDebugInfo(prev => ({
+          ...prev,
+          testing: {
+            ...prev.testing,
+            error: 'Test execution stopped by user',
+            logs: [...(prev.testing?.logs || []), `[${new Date().toISOString()}] STOPPED by user`]
+          }
+        }));
+      } else {
+        setError(`Test execution failed: ${err.message}`);
+        setTestOutput(prev => [...prev, `Error: ${err.message}`]);
+        setDebugInfo(prev => ({
+          ...prev,
+          testing: {
+            ...prev.testing,
+            error: err.message,
+            logs: [...(prev.testing?.logs || []), `[${new Date().toISOString()}] ERROR: ${err.message}`]
+          }
+        }));
+      }
     } finally {
       setTestRunning(false);
+      setTestAbortController(null);
     }
   };
 
@@ -864,6 +1018,122 @@ export default function App() {
 
   const isLoading = (key: string) => loading === key;
 
+  // Helper function to render debug panel
+  const renderDebugPanel = (tabId: string) => {
+    const debug = debugInfo[tabId];
+    if (!debug) return null;
+
+    return (
+      <div style={{
+        background: '#1a1a1a',
+        padding: '1rem',
+        borderRadius: '8px',
+        border: '1px solid #333',
+        marginTop: '1rem'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>🔍 Debug Information</h3>
+          <button
+            onClick={() => setShowDebug(prev => ({ ...prev, [tabId]: !prev[tabId] }))}
+            style={{
+              padding: '0.25rem 0.5rem',
+              background: '#222',
+              border: '1px solid #444',
+              borderRadius: '4px',
+              color: '#999',
+              cursor: 'pointer',
+              fontSize: '0.75rem'
+            }}
+          >
+            {showDebug[tabId] ? '▼ Hide' : '▶ Show'}
+          </button>
+        </div>
+        {showDebug[tabId] && (
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {debug.timestamp && (
+              <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                Timestamp: {new Date(debug.timestamp).toLocaleString()}
+              </div>
+            )}
+            {debug.duration !== undefined && (
+              <div style={{ fontSize: '0.85rem', color: '#666' }}>
+                Duration: {debug.duration}ms
+              </div>
+            )}
+            {debug.request !== undefined && debug.request !== null && (
+              <div>
+                <strong style={{ color: '#999', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Request:</strong>
+                <pre style={{
+                  background: '#0a0a0a',
+                  padding: '0.75rem',
+                  borderRadius: '4px',
+                  fontSize: '0.8rem',
+                  overflow: 'auto',
+                  maxHeight: '300px',
+                  border: '1px solid #333'
+                }}>
+                  {pretty(debug.request)}
+                </pre>
+              </div>
+            )}
+            {debug.response !== undefined && debug.response !== null && (
+              <div>
+                <strong style={{ color: '#999', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Response:</strong>
+                <pre style={{
+                  background: '#0a0a0a',
+                  padding: '0.75rem',
+                  borderRadius: '4px',
+                  fontSize: '0.8rem',
+                  overflow: 'auto',
+                  maxHeight: '300px',
+                  border: '1px solid #333'
+                }}>
+                  {pretty(debug.response)}
+                </pre>
+              </div>
+            )}
+            {debug.error && (
+              <div>
+                <strong style={{ color: '#ff4444', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Error:</strong>
+                <div style={{
+                  background: '#ff444420',
+                  padding: '0.75rem',
+                  borderRadius: '4px',
+                  color: '#ff4444',
+                  fontSize: '0.85rem',
+                  border: '1px solid #ff4444'
+                }}>
+                  {debug.error}
+                </div>
+              </div>
+            )}
+            {debug.logs && debug.logs.length > 0 && (
+              <div>
+                <strong style={{ color: '#999', fontSize: '0.85rem', display: 'block', marginBottom: '0.5rem' }}>Logs:</strong>
+                <div style={{
+                  background: '#0a0a0a',
+                  padding: '0.75rem',
+                  borderRadius: '4px',
+                  fontSize: '0.8rem',
+                  maxHeight: '200px',
+                  overflow: 'auto',
+                  border: '1px solid #333',
+                  fontFamily: 'monospace'
+                }}>
+                  {debug.logs.map((log, idx) => (
+                    <div key={idx} style={{ color: '#999', marginBottom: '0.25rem' }}>
+                      {log}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui' }}>
       <header style={{ 
@@ -990,7 +1260,7 @@ export default function App() {
         gap: '0.25rem'
       }}>
         {[
-          { id: 'testing', label: 'Testing', icon: '' },
+          { id: 'testing', label: 'Testing Suite', icon: '' },
           { id: 'orchestration', label: 'Orchestration', icon: '' },
           { id: 'workflow', label: 'Workflows', icon: '' },
           { id: 'llm', label: 'Local LLM', icon: '' },
@@ -1218,6 +1488,22 @@ export default function App() {
                 >
                   {testRunning ? 'Running...' : 'Run Tests (Sync)'}
                 </button>
+                {testRunning && (
+                  <button
+                    onClick={stopTests}
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      background: '#ff4444',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    ⏹ Stop Tests
+                  </button>
+                )}
                 <button
                   onClick={() => {
                     setTestOutput([]);
@@ -1443,6 +1729,9 @@ export default function App() {
                   <strong>Error:</strong> {error}
                 </div>
               )}
+
+              {/* Debug Panel */}
+              {renderDebugPanel('testing')}
             </div>
           )}
 
@@ -1549,6 +1838,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for Orchestration */}
+            {renderDebugPanel('orchestration')}
           </div>
           )}
 
@@ -1625,6 +1917,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for Workflow */}
+            {renderDebugPanel('workflow')}
           </div>
           )}
 
@@ -1725,6 +2020,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for Local LLM */}
+            {renderDebugPanel('llm')}
           </div>
           )}
 
@@ -1845,6 +2143,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for RAG */}
+            {renderDebugPanel('rag')}
           </div>
           )}
 
@@ -1975,6 +2276,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for Tools */}
+            {renderDebugPanel('tools')}
           </div>
           )}
 
@@ -2098,6 +2402,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for State Management */}
+            {renderDebugPanel('state')}
           </div>
           )}
 
@@ -2137,6 +2444,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for Monitoring */}
+            {renderDebugPanel('monitoring')}
           </div>
           )}
 
@@ -2194,6 +2504,9 @@ export default function App() {
                 </div>
               )}
             </div>
+            
+            {/* Debug Panel for Safety */}
+            {renderDebugPanel('safety')}
           </div>
           )}
 
@@ -2486,7 +2799,10 @@ export default function App() {
                 </button>
               </div>
             </div>
-          </div>
+            
+            {/* Debug Panel for Chat */}
+            {renderDebugPanel('chat')}
+            </div>
           )}
 
           {/* Test History Tab */}
@@ -2508,82 +2824,200 @@ export default function App() {
                   No tests run yet. Start testing to see history here.
                 </div>
               )}
-              {testHistory.map((test, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    background: test.success ? '#00aa0020' : '#ff444420',
-                    border: `1px solid ${test.success ? '#00aa00' : '#ff4444'}`,
-                    borderRadius: '4px',
-                    padding: '1rem',
-                    minWidth: 0,
-                    overflow: 'hidden'
-                  }}
-                >
-                  <div style={{ 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    marginBottom: '0.5rem',
-                    flexWrap: 'wrap',
-                    gap: '0.5rem'
-                  }}>
-                    <strong style={{ 
-                      color: test.success ? '#00aa00' : '#ff4444',
-                      wordBreak: 'break-word',
-                      flex: '1 1 auto',
-                      minWidth: 0
+              {testHistory.map((test, idx) => {
+                // Extract request summary
+                const requestSummary = typeof test.request === 'object' && test.request !== null
+                  ? Object.keys(test.request).slice(0, 3).map(key => `${key}: ${JSON.stringify((test.request as any)[key]).substring(0, 30)}`).join(', ')
+                  : String(test.request).substring(0, 100);
+                
+                // Extract response summary
+                const responseSummary = test.response 
+                  ? (typeof test.response === 'string' ? test.response.substring(0, 150) : JSON.stringify(test.response).substring(0, 150))
+                  : null;
+                
+                // Format duration
+                const durationStr = test.duration < 1000 
+                  ? `${test.duration}ms` 
+                  : `${(test.duration / 1000).toFixed(2)}s`;
+                
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      background: test.success ? '#00aa0020' : '#ff444420',
+                      border: `1px solid ${test.success ? '#00aa00' : '#ff4444'}`,
+                      borderRadius: '4px',
+                      padding: '1rem',
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.75rem'
+                    }}
+                  >
+                    {/* Header with status badge */}
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                      gap: '0.5rem'
                     }}>
-                      {test.endpoint}
-                    </strong>
-                    <span style={{ 
-                      color: '#999', 
-                      fontSize: '0.85rem',
-                      whiteSpace: 'nowrap',
-                      flexShrink: 0
-                    }}>
-                      {test.duration}ms | {new Date(test.timestamp).toLocaleTimeString()}
-                    </span>
-                  </div>
-                  {test.error && (
-                    <div style={{ color: '#ff4444', marginBottom: '0.5rem' }}>
-                      Error: {test.error}
+                      <div style={{ flex: '1 1 auto', minWidth: 0 }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '0.5rem',
+                          marginBottom: '0.25rem'
+                        }}>
+                          <span style={{
+                            padding: '0.25rem 0.5rem',
+                            background: test.success ? '#00aa00' : '#ff4444',
+                            borderRadius: '4px',
+                            fontSize: '0.7rem',
+                            fontWeight: 600,
+                            color: '#fff'
+                          }}>
+                            {test.success ? '✓ SUCCESS' : '✗ FAILED'}
+                          </span>
+                          <strong style={{ 
+                            color: test.success ? '#00aa00' : '#ff4444',
+                            wordBreak: 'break-word',
+                            fontSize: '0.9rem'
+                          }}>
+                            {test.endpoint}
+                          </strong>
+                        </div>
+                        <div style={{ 
+                          color: '#999', 
+                          fontSize: '0.75rem',
+                          display: 'flex',
+                          gap: '0.75rem',
+                          flexWrap: 'wrap'
+                        }}>
+                          <span>⏱ {durationStr}</span>
+                          <span>🕐 {new Date(test.timestamp).toLocaleString()}</span>
+                        </div>
+                      </div>
                     </div>
-                  )}
-                  <details>
-                    <summary style={{ cursor: 'pointer', color: '#999', fontSize: '0.85rem' }}>View Details</summary>
-                    <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
+                    
+                    {/* Error display */}
+                    {test.error && (
+                      <div style={{ 
+                        background: '#ff444420',
+                        border: '1px solid #ff4444',
+                        borderRadius: '4px',
+                        padding: '0.5rem',
+                        color: '#ff4444',
+                        fontSize: '0.85rem'
+                      }}>
+                        <strong>Error:</strong> {test.error}
+                      </div>
+                    )}
+                    
+                    {/* Request Summary */}
+                    <div>
+                      <div style={{ 
+                        color: '#999', 
+                        fontSize: '0.75rem', 
+                        marginBottom: '0.25rem',
+                        fontWeight: 600
+                      }}>
+                        📤 Request:
+                      </div>
+                      <div style={{
+                        background: '#0a0a0a',
+                        padding: '0.5rem',
+                        borderRadius: '4px',
+                        fontSize: '0.8rem',
+                        color: '#ccc',
+                        fontFamily: 'monospace',
+                        wordBreak: 'break-word',
+                        maxHeight: '80px',
+                        overflow: 'auto'
+                      }}>
+                        {requestSummary}
+                        {requestSummary.length >= 100 && '...'}
+                      </div>
+                    </div>
+                    
+                    {/* Response Summary */}
+                    {responseSummary && (
                       <div>
-                        <strong style={{ color: '#999', fontSize: '0.85rem' }}>Request:</strong>
-                        <pre style={{
+                        <div style={{ 
+                          color: '#999', 
+                          fontSize: '0.75rem', 
+                          marginBottom: '0.25rem',
+                          fontWeight: 600
+                        }}>
+                          📥 Response:
+                        </div>
+                        <div style={{
                           background: '#0a0a0a',
                           padding: '0.5rem',
                           borderRadius: '4px',
                           fontSize: '0.8rem',
-                          overflow: 'auto',
-                          maxHeight: '200px'
+                          color: '#ccc',
+                          fontFamily: 'monospace',
+                          wordBreak: 'break-word',
+                          maxHeight: '80px',
+                          overflow: 'auto'
                         }}>
-                          {pretty(test.request)}
-                        </pre>
+                          {responseSummary}
+                          {responseSummary.length >= 150 && '...'}
+                        </div>
                       </div>
-                      {test.response != null && (
+                    )}
+                    
+                    {/* Expandable Details */}
+                    <details>
+                      <summary style={{ 
+                        cursor: 'pointer', 
+                        color: '#999', 
+                        fontSize: '0.85rem',
+                        padding: '0.5rem',
+                        background: '#222',
+                        borderRadius: '4px',
+                        border: '1px solid #333'
+                      }}>
+                        🔍 View Full Details
+                      </summary>
+                      <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
                         <div>
-                          <strong style={{ color: '#999', fontSize: '0.85rem' }}>Response:</strong>
+                          <strong style={{ color: '#999', fontSize: '0.85rem', display: 'block', marginBottom: '0.25rem' }}>Full Request:</strong>
                           <pre style={{
                             background: '#0a0a0a',
-                            padding: '0.5rem',
+                            padding: '0.75rem',
                             borderRadius: '4px',
-                            fontSize: '0.8rem',
+                            fontSize: '0.75rem',
                             overflow: 'auto',
-                            maxHeight: '200px'
+                            maxHeight: '300px',
+                            border: '1px solid #333'
                           }}>
-                            {test.response}
+                            {pretty(test.request)}
                           </pre>
                         </div>
-                      )}
-                    </div>
-                  </details>
-                </div>
-              ))}
+                        {test.response != null && (
+                          <div>
+                            <strong style={{ color: '#999', fontSize: '0.85rem', display: 'block', marginBottom: '0.25rem' }}>Full Response:</strong>
+                            <pre style={{
+                              background: '#0a0a0a',
+                              padding: '0.75rem',
+                              borderRadius: '4px',
+                              fontSize: '0.75rem',
+                              overflow: 'auto',
+                              maxHeight: '300px',
+                              border: '1px solid #333'
+                            }}>
+                              {test.response}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  </div>
+                );
+              })}
             </div>
           </div>
           )}

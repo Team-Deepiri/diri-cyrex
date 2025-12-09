@@ -30,17 +30,51 @@ except ImportError as e:
     Input = None
     Output = None
 
-# Agent imports with graceful fallbacks (LangChain 1.x compatible)
+# Agent imports with graceful fallbacks (LangChain 0.2.x compatible)
 try:
-    # Try LangChain 1.x imports first
+    # Try multiple import paths for LangChain 0.2.x
+    AgentExecutor = None
+    create_openai_functions_agent = None
+    create_react_agent = None
+    
+    # Try langchain-classic first (for deprecated AgentExecutor)
     try:
-        from langchain.agents import create_openai_functions_agent, create_react_agent, AgentExecutor
+        from langchain_classic.agents import AgentExecutor
+        logger.debug("Found AgentExecutor in langchain-classic")
     except ImportError:
-        # Fallback for different 1.x structure
-        from langchain.agents import AgentExecutor
-        from langchain.agents.openai_functions import create_openai_functions_agent
-        from langchain.agents.react import create_react_agent
-    HAS_AGENTS = True
+        # Try langchain.agents.agent (some 0.2.x versions)
+        try:
+            from langchain.agents.agent import AgentExecutor
+            logger.debug("Found AgentExecutor in langchain.agents.agent")
+        except ImportError:
+            # Try direct langchain.agents (older versions)
+            try:
+                from langchain.agents import AgentExecutor
+                logger.debug("Found AgentExecutor in langchain.agents")
+            except ImportError:
+                pass
+    
+    # Try to import agent creation functions
+    try:
+        from langchain.agents import create_openai_functions_agent, create_react_agent
+    except ImportError:
+        # Try alternative paths
+        try:
+            from langchain.agents.openai_functions import create_openai_functions_agent
+        except ImportError:
+            pass
+        try:
+            from langchain.agents.react import create_react_agent
+        except ImportError:
+            pass
+    
+    # Check if we have at least AgentExecutor
+    if AgentExecutor is not None:
+        HAS_AGENTS = True
+        logger.debug("LangChain agents available")
+    else:
+        raise ImportError("AgentExecutor not found in any expected location")
+        
 except ImportError as e:
     logger.warning(f"LangChain agents not available: {e}")
     create_openai_functions_agent = None
@@ -370,9 +404,9 @@ Final Answer: the final answer to the original input question"""),
                     "request_id": request_id,
                 }
             
-            # Retrieve context if RAG enabled
+            # Retrieve context if RAG enabled and user_input is not empty
             context_docs = []
-            if use_rag and self.vector_store:
+            if use_rag and self.vector_store and user_input and user_input.strip():
                 try:
                     context_docs = await self.vector_store.asimilarity_search(user_input, k=4)
                     if context_docs:
@@ -586,19 +620,122 @@ Final Answer: the final answer to the original input question"""),
             yield json.dumps({"error": str(e)})
     
     async def get_status(self) -> Dict[str, Any]:
-        """Get orchestrator status"""
+        """Get orchestrator status - optimized for speed with timeouts"""
+        import asyncio
+        
+        # Overall timeout for entire status check (5 seconds max)
+        try:
+            return await asyncio.wait_for(self._get_status_internal(), timeout=5.0)
+        except asyncio.TimeoutError:
+            self.logger.warning("Status check timed out after 5 seconds")
+            return {
+                "llm": {"status": "timeout", "error": "Status check timed out"},
+                "vector_store": None,
+                "tools": {},
+                "monitor": {},
+                "queue": None,
+                "error": "Status check timed out after 5 seconds"
+            }
+    
+    async def _get_status_internal(self) -> Dict[str, Any]:
+        """Internal status check method"""
+        import asyncio
+        
         status = {
-            "llm": self.llm_provider.health_check() if self.llm_provider else {"status": "not_initialized"},
-            "vector_store": self.vector_store.stats() if self.vector_store else None,
-            "tools": self.tool_registry.get_tool_stats(),
-            "monitor": self.monitor.get_stats(),
+            "llm": {"status": "not_initialized"},
+            "vector_store": None,
+            "tools": {},
+            "monitor": {},
+            "queue": None,
         }
         
-        # Add queue stats if available
+        # Get LLM status (with timeout protection - run in executor to avoid blocking)
+        try:
+            if self.llm_provider and hasattr(self.llm_provider, 'health_check'):
+                try:
+                    # Run synchronous health_check in executor with timeout
+                    loop = asyncio.get_event_loop()
+                    health_check = await asyncio.wait_for(
+                        loop.run_in_executor(None, self.llm_provider.health_check),
+                        timeout=2.0
+                    )
+                    status["llm"] = health_check
+                except asyncio.TimeoutError:
+                    status["llm"] = {"status": "timeout", "error": "Health check timed out"}
+                except Exception as e:
+                    status["llm"] = {"status": "error", "error": str(e)}
+        except Exception as e:
+            self.logger.warning(f"Failed to get LLM status: {e}")
+        
+        # Get vector store status (with timeout protection - run in executor)
+        try:
+            if self.vector_store:
+                if hasattr(self.vector_store, 'health_check'):
+                    try:
+                        # Run synchronous health_check in executor with timeout
+                        loop = asyncio.get_event_loop()
+                        health_check = await asyncio.wait_for(
+                            loop.run_in_executor(None, self.vector_store.health_check),
+                            timeout=2.0
+                        )
+                        status["vector_store"] = health_check
+                    except asyncio.TimeoutError:
+                        # Fallback to stats if health_check times out
+                        try:
+                            stats = await asyncio.wait_for(
+                                loop.run_in_executor(None, self.vector_store.stats) if hasattr(self.vector_store, 'stats') else None,
+                                timeout=1.0
+                            )
+                            status["vector_store"] = stats
+                        except Exception:
+                            status["vector_store"] = None
+                    except Exception:
+                        status["vector_store"] = None
+                elif hasattr(self.vector_store, 'stats'):
+                    try:
+                        loop = asyncio.get_event_loop()
+                        status["vector_store"] = await asyncio.wait_for(
+                            loop.run_in_executor(None, self.vector_store.stats),
+                            timeout=1.0
+                        )
+                    except Exception:
+                        status["vector_store"] = None
+        except Exception as e:
+            self.logger.warning(f"Failed to get vector store status: {e}")
+        
+        # Get tool stats (fast, no timeout needed)
+        try:
+            status["tools"] = self.tool_registry.get_tool_stats()
+        except Exception as e:
+            self.logger.warning(f"Failed to get tool stats: {e}")
+        
+        # Get monitor stats (fast, no timeout needed)
+        try:
+            status["monitor"] = self.monitor.get_stats()
+        except Exception as e:
+            self.logger.warning(f"Failed to get monitor stats: {e}")
+        
+        # Add queue stats if available (with timeout)
         try:
             if hasattr(self.queue_manager, 'get_queue_stats'):
-                status["queue"] = await self.queue_manager.get_queue_stats()
-        except:
+                try:
+                    # Call the method and check if result is async
+                    queue_stats_method = self.queue_manager.get_queue_stats
+                    if asyncio.iscoroutinefunction(queue_stats_method):
+                        queue_stats = await asyncio.wait_for(queue_stats_method(), timeout=1.0)
+                    else:
+                        # Run synchronous method in executor
+                        loop = asyncio.get_event_loop()
+                        queue_stats = await asyncio.wait_for(
+                            loop.run_in_executor(None, queue_stats_method),
+                            timeout=1.0
+                        )
+                    status["queue"] = queue_stats
+                except asyncio.TimeoutError:
+                    status["queue"] = None
+                except Exception:
+                    status["queue"] = None
+        except Exception:
             status["queue"] = None
         
         return status

@@ -76,38 +76,71 @@ class MilvusVectorStore:
         self.host = host or settings.MILVUS_HOST
         self.port = port or settings.MILVUS_PORT
         
+        # Always initialize in-memory fallback first to ensure it exists
+        self._memory_docs = []
+        self.milvus_available = False
+        self.collection = None
+        self.langchain_store = None
+        
         # Initialize embeddings with robust error handling for PyTorch meta tensor issues
         if embedding_model:
             self.embeddings = embedding_model
+            logger.info("Using provided embedding model")
         else:
             model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
             
             embedding_initialized = False
             last_error = None
+            errors = []
             
             # Method 1: Try HuggingFaceEmbeddings if available
             if HuggingFaceEmbeddings:
                 try:
+                    logger.info(f"Attempting to initialize {model_name} with HuggingFaceEmbeddings...")
                     self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
-                    logger.info(f"Using embedding model: {model_name} (HuggingFaceEmbeddings)")
-                    embedding_initialized = True
+                    # Test the embedding to ensure it works
+                    test_embedding = self.embeddings.embed_query("test")
+                    if test_embedding and len(test_embedding) > 0:
+                        logger.info(f"Successfully initialized embedding model: {model_name} (HuggingFaceEmbeddings, dim={len(test_embedding)})")
+                        embedding_initialized = True
+                    else:
+                        raise RuntimeError("Embedding test returned empty result")
                 except Exception as e:
+                    error_msg = str(e)
+                    errors.append(f"HuggingFaceEmbeddings: {error_msg}")
                     last_error = e
-                    logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
+                    if "meta tensor" in error_msg.lower() or "to_empty" in error_msg.lower():
+                        logger.warning(f"HuggingFaceEmbeddings failed with meta tensor error: {e}, trying robust wrapper")
+                    else:
+                        logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
             
             # Method 2: Use robust embeddings wrapper (bypasses HuggingFaceEmbeddings issues)
             if not embedding_initialized:
                 try:
+                    logger.info(f"Attempting to initialize {model_name} with RobustEmbeddings wrapper...")
                     from .embeddings_wrapper import get_robust_embeddings
                     self.embeddings = get_robust_embeddings(model_name)
-                    logger.info(f"Using embedding model: {model_name} (RobustEmbeddings wrapper)")
-                    embedding_initialized = True
+                    # Test the embedding to ensure it works
+                    test_embedding = self.embeddings.embed_query("test")
+                    if test_embedding and len(test_embedding) > 0:
+                        logger.info(f"Successfully initialized embedding model: {model_name} (RobustEmbeddings wrapper, dim={len(test_embedding)})")
+                        embedding_initialized = True
+                    else:
+                        raise RuntimeError("Embedding test returned empty result")
                 except Exception as e2:
+                    error_msg = str(e2)
+                    errors.append(f"RobustEmbeddings: {error_msg}")
                     last_error = e2
-                    logger.error(f"RobustEmbeddings initialization failed: {e2}")
+                    logger.error(f"RobustEmbeddings initialization failed: {e2}", exc_info=True)
             
             if not embedding_initialized:
-                raise RuntimeError(f"Failed to initialize embeddings after all attempts: {last_error}") from last_error
+                error_summary = "; ".join(errors) if errors else str(last_error)
+                raise RuntimeError(
+                    f"Failed to initialize embeddings after all attempts. "
+                    f"Model: {model_name}. "
+                    f"Errors: {error_summary}. "
+                    f"This may be due to PyTorch meta tensor issues, missing dependencies, or insufficient resources."
+                ) from last_error
         
         # Get embedding dimension
         if dimension:
@@ -137,18 +170,39 @@ class MilvusVectorStore:
         
         try:
             # Connect with default alias for PyMilvus operations
+            logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
             connections.connect(
                 alias=self.connection_alias,
                 host=self.host,
                 port=self.port,
                 timeout=10.0,  # Increased timeout for better reliability
             )
+            
+            # Verify connection by checking server version
+            try:
+                from pymilvus import __version__ as pymilvus_version
+                logger.info(f"Connected to Milvus at {self.host}:{self.port} (pymilvus version: {pymilvus_version})")
+            except Exception:
+                logger.info(f"Connected to Milvus at {self.host}:{self.port}")
+            
             self.milvus_available = True
-            logger.info(f"Connected to Milvus at {self.host}:{self.port} (alias: {self.connection_alias})")
         except Exception as e:
-            logger.warning(
-                f"Milvus unavailable, falling back to in-memory store: {e}"
-            )
+            error_msg = str(e).lower()
+            if "connection refused" in error_msg or "cannot connect" in error_msg:
+                logger.warning(
+                    f"Milvus connection refused at {self.host}:{self.port}. "
+                    f"Ensure Milvus is running. Falling back to in-memory store."
+                )
+            elif "timeout" in error_msg:
+                logger.warning(
+                    f"Milvus connection timeout at {self.host}:{self.port}. "
+                    f"Server may be slow or unavailable. Falling back to in-memory store."
+                )
+            else:
+                logger.warning(
+                    f"Milvus unavailable at {self.host}:{self.port}: {e}. "
+                    f"Falling back to in-memory store."
+                )
             self.milvus_available = False
             self.collection = None
             self.langchain_store = None
@@ -161,10 +215,7 @@ class MilvusVectorStore:
             self.collection = self._get_or_create_collection()
         except Exception as e:
             logger.warning(f"Failed to initialize collection, using in-memory fallback: {e}")
-            self.milvus_available = False
-            self.collection = None
-            self.langchain_store = None
-            self._memory_docs = []
+            # _memory_docs already initialized above
             return
         
         # Initialize LangChain Milvus wrapper with explicit connection configuration
@@ -328,6 +379,90 @@ class MilvusVectorStore:
                     )
         except Exception as e:
             logger.warning(f"Failed to ensure Milvus connections: {e}")
+            # Mark as unavailable if connection fails
+            self.milvus_available = False
+    
+    def health_check(self) -> Dict[str, Any]:
+        """
+        Perform health check on Milvus connection and collection.
+        
+        Returns:
+            Dictionary with health status, connection info, and collection stats
+        """
+        health_status = {
+            "healthy": False,
+            "milvus_available": self.milvus_available,
+            "connection": {
+                "host": self.host,
+                "port": self.port,
+                "connected": False,
+            },
+            "collection": {
+                "name": self.collection_name,
+                "exists": False,
+                "loaded": False,
+                "num_entities": 0,
+            },
+            "embeddings": {
+                "initialized": self.embeddings is not None,
+                "dimension": self.dimension if hasattr(self, 'dimension') else None,
+            },
+            "errors": [],
+        }
+        
+        if not HAS_PYMILVUS:
+            health_status["errors"].append("pymilvus not available")
+            return health_status
+        
+        # Check connection
+        try:
+            if connections.has_connection(self.connection_alias):
+                health_status["connection"]["connected"] = True
+                health_status["healthy"] = True
+            else:
+                health_status["errors"].append(f"Connection '{self.connection_alias}' not established")
+        except Exception as e:
+            health_status["errors"].append(f"Connection check failed: {e}")
+        
+        # Check collection
+        if self.milvus_available and self.collection:
+            try:
+                health_status["collection"]["exists"] = True
+                health_status["collection"]["num_entities"] = self.collection.num_entities
+                
+                # Check if collection is loaded
+                try:
+                    # Try to query to see if collection is loaded
+                    if hasattr(self.collection, 'is_empty'):
+                        health_status["collection"]["loaded"] = True
+                    else:
+                        health_status["collection"]["loaded"] = True  # Assume loaded if we can access it
+                except Exception:
+                    health_status["collection"]["loaded"] = False
+                    health_status["errors"].append("Collection may not be loaded")
+            except Exception as e:
+                health_status["errors"].append(f"Collection check failed: {e}")
+                health_status["healthy"] = False
+        
+        # Check embeddings
+        if self.embeddings:
+            try:
+                # Test embedding generation
+                test_embedding = self.embeddings.embed_query("health check")
+                if test_embedding and len(test_embedding) > 0:
+                    health_status["embeddings"]["dimension"] = len(test_embedding)
+                else:
+                    health_status["errors"].append("Embedding test returned empty result")
+                    health_status["healthy"] = False
+            except Exception as e:
+                health_status["errors"].append(f"Embedding test failed: {e}")
+                health_status["healthy"] = False
+        
+        # Overall health is True only if all components are healthy
+        if health_status["errors"]:
+            health_status["healthy"] = False
+        
+        return health_status
     
     def _get_or_create_collection(self) -> Collection:
         """Get existing collection or create new one"""
@@ -385,6 +520,10 @@ class MilvusVectorStore:
     
     def add_documents(self, documents: List[Document], **kwargs):
         """Add documents to vector store"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             # In-memory fallback
             self._memory_docs.extend(documents)
@@ -398,6 +537,10 @@ class MilvusVectorStore:
     
     async def aadd_documents(self, documents: List[Document], **kwargs):
         """Async add documents"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             # In-memory fallback
             self._memory_docs.extend(documents)
@@ -422,6 +565,10 @@ class MilvusVectorStore:
         **kwargs
     ) -> List[Document]:
         """Search for similar documents"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             # Simple in-memory fallback - return first k documents
             return self._memory_docs[:k]
@@ -478,6 +625,9 @@ class MilvusVectorStore:
                     return []
                 logger.error(f"Similarity search retry failed: {retry_error}")
             # Fallback to in-memory
+            # Ensure _memory_docs exists (safety check)
+            if not hasattr(self, '_memory_docs'):
+                self._memory_docs = []
             return self._memory_docs[:k]
     
     async def asimilarity_search(
@@ -488,6 +638,10 @@ class MilvusVectorStore:
         **kwargs
     ) -> List[Document]:
         """Async similarity search"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             # Simple in-memory fallback
             return self._memory_docs[:k]
@@ -553,6 +707,9 @@ class MilvusVectorStore:
                     return []
                 logger.error(f"Async similarity search retry failed: {retry_error}")
             # Fallback to in-memory
+            # Ensure _memory_docs exists (safety check)
+            if not hasattr(self, '_memory_docs'):
+                self._memory_docs = []
             return self._memory_docs[:k]
     
     def similarity_search_with_score(
@@ -563,6 +720,10 @@ class MilvusVectorStore:
         **kwargs
     ) -> List[tuple[Document, float]]:
         """Search with similarity scores"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             # In-memory fallback with dummy scores
             return [(doc, 0.5) for doc in self._memory_docs[:k]]
@@ -580,6 +741,10 @@ class MilvusVectorStore:
     
     def delete(self, ids: Optional[List[str]] = None, **kwargs):
         """Delete documents by IDs"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             # In-memory fallback - remove by index if ids provided
             if ids:
@@ -610,19 +775,29 @@ class MilvusVectorStore:
                         self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None
                     ) -> List[Document]:
                         """Get relevant documents for a query"""
+                        # Ensure _memory_docs exists (safety check)
+                        if not hasattr(self.store, '_memory_docs'):
+                            self.store._memory_docs = []
                         return self.store._memory_docs[:4]  # Return first 4 docs
                     
                     async def _aget_relevant_documents(
                         self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None
                     ) -> List[Document]:
                         """Async get relevant documents for a query"""
+                        # Ensure _memory_docs exists (safety check)
+                        if not hasattr(self.store, '_memory_docs'):
+                            self.store._memory_docs = []
                         return self.store._memory_docs[:4]  # Return first 4 docs
                 
                 return SimpleRetriever(store=self)
             else:
                 # Fallback: wrap in RunnableLambda if BaseRetriever not available
                 logger.warning("BaseRetriever not available, using simple callable")
-                return lambda query: self._memory_docs[:4]
+                # Ensure _memory_docs exists (safety check)
+                if not hasattr(self, '_memory_docs'):
+                    self._memory_docs = []
+                _memory_docs_ref = self._memory_docs  # Capture reference for lambda
+                return lambda query: _memory_docs_ref[:4]
         
         if not self.langchain_store:
             # If LangChain wrapper is not available, create a simple retriever that uses our search methods
@@ -686,6 +861,10 @@ class MilvusVectorStore:
     
     def stats(self) -> Dict[str, Any]:
         """Get collection statistics"""
+        # Ensure _memory_docs exists (safety check)
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
         if not self.milvus_available:
             return {
                 "collection_name": self.collection_name,
@@ -693,10 +872,14 @@ class MilvusVectorStore:
                 "dimension": self.dimension,
                 "host": self.host,
                 "port": self.port,
-                "mode": "in-memory"
+                "mode": "in-memory",
+                "healthy": False,
             }
         
         try:
+            # Ensure connection is alive
+            self._ensure_connection()
+            
             stats = self.collection.num_entities
             return {
                 "collection_name": self.collection_name,
@@ -704,11 +887,16 @@ class MilvusVectorStore:
                 "dimension": self.dimension,
                 "host": self.host,
                 "port": self.port,
-                "mode": "milvus"
+                "mode": "milvus",
+                "healthy": self.milvus_available,
             }
         except Exception as e:
             logger.error(f"Failed to get stats: {e}", exc_info=True)
-            return {"error": str(e)}
+            return {
+                "collection_name": self.collection_name,
+                "error": str(e),
+                "healthy": False,
+            }
 
 
 def get_milvus_store(

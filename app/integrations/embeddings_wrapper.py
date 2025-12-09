@@ -19,6 +19,22 @@ class RobustEmbeddings:
         self.model = None
         self._initialize_model()
     
+    def _get_target_device(self):
+        """Determine target device with proper fallback: CUDA → MPS → CPU"""
+        import torch
+        
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+            logger.info(f"CUDA available, using GPU: {torch.cuda.get_device_name(0)}")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+            logger.info("MPS (Apple Silicon) available, using MPS")
+        else:
+            device = torch.device('cpu')
+            logger.info("Using CPU (no GPU/MPS available)")
+        
+        return device
+    
     def _initialize_model(self):
         """Initialize sentence-transformers model using proper PyTorch device handling."""
         try:
@@ -26,8 +42,8 @@ class RobustEmbeddings:
             from sentence_transformers import SentenceTransformer
             from transformers import AutoModel, AutoTokenizer
             
-            # Determine target device (always CPU for compatibility)
-            target_device = torch.device('cpu')
+            # Determine target device with proper fallback
+            target_device = self._get_target_device()
             logger.info(f"Initializing embedding model {self.model_name} on device: {target_device}")
             
             initialization_success = False
@@ -39,16 +55,24 @@ class RobustEmbeddings:
                     # Use transformers directly with proper device mapping
                     tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                     
-                    # Load model with explicit CPU device mapping and low memory usage
+                    # Determine device_map based on target device
+                    if target_device.type == 'cuda':
+                        device_map = "cuda:0"
+                    elif target_device.type == 'mps':
+                        device_map = "mps"
+                    else:
+                        device_map = "cpu"
+                    
+                    # Load model with explicit device mapping and low memory usage
                     # This prevents PyTorch from using meta device
                     model = AutoModel.from_pretrained(
                         self.model_name,
                         torch_dtype=torch.float32,
-                        device_map="cpu",  # Explicit CPU mapping
+                        device_map=device_map,  # Explicit device mapping
                         low_cpu_mem_usage=True,  # Prevents meta device usage
                     )
                     
-                    # Ensure model is on CPU (should already be, but be explicit)
+                    # Ensure model is on target device (should already be, but verify)
                     if hasattr(model, 'to'):
                         model = model.to(target_device)
                     
@@ -86,37 +110,29 @@ class RobustEmbeddings:
                     except RuntimeError as move_error:
                         error_msg = str(move_error).lower()
                         if "meta tensor" in error_msg or "to_empty" in error_msg:
-                            # Model is on meta device - use to_empty() as PyTorch suggests
-                            logger.info("Detected meta device, using to_empty() to properly move model")
+                            # Model is on meta device - reload with explicit map_location
+                            logger.info("Detected meta device, reloading model with map_location to target device")
                             
-                            # Get model's device (should be meta)
-                            if hasattr(model, 'device'):
-                                current_device = model.device
-                            else:
-                                # Check first parameter's device
-                                first_param = next(model.parameters(), None)
-                                current_device = first_param.device if first_param is not None else None
+                            # Clean up the meta model
+                            del model
+                            import gc
+                            gc.collect()
                             
-                            # Use to_empty() to move from meta to CPU
-                            if hasattr(model, 'to_empty'):
-                                # Create empty model on target device
-                                model = model.to_empty(device=target_device)
-                                # Load state dict to populate it
-                                state_dict = model.state_dict()
-                                # Re-initialize with proper weights
-                                model.load_state_dict(state_dict, strict=False)
-                            else:
-                                # Fallback: reinitialize model directly on CPU
-                                logger.warning("to_empty() not available, reinitializing model on CPU")
-                                model = AutoModel.from_pretrained(
-                                    self.model_name,
-                                    torch_dtype=torch.float32,
-                                )
-                                # Force to CPU with explicit device placement
-                                for name, param in model.named_parameters():
-                                    param.data = param.data.to(target_device)
-                                for name, buffer in model.named_buffers():
-                                    buffer.data = buffer.data.to(target_device)
+                            # Reload with explicit map_location to prevent meta device
+                            # This is the most reliable way to avoid meta tensor issues
+                            model = AutoModel.from_pretrained(
+                                self.model_name,
+                                torch_dtype=torch.float32,
+                                map_location=target_device,  # Explicitly map to target device
+                            )
+                            
+                            # Verify model is on correct device
+                            first_param = next(model.parameters(), None)
+                            if first_param is not None:
+                                actual_device = first_param.device
+                                if actual_device != target_device:
+                                    logger.warning(f"Model loaded on {actual_device} instead of {target_device}, moving explicitly")
+                                    model = model.to(target_device)
                         else:
                             # Not a meta tensor error, re-raise
                             raise
@@ -137,11 +153,11 @@ class RobustEmbeddings:
                 try:
                     tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                     
-                    # Use map_location to force CPU loading and prevent meta device
+                    # Use map_location to force loading on target device and prevent meta device
                     model = AutoModel.from_pretrained(
                         self.model_name,
                         torch_dtype=torch.float32,
-                        map_location=str(target_device),  # Explicit map_location prevents meta device
+                        map_location=target_device,  # Explicit map_location prevents meta device
                     )
                     
                     # Create SentenceTransformer
@@ -174,10 +190,19 @@ class RobustEmbeddings:
                         original_model_name = self.model_name
                         # Try with fallback model (non-recursive to avoid infinite loops)
                         tokenizer = AutoTokenizer.from_pretrained(fallback_model)
+                        
+                        # Determine device_map based on target device
+                        if target_device.type == 'cuda':
+                            device_map = "cuda:0"
+                        elif target_device.type == 'mps':
+                            device_map = "mps"
+                        else:
+                            device_map = "cpu"
+                        
                         model = AutoModel.from_pretrained(
                             fallback_model,
                             torch_dtype=torch.float32,
-                            device_map="cpu",
+                            device_map=device_map,
                             low_cpu_mem_usage=True,
                         )
                         model = model.to(target_device)

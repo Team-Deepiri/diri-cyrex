@@ -16,7 +16,7 @@ router = APIRouter(prefix="/orchestration", tags=["orchestration"])
 
 class ProcessRequestInput(BaseModel):
     """Input for process request"""
-    user_input: str = Field(..., description="User's input/request")
+    user_input: str = Field(..., min_length=1, description="User's input/request")
     user_id: Optional[str] = Field(None, description="User identifier")
     workflow_id: Optional[str] = Field(None, description="Workflow ID for state tracking")
     use_rag: bool = Field(True, description="Whether to use RAG for context")
@@ -173,9 +173,17 @@ async def execute_workflow(
 async def get_status(
     orchestrator: WorkflowOrchestrator = Depends(get_orchestrator),
 ):
-    """Get orchestrator status"""
+    """Get orchestrator status - with timeout protection"""
+    import asyncio
     try:
-        return await orchestrator.get_status()
+        # Add an additional timeout wrapper as safety (10 seconds max)
+        return await asyncio.wait_for(orchestrator.get_status(), timeout=10.0)
+    except asyncio.TimeoutError:
+        logger.error("Status endpoint timed out after 10 seconds")
+        raise HTTPException(
+            status_code=504,
+            detail="Status check timed out. Some services may be slow or unavailable."
+        )
     except Exception as e:
         logger.error(f"Failed to get status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
