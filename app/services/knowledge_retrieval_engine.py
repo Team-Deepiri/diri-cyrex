@@ -57,13 +57,64 @@ class KnowledgeRetrievalEngine:
         self.vector_store_type = vector_store_type
         self.use_compression = use_compression
         
-        # Initialize embeddings
+        # Initialize embeddings with robust error handling for PyTorch meta tensor issues
         if embedding_model.startswith("sentence-transformers"):
-            self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+            embedding_initialized = False
+            last_embedding_error = None
+            
+            # Method 1: Try HuggingFaceEmbeddings if available
+            if HuggingFaceEmbeddings:
+                try:
+                    self.embeddings = HuggingFaceEmbeddings(model_name=embedding_model)
+                    logger.info(f"Using embedding model: {embedding_model} (HuggingFaceEmbeddings)")
+                    embedding_initialized = True
+                except Exception as e:
+                    last_embedding_error = e
+                    logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
+            
+            # Method 2: Use robust embeddings wrapper (bypasses HuggingFaceEmbeddings issues)
+            if not embedding_initialized:
+                try:
+                    from ..integrations.embeddings_wrapper import get_robust_embeddings
+                    self.embeddings = get_robust_embeddings(embedding_model)
+                    logger.info(f"Using embedding model: {embedding_model} (RobustEmbeddings wrapper)")
+                    embedding_initialized = True
+                except Exception as e2:
+                    last_embedding_error = e2
+                    logger.error(f"RobustEmbeddings initialization failed: {e2}")
+            
+            if not embedding_initialized:
+                raise RuntimeError(f"Failed to initialize embeddings after all attempts: {last_embedding_error}") from last_embedding_error
         else:
             if not settings.OPENAI_API_KEY:
                 logger.warning("OpenAI API key not set, using HuggingFace embeddings")
-                self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+                embedding_initialized = False
+                last_embedding_error = None
+                fallback_model = "sentence-transformers/all-MiniLM-L6-v2"
+                
+                # Method 1: Try HuggingFaceEmbeddings if available
+                if HuggingFaceEmbeddings:
+                    try:
+                        self.embeddings = HuggingFaceEmbeddings(model_name=fallback_model)
+                        logger.info(f"Using embedding model: {fallback_model} (HuggingFaceEmbeddings)")
+                        embedding_initialized = True
+                    except Exception as e:
+                        last_embedding_error = e
+                        logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
+                
+                # Method 2: Use robust embeddings wrapper (bypasses HuggingFaceEmbeddings issues)
+                if not embedding_initialized:
+                    try:
+                        from ..integrations.embeddings_wrapper import get_robust_embeddings
+                        self.embeddings = get_robust_embeddings(fallback_model)
+                        logger.info(f"Using embedding model: {fallback_model} (RobustEmbeddings wrapper)")
+                        embedding_initialized = True
+                    except Exception as e2:
+                        last_embedding_error = e2
+                        logger.error(f"RobustEmbeddings initialization failed: {e2}")
+                
+                if not embedding_initialized:
+                    raise RuntimeError(f"Failed to initialize embeddings after all attempts: {last_embedding_error}") from last_embedding_error
             else:
                 self.embeddings = OpenAIEmbeddings(api_key=settings.OPENAI_API_KEY)
         

@@ -375,7 +375,13 @@ Final Answer: the final answer to the original input question"""),
             if use_rag and self.vector_store:
                 try:
                     context_docs = await self.vector_store.asimilarity_search(user_input, k=4)
-                    context = "\n\n".join([doc.page_content for doc in context_docs])
+                    if context_docs:
+                        context = "\n\n".join([doc.page_content for doc in context_docs])
+                        self.logger.debug(f"Retrieved {len(context_docs)} documents for RAG context")
+                    else:
+                        # Empty collection - no documents indexed yet (this is fine)
+                        context = ""
+                        self.logger.debug("No documents found in vector store (collection may be empty - RAG disabled for this request)")
                 except Exception as e:
                     self.logger.warning(f"RAG retrieval failed: {e}")
                     context = ""

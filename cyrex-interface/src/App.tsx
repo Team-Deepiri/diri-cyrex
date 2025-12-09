@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import './App.css';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -10,7 +11,7 @@ type ChatMessage = {
 type TestResult = {
   endpoint: string;
   request: unknown;
-  response: unknown;
+  response?: React.ReactNode | null;
   duration: number;
   timestamp: string;
   success: boolean;
@@ -97,6 +98,13 @@ export default function App() {
   // Chat state
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [chatProvider, setChatProvider] = useState<'api' | 'local'>('api');
+  const [chatLocalLLMService, setChatLocalLLMService] = useState<string>('');
+  const [chatLocalLLMModel, setChatLocalLLMModel] = useState<string>('llama3:8b');
+  const [chatLocalLLMBackend, setChatLocalLLMBackend] = useState<string>('ollama');
+  const [chatMaxTokens, setChatMaxTokens] = useState<number>(200);
+  const [availableLLMServices, setAvailableLLMServices] = useState<Array<{name: string; type: string; base_url: string; models: string[]}>>([]);
+  const [scanningLLMServices, setScanningLLMServices] = useState(false);
 
   // Testing state
   const [testCategories, setTestCategories] = useState<Record<string, any>>({});
@@ -139,18 +147,49 @@ export default function App() {
       setLoading(path);
       setError(null);
       
+      // Determine timeout based on endpoint type
+      let timeoutMs = 5 * 60 * 1000; // Default 5 minutes
+      
+      // Discovery/scanning endpoints need more time
+      if (path.includes('/llm-services') || path.includes('/discover') || path.includes('/scan')) {
+        timeoutMs = 10 * 60 * 1000; // 10 minutes for discovery
+      }
+      // Chat/LLM generation endpoints
+      else if (path.includes('/process') || path.includes('/generate') || path.includes('/chat')) {
+        timeoutMs = 6 * 60 * 1000; // 6 minutes for LLM generation (allows for slow models)
+      }
+      // Status/health checks should be fast
+      else if (path.includes('/status') || path.includes('/health') || path.includes('/list')) {
+        timeoutMs = 30 * 1000; // 30 seconds for status checks
+      }
+      
       try {
+        // Create AbortController for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
         const res = await fetch(`${baseUrl}${path}`, {
           method,
           headers,
-          body: method !== 'GET' ? JSON.stringify(payload) : undefined
+          body: method !== 'GET' ? JSON.stringify(payload) : undefined,
+          signal: controller.signal
         });
+        
+        clearTimeout(timeoutId);
         
         const duration = Date.now() - startTime;
         const text = await res.text();
         
         if (!res.ok) {
-          throw new Error(`${res.status} ${res.statusText}: ${text}`);
+          // Try to parse error message from response
+          let errorDetail = text;
+          try {
+            const errorJson = JSON.parse(text);
+            errorDetail = errorJson.detail || errorJson.error || errorJson.message || text;
+          } catch {
+            // If not JSON, use text as-is
+          }
+          throw new Error(`${res.status} ${res.statusText}: ${errorDetail}`);
         }
         
         const json = text ? JSON.parse(text) : {};
@@ -159,7 +198,7 @@ export default function App() {
         const testResult: TestResult = {
           endpoint: path,
           request: payload,
-          response: json,
+          response: pretty(json) as React.ReactNode,
           duration,
           timestamp: new Date().toISOString(),
           success: true
@@ -169,7 +208,21 @@ export default function App() {
         return json;
       } catch (err: any) {
         const duration = Date.now() - startTime;
-        const errorMsg = err?.message ?? 'Unknown error';
+        let errorMsg = err?.message ?? 'Unknown error';
+        
+        // Handle abort/timeout errors with context-aware messages
+        if (err.name === 'AbortError' || errorMsg.includes('aborted')) {
+          if (path.includes('/llm-services') || path.includes('/discover')) {
+            errorMsg = 'Service discovery timed out after 10 minutes. Docker network scanning may be slow. Try again or check Docker network connectivity.';
+          } else if (path.includes('/process') || path.includes('/generate')) {
+            errorMsg = 'Request timed out after 6 minutes. The LLM may be slow. Try reducing max_tokens or using a faster model.';
+          } else if (path.includes('/status') || path.includes('/health') || path.includes('/list')) {
+            errorMsg = 'Request timed out after 30 seconds.';
+          } else {
+            errorMsg = 'Request timed out after 5 minutes.';
+          }
+        }
+        
         setError(errorMsg);
         
         // Record failed test
@@ -425,48 +478,170 @@ export default function App() {
     setChatInput('');
     
     try {
-      const result = await callEndpoint('/orchestration/process', {
+      const payload: any = {
         user_input: userMsg.content,
         user_id: 'chat-user',
         use_rag: true,
         use_tools: true
-      });
+      };
+      
+      // If using local LLM, add local LLM parameters
+      if (chatProvider === 'local') {
+        payload.force_local_llm = true;
+        payload.llm_backend = chatLocalLLMBackend;
+        payload.llm_model = chatLocalLLMModel;
+        payload.max_tokens = chatMaxTokens; // Use reduced tokens for faster response
+        // Get base_url from selected service
+        const selectedService = availableLLMServices.find(s => s.name === chatLocalLLMService);
+        if (selectedService) {
+          payload.llm_base_url = selectedService.base_url;
+        }
+      }
+      
+      const result = await callEndpoint('/orchestration/process', payload);
+      
+      // Handle different response formats
+      let responseText = 'No response';
+      let isError = false;
+      
+      if (!result || Object.keys(result).length === 0) {
+        responseText = 'Empty response received from server';
+        isError = true;
+      } else if ((result as any).success === false) {
+        // Error response from orchestrator
+        responseText = `Error: ${(result as any).error || 'Request failed'}`;
+        isError = true;
+      } else if ((result as any).error) {
+        // Error field present
+        responseText = `Error: ${(result as any).error}`;
+        isError = true;
+      } else if (typeof result === 'string') {
+        responseText = result;
+      } else if ((result as any).response) {
+        responseText = (result as any).response;
+      } else if ((result as any).message) {
+        responseText = (result as any).message;
+      } else if ((result as any).content) {
+        responseText = (result as any).content;
+      } else {
+        // Try to extract any text from the response
+        responseText = JSON.stringify(result, null, 2);
+      }
       
       const assistantMsg: ChatMessage = {
-        role: 'assistant',
-        content: (result as any).response || 'No response',
+        role: isError ? 'system' : 'assistant',
+        content: responseText,
         meta: result,
         timestamp: new Date().toISOString()
       };
       setChatHistory(prev => [...prev, assistantMsg]);
     } catch (err: any) {
+      let errorMessage = err.message || 'Unknown error';
+      
+      // Handle timeout errors more gracefully
+      if (errorMessage.includes('timeout') || errorMessage.includes('timed out')) {
+        errorMessage = `Request timed out. The LLM may be slow or unresponsive. Try reducing max_tokens or using a faster model.`;
+      }
+      
+      // Handle connection errors
+      if (errorMessage.includes('connection') || errorMessage.includes('connect')) {
+        errorMessage = `Connection failed. Make sure the LLM service is running and accessible.`;
+      }
+      
       setChatHistory(prev => [...prev, {
         role: 'system',
-        content: `Error: ${err.message}`,
+        content: `Error: ${errorMessage}`,
         timestamp: new Date().toISOString()
       }]);
     }
   };
 
-  // Testing functions
-  const loadTestList = async () => {
+  // Testing functions - wrapped in useCallback to avoid dependency issues
+  const loadTestList = useCallback(async () => {
     try {
-      const result = await callEndpoint('/testing/list', {}, 'GET');
-      setTestCategories((result as any).categories || {});
-      setTestFiles((result as any).files || {});
+      // Use separate fetch with short timeout for test list
+      // Don't use AbortController to avoid "signal is aborted" errors
+      const fetchPromise = fetch(`${baseUrl}/testing/list`, {
+        method: 'GET',
+        headers: headers || { 'Content-Type': 'application/json' }
+      });
+      
+      // Use Promise.race with timeout instead of AbortController
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), 5 * 1000)
+      );
+      
+      const res = await Promise.race([fetchPromise, timeoutPromise]);
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
+      const result = await res.json();
+      console.log('Test list loaded:', result);
+      console.log('Result type:', typeof result);
+      console.log('Result keys:', Object.keys(result || {}));
+      
+      // Handle both direct response and wrapped response
+      const categories = result?.categories || result?.data?.categories || {};
+      const files = result?.files || result?.data?.files || {};
+      
+      if (categories && Object.keys(categories).length > 0) {
+        setTestCategories(categories);
+        console.log('Set test categories:', Object.keys(categories));
+      } else {
+        console.warn('No categories found in response:', result);
+      }
+      
+      if (files && Object.keys(files).length > 0) {
+        setTestFiles(files);
+        console.log('Set test files:', Object.keys(files));
+      } else {
+        console.warn('No files found in response:', result);
+      }
     } catch (err: any) {
-      setError(`Failed to load test list: ${err.message}`);
+      // Don't show error for test list - it's optional
+      // Just log it and use empty defaults
+      console.warn('Failed to load test list:', err.message);
+      // Set empty defaults so UI doesn't break
+      setTestCategories({});
+      setTestFiles({});
     }
-  };
+  }, [baseUrl, headers]);
 
-  const loadTestStatus = async () => {
+  const loadTestStatus = useCallback(async () => {
     try {
-      const status = await callEndpoint('/testing/status', {}, 'GET');
+      // Use Promise.race with timeout instead of AbortController to avoid "signal is aborted" errors
+      const fetchPromise = fetch(`${baseUrl}/testing/status`, {
+        method: 'GET',
+        headers: headers || { 'Content-Type': 'application/json' }
+      });
+      
+      const timeoutPromise = new Promise<never>((_, reject) => 
+        setTimeout(() => reject(new Error('Request timeout')), 5 * 1000)
+      );
+      
+      const res = await Promise.race([fetchPromise, timeoutPromise]);
+      
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+      
+      const status = await res.json();
       setTestStatus(status);
     } catch (err: any) {
-      setError(`Failed to load test status: ${err.message}`);
+      // Don't set error for status checks - they're optional
+      // Just set a default status
+      console.warn('Failed to load test status:', err.message);
+      setTestStatus({
+        tests_dir_exists: false,
+        available_categories: 0,
+        available_files: 0,
+        status: 'error',
+        error: err.message || 'Failed to load status'
+      });
     }
-  };
+  }, [baseUrl, headers]);
 
   const runTestsStream = async () => {
     setTestRunning(true);
@@ -653,14 +828,43 @@ export default function App() {
     }
   };
 
+  // Scan for LLM services
+  const scanForLLMServices = useCallback(async () => {
+    setScanningLLMServices(true);
+    try {
+      const result = await callEndpoint('/orchestration/llm-services', {}, 'GET');
+      const services = (result as any)?.services || [];
+      setAvailableLLMServices(services);
+      
+      // Auto-select first service if available
+      if (services.length > 0 && !chatLocalLLMService) {
+        const firstService = services[0];
+        setChatLocalLLMService(firstService.name);
+        if (firstService.models && firstService.models.length > 0) {
+          setChatLocalLLMModel(firstService.models[0]);
+        }
+        if (firstService.type) {
+          setChatLocalLLMBackend(firstService.type);
+        }
+      }
+    } catch (err: any) {
+      setError(`Failed to scan for LLM services: ${err.message}`);
+    } finally {
+      setScanningLLMServices(false);
+    }
+  }, [callEndpoint, chatLocalLLMService]);
+
   useEffect(() => {
     loadSystemStatus();
     loadTools();
+    // Load test data immediately
     loadTestList();
     loadTestStatus();
+    // Scan for LLM services on mount
+    scanForLLMServices();
     const interval = setInterval(loadSystemStatus, 10000); // Refresh every 10s
     return () => clearInterval(interval);
-  }, [baseUrl, apiKey]);
+  }, [baseUrl, apiKey, scanForLLMServices, loadTestList, loadTestStatus]);
 
   const isLoading = (key: string) => loading === key;
 
@@ -672,9 +876,48 @@ export default function App() {
         borderBottom: '1px solid #333',
         position: 'sticky',
         top: 0,
-        zIndex: 100
+        zIndex: 100,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '1rem'
       }}>
-        <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 600 }}>Cyrex Testing Interface</h1>
+        <div style={{
+          background: 'rgba(26, 26, 26, 0.9)',
+          padding: '0.5rem',
+          borderRadius: '8px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: '1px solid rgba(255, 255, 255, 0.1)'
+        }}>
+          <img 
+            src="/logo.png" 
+            alt="Deepiri Logo" 
+            className="header-logo"
+            style={{
+              height: '2.5rem',
+              width: 'auto',
+              objectFit: 'contain',
+              filter: 'brightness(1.1) contrast(1.1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3))'
+            }}
+          />
+        </div>
+        <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 600 }}>
+          <span
+            className="cyrex-shimmer"
+            style={{
+              background: 'linear-gradient(90deg, #FFD700 0%, #FFA500 25%, #FFD700 50%, #FFA500 75%, #FFD700 100%)',
+              backgroundSize: '200% 100%',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              display: 'inline-block',
+            }}
+          >
+            Cyrex
+          </span>
+          {' Testing Interface'}
+        </h1>
         <p style={{ margin: '0.5rem 0 0', color: '#999', fontSize: '0.9rem' }}>
           Comprehensive testing dashboard for orchestration, local LLMs, RAG, tools, and workflows
         </p>
@@ -727,7 +970,7 @@ export default function App() {
           disabled={isLoading('/orchestration/status')}
           style={{
             padding: '0.5rem 1rem',
-            background: isLoading('/orchestration/status') ? '#444' : '#0066ff',
+            background: isLoading('/orchestration/status') ? '#444' : '#FFB84D',
             border: 'none',
             borderRadius: '4px',
             color: '#fff',
@@ -742,7 +985,14 @@ export default function App() {
       </section>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: '1px solid #333', background: '#151515' }}>
+      <div className="tab-container" style={{ 
+        display: 'flex', 
+        borderBottom: '1px solid #333', 
+        background: '#151515',
+        flexWrap: 'wrap',
+        overflowX: 'auto',
+        gap: '0.25rem'
+      }}>
         {[
           { id: 'testing', label: 'Testing', icon: '' },
           { id: 'orchestration', label: 'Orchestration', icon: '' },
@@ -760,14 +1010,17 @@ export default function App() {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
-              padding: '0.75rem 1.5rem',
-              background: activeTab === tab.id ? '#0066ff' : 'transparent',
+              padding: '0.75rem 1rem',
+              background: activeTab === tab.id ? '#FFB84D' : 'transparent',
               border: 'none',
-              borderBottom: activeTab === tab.id ? '2px solid #00aaff' : '2px solid transparent',
-              color: activeTab === tab.id ? '#fff' : '#999',
+              borderBottom: activeTab === tab.id ? '2px solid #FFA500' : '2px solid transparent',
+              color: activeTab === tab.id ? '#000' : '#999',
               cursor: 'pointer',
-              fontSize: '0.9rem',
-              fontWeight: activeTab === tab.id ? 600 : 400
+              fontSize: '0.85rem',
+              fontWeight: activeTab === tab.id ? 600 : 400,
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              transition: 'background 0.2s, color 0.2s'
             }}
           >
             {tab.label}
@@ -776,7 +1029,13 @@ export default function App() {
       </div>
 
       {/* Tab Content */}
-      <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto' }}>
+      <div style={{ 
+        padding: '1rem', 
+        maxWidth: '100%', 
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
+      }}>
         <React.Fragment>
           {/* Testing Tab */}
           {activeTab === 'testing' && (
@@ -937,7 +1196,7 @@ export default function App() {
                   disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
                   style={{
                     padding: '0.75rem 1.5rem',
-                    background: testRunning ? '#444' : '#0066ff',
+                    background: testRunning ? '#444' : '#FFB84D',
                     border: 'none',
                     borderRadius: '4px',
                     color: '#fff',
@@ -1053,7 +1312,7 @@ export default function App() {
                       borderRadius: '4px',
                       textAlign: 'center'
                     }}>
-                      <div style={{ fontSize: '2rem', fontWeight: 600, color: '#00aaff' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 600, color: '#FFB84D' }}>
                         {testSummary.duration}
                       </div>
                       <div style={{ color: '#999', fontSize: '0.9rem' }}>Duration</div>
@@ -1124,7 +1383,7 @@ export default function App() {
                       } else if (line.includes('WARNING')) {
                         color = '#ffaa00';
                       } else if (line.includes('test_') || line.includes('::')) {
-                        color = '#00aaff';
+                        color = '#FFB84D';
                       }
                       
                       return (
@@ -1134,7 +1393,7 @@ export default function App() {
                       );
                     })}
                     {testRunning && (
-                      <div style={{ color: '#00aaff', marginTop: '0.5rem' }}>
+                      <div style={{ color: '#FFB84D', marginTop: '0.5rem' }}>
                         Running...
                       </div>
                     )}
@@ -1143,14 +1402,14 @@ export default function App() {
               </div>
 
               {/* Test Status */}
-              {testStatus && (
-                <div style={{
-                  background: '#1a1a1a',
-                  padding: '1rem',
-                  borderRadius: '8px',
-                  border: '1px solid #333'
-                }}>
-                  <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
+              <div style={{
+                background: '#1a1a1a',
+                padding: '1rem',
+                borderRadius: '8px',
+                border: '1px solid #333'
+              }}>
+                <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
+                {testStatus ? (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
                     <div>
                       <span style={{ color: '#666' }}>Tests Dir:</span>{' '}
@@ -1160,15 +1419,22 @@ export default function App() {
                     </div>
                     <div>
                       <span style={{ color: '#666' }}>Categories:</span>{' '}
-                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories?.length || 0}</span>
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories || testStatus.categories?.length || 0}</span>
                     </div>
                     <div>
                       <span style={{ color: '#666' }}>Files:</span>{' '}
-                      <span style={{ color: '#00aaff' }}>{testStatus.available_files?.length || 0}</span>
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_files || testStatus.files?.length || 0}</span>
                     </div>
+                    {testStatus.status === 'error' && testStatus.error && (
+                      <div style={{ gridColumn: '1 / -1', color: '#ff4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                        Error: {testStatus.error}
+                      </div>
+                    )}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div style={{ color: '#666', fontSize: '0.85rem' }}>Loading status...</div>
+                )}
+              </div>
 
               {error && (
                 <div style={{
@@ -1230,7 +1496,7 @@ export default function App() {
                   disabled={isLoading('/orchestration/process')}
                   style={{
                     padding: '0.75rem 1.5rem',
-                    background: '#0066ff',
+                    background: '#FFB84D',
                     border: 'none',
                     borderRadius: '4px',
                     color: '#fff',
@@ -1506,7 +1772,7 @@ export default function App() {
                     disabled={isLoading('/rag/query')}
                     style={{
                       padding: '0.75rem 1.5rem',
-                      background: '#0066ff',
+                      background: '#FFB84D',
                       border: 'none',
                       borderRadius: '4px',
                       color: '#fff',
@@ -1597,7 +1863,7 @@ export default function App() {
                     disabled={isLoading('/orchestration/status')}
                     style={{
                       padding: '0.75rem 1.5rem',
-                      background: '#0066ff',
+                      background: '#FFB84D',
                       border: 'none',
                       borderRadius: '4px',
                       color: '#fff',
@@ -1685,7 +1951,7 @@ export default function App() {
                     disabled={!toolName || isLoading('/orchestration/process')}
                     style={{
                       padding: '0.75rem 1.5rem',
-                      background: '#0066ff',
+                      background: '#FFB84D',
                       border: 'none',
                       borderRadius: '4px',
                       color: '#fff',
@@ -1782,7 +2048,7 @@ export default function App() {
                   disabled={isLoading('/orchestration/workflow')}
                   style={{
                     padding: '0.75rem 1.5rem',
-                    background: '#0066ff',
+                    background: '#FFB84D',
                     border: 'none',
                     borderRadius: '4px',
                     color: '#fff',
@@ -1939,6 +2205,200 @@ export default function App() {
           {activeTab === 'chat' && (
             <div>
             <h2 style={{ marginTop: 0 }}>Interactive Chat</h2>
+            
+            {/* Provider Selection */}
+            <div style={{
+              background: '#1a1a1a',
+              padding: '1rem',
+              borderRadius: '4px',
+              border: '1px solid #333',
+              marginBottom: '1rem'
+            }}>
+              <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Provider Configuration</h3>
+              <div style={{ display: 'grid', gap: '1rem' }}>
+                <div>
+                  <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                    Provider
+                  </label>
+                  <select
+                    value={chatProvider}
+                    onChange={(e) => setChatProvider(e.target.value as 'api' | 'local')}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      background: '#222',
+                      border: '1px solid #444',
+                      borderRadius: '4px',
+                      color: '#e0e0e0'
+                    }}
+                  >
+                    <option value="api">API Key (OpenAI/Cloud)</option>
+                    <option value="local">Local LLM (Ollama/LocalAI)</option>
+                  </select>
+                </div>
+                
+                {chatProvider === 'local' && (
+                  <>
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        onClick={scanForLLMServices}
+                        disabled={scanningLLMServices}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          background: scanningLLMServices ? '#444' : '#FFB84D',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: scanningLLMServices ? 'not-allowed' : 'pointer',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        {scanningLLMServices ? 'Scanning...' : '🔍 Scan for Services'}
+                      </button>
+                      <span style={{ color: '#999', fontSize: '0.85rem' }}>
+                        {availableLLMServices.length} service(s) found
+                      </span>
+                    </div>
+                    
+                    {availableLLMServices.length > 0 && (
+                      <>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Service
+                          </label>
+                          <select
+                            value={chatLocalLLMService}
+                            onChange={(e) => {
+                              setChatLocalLLMService(e.target.value);
+                              const service = availableLLMServices.find(s => s.name === e.target.value);
+                              if (service) {
+                                if (service.models && service.models.length > 0) {
+                                  setChatLocalLLMModel(service.models[0]);
+                                }
+                                if (service.type) {
+                                  setChatLocalLLMBackend(service.type);
+                                }
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          >
+                            {availableLLMServices.map(service => (
+                              <option key={service.name} value={service.name}>
+                                {service.name} ({service.type}) - {service.base_url}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Backend
+                          </label>
+                          <select
+                            value={chatLocalLLMBackend}
+                            onChange={(e) => setChatLocalLLMBackend(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          >
+                            <option value="ollama">Ollama</option>
+                            <option value="llama_cpp">llama.cpp</option>
+                            <option value="transformers">Transformers</option>
+                          </select>
+                        </div>
+                        
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Model
+                          </label>
+                          {(() => {
+                            const selectedService = availableLLMServices.find(s => s.name === chatLocalLLMService);
+                            const models = selectedService?.models || [];
+                            
+                            if (models.length > 0) {
+                              return (
+                                <select
+                                  value={chatLocalLLMModel}
+                                  onChange={(e) => setChatLocalLLMModel(e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    padding: '0.75rem',
+                                    background: '#222',
+                                    border: '1px solid #444',
+                                    borderRadius: '4px',
+                                    color: '#e0e0e0'
+                                  }}
+                                >
+                                  {models.map(model => (
+                                    <option key={model} value={model}>{model}</option>
+                                  ))}
+                                </select>
+                              );
+                            } else {
+                              return (
+                                <input
+                                  value={chatLocalLLMModel}
+                                  onChange={(e) => setChatLocalLLMModel(e.target.value)}
+                                  placeholder="llama3:8b"
+                                  style={{
+                                    width: '100%',
+                                    padding: '0.75rem',
+                                    background: '#222',
+                                    border: '1px solid #444',
+                                    borderRadius: '4px',
+                                    color: '#e0e0e0'
+                                  }}
+                                />
+                              );
+                            }
+                          })()}
+                        </div>
+                        
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Max Tokens (lower = faster, default: 200)
+                          </label>
+                          <input
+                            type="number"
+                            value={chatMaxTokens}
+                            onChange={(e) => setChatMaxTokens(Number(e.target.value))}
+                            min="50"
+                            max="2000"
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          />
+                        </div>
+                      </>
+                    )}
+                    
+                    {availableLLMServices.length === 0 && !scanningLLMServices && (
+                      <div style={{ color: '#ffaa00', fontSize: '0.85rem', padding: '0.5rem', background: '#ffaa0020', borderRadius: '4px' }}>
+                        No local LLM services found. Click "Scan for Services" to discover services on the Docker network.
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+            
             <div style={{
               background: '#1a1a1a',
               border: '1px solid #333',
@@ -1946,7 +2406,9 @@ export default function App() {
               padding: '1rem',
               minHeight: '400px',
               display: 'flex',
-              flexDirection: 'column'
+              flexDirection: 'column',
+              width: '100%',
+              boxSizing: 'border-box'
             }}>
               <div style={{ flex: 1, overflow: 'auto', marginBottom: '1rem' }}>
                 {chatHistory.length === 0 && (
@@ -1960,15 +2422,15 @@ export default function App() {
                     style={{
                       marginBottom: '1rem',
                       padding: '0.75rem',
-                      background: msg.role === 'user' ? '#0066ff20' : msg.role === 'assistant' ? '#00aa0020' : '#ff660020',
+                      background: msg.role === 'user' ? '#FFB84D20' : msg.role === 'assistant' ? '#00aa0020' : '#ff660020',
                       borderRadius: '4px',
                       borderLeft: `3px solid ${
-                        msg.role === 'user' ? '#0066ff' : msg.role === 'assistant' ? '#00aa00' : '#ff6600'
+                        msg.role === 'user' ? '#FFB84D' : msg.role === 'assistant' ? '#00aa00' : '#ff6600'
                       }`
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <strong style={{ color: msg.role === 'user' ? '#0066ff' : msg.role === 'assistant' ? '#00aa00' : '#ff6600' }}>
+                      <strong style={{ color: msg.role === 'user' ? '#FFB84D' : msg.role === 'assistant' ? '#00aa00' : '#ff6600' }}>
                         {msg.role.toUpperCase()}
                       </strong>
                       {msg.timestamp && (
@@ -2016,7 +2478,7 @@ export default function App() {
                   disabled={!chatInput.trim() || isLoading('/orchestration/process')}
                   style={{
                     padding: '0.75rem 1.5rem',
-                    background: '#0066ff',
+                    background: '#FFB84D',
                     border: 'none',
                     borderRadius: '4px',
                     color: '#fff',
@@ -2035,9 +2497,18 @@ export default function App() {
           {activeTab === 'history' && (
             <div>
             <h2 style={{ marginTop: 0 }}>Test History</h2>
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
+            <div style={{ 
+              display: 'grid', 
+              gap: '0.5rem',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))'
+            }}>
               {testHistory.length === 0 && (
-                <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                <div style={{ 
+                  color: '#666', 
+                  textAlign: 'center', 
+                  padding: '2rem',
+                  gridColumn: '1 / -1'
+                }}>
                   No tests run yet. Start testing to see history here.
                 </div>
               )}
@@ -2048,14 +2519,32 @@ export default function App() {
                     background: test.success ? '#00aa0020' : '#ff444420',
                     border: `1px solid ${test.success ? '#00aa00' : '#ff4444'}`,
                     borderRadius: '4px',
-                    padding: '1rem'
+                    padding: '1rem',
+                    minWidth: 0,
+                    overflow: 'hidden'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <strong style={{ color: test.success ? '#00aa00' : '#ff4444' }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    marginBottom: '0.5rem',
+                    flexWrap: 'wrap',
+                    gap: '0.5rem'
+                  }}>
+                    <strong style={{ 
+                      color: test.success ? '#00aa00' : '#ff4444',
+                      wordBreak: 'break-word',
+                      flex: '1 1 auto',
+                      minWidth: 0
+                    }}>
                       {test.endpoint}
                     </strong>
-                    <span style={{ color: '#999', fontSize: '0.85rem' }}>
+                    <span style={{ 
+                      color: '#999', 
+                      fontSize: '0.85rem',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
+                    }}>
                       {test.duration}ms | {new Date(test.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
@@ -2080,7 +2569,7 @@ export default function App() {
                           {pretty(test.request)}
                         </pre>
                       </div>
-                      {test.response && (
+                      {test.response != null && (
                         <div>
                           <strong style={{ color: '#999', fontSize: '0.85rem' }}>Response:</strong>
                           <pre style={{
@@ -2091,7 +2580,7 @@ export default function App() {
                             overflow: 'auto',
                             maxHeight: '200px'
                           }}>
-                            {pretty(test.response)}
+                            {test.response}
                           </pre>
                         </div>
                       )}

@@ -24,6 +24,7 @@ class ProcessRequestInput(BaseModel):
     force_local_llm: bool = Field(False, description="Force use of local LLM instead of OpenAI")
     llm_backend: Optional[str] = Field(None, description="Local LLM backend (ollama, llama_cpp, transformers)")
     llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., llama3:8b)")
+    llm_base_url: Optional[str] = Field(None, description="Local LLM base URL (e.g., http://ollama:11434)")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate (default: 500 for local LLM, 2000 for OpenAI)")
 
 
@@ -59,12 +60,16 @@ async def process_request(
             
             try:
                 backend = LLMBackend(backend_str)
-                # Pass max_tokens if provided, otherwise use default (300 for local LLM on CPU)
-                max_tokens_for_llm = input.max_tokens if input.max_tokens else 300
+                # Pass max_tokens if provided, otherwise use default (200 for local LLM on CPU - faster responses)
+                max_tokens_for_llm = input.max_tokens if input.max_tokens else 200
+                # Use provided base_url or fall back to settings
+                base_url = input.llm_base_url
+                if not base_url and backend == LLMBackend.OLLAMA:
+                    base_url = settings.OLLAMA_BASE_URL
                 local_llm = get_local_llm(
                     backend=backend.value,
                     model_name=model_str,
-                    base_url=settings.OLLAMA_BASE_URL if backend == LLMBackend.OLLAMA else None,
+                    base_url=base_url,
                     max_tokens=max_tokens_for_llm,
                 )
                 
@@ -81,11 +86,18 @@ async def process_request(
                             use_tools=input.use_tools,
                             max_tokens=max_tokens_for_llm,
                         )
+                        # Check if result indicates failure
+                        if isinstance(result, dict) and result.get("success") is False:
+                            error_msg = result.get("error", "Unknown error")
+                            raise HTTPException(
+                                status_code=500,
+                                detail=error_msg
+                        )
                         return result
                     except TimeoutError as e:
                         raise HTTPException(
                             status_code=504,
-                            detail=f"Local LLM ({backend_str}) request timed out. The LLM may be slow or unresponsive. Error: {str(e)}"
+                            detail=f"Local LLM ({backend_str}) request timed out after 120 seconds. The model may be too slow or unresponsive. Try reducing max_tokens or using a faster model. Error: {str(e)}"
                         )
                     except Exception as e:
                         error_msg = str(e)
@@ -122,6 +134,13 @@ async def process_request(
             workflow_id=input.workflow_id,
             use_rag=input.use_rag,
             use_tools=input.use_tools,
+        )
+        # Check if result indicates failure
+        if isinstance(result, dict) and result.get("success") is False:
+            error_msg = result.get("error", "Unknown error")
+            raise HTTPException(
+                status_code=500,
+                detail=error_msg
         )
         return result
     except HTTPException:
@@ -179,3 +198,38 @@ async def get_workflow_state(
         logger.error(f"Failed to get workflow state: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@router.get("/llm-services")
+async def discover_llm_services():
+    """Discover available local LLM services on Docker network"""
+    import asyncio
+    try:
+        from ..utils.docker_scanner import scan_docker_network
+        
+        # Run scanning in executor with timeout to prevent hanging
+        loop = asyncio.get_event_loop()
+        services = await asyncio.wait_for(
+            loop.run_in_executor(None, scan_docker_network),
+            timeout=60.0  # 60 second timeout for scanning
+        )
+        
+        return {
+            "services": services,
+            "count": len(services)
+        }
+    except asyncio.TimeoutError:
+        logger.warning("Docker network scanning timed out after 60 seconds")
+        # Return empty list instead of error - scanning is optional
+        return {
+            "services": [],
+            "count": 0,
+            "warning": "Service discovery timed out. Services may still be available."
+        }
+    except Exception as e:
+        logger.error(f"Failed to discover LLM services: {e}", exc_info=True)
+        # Return empty list instead of error - scanning is optional
+        return {
+            "services": [],
+            "count": 0,
+            "error": str(e)
+        }
