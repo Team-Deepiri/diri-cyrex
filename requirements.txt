@@ -72,7 +72,13 @@ langchain-openai==0.1.22
 langchain-milvus==0.1.4
 langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
 langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
+langchain-classic>=0.0.20  # Provides deprecated AgentExecutor and other legacy functionality for LangChain 0.2.x
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
+
+# LangGraph for multi-agent workflows and stateful orchestration
+# Compatible with langchain-core 0.2.x
+#langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows
+#langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
 ollama>=0.1.0  # Ollama API client for local models
