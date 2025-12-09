@@ -21,8 +21,33 @@ logger = get_logger("cyrex.testing_api")
 router = APIRouter(prefix="/testing", tags=["testing"])
 
 # Get project root directory
+# In Docker: __file__ is /app/app/routes/testing_api.py, so parent.parent.parent = /app/
+# In local: __file__ is .../diri-cyrex/app/routes/testing_api.py, so parent.parent.parent = .../diri-cyrex/
 PROJECT_ROOT = Path(__file__).parent.parent.parent.absolute()
-TESTS_DIR = PROJECT_ROOT / "tests"
+APP_DIR = Path(__file__).parent.parent.absolute()  # /app/app or .../diri-cyrex/app
+
+# Try multiple possible locations for tests directory
+# 1. Sibling to app directory (Docker: /app/tests, Local: .../diri-cyrex/tests)
+# 2. Inside app directory (Local fallback: .../diri-cyrex/app/tests)
+# 3. At project root (Docker: /app/tests, Local: .../diri-cyrex/tests)
+possible_test_dirs = [
+    APP_DIR.parent / "tests",  # Most common: sibling to app/
+    APP_DIR / "tests",  # Fallback: inside app/
+    PROJECT_ROOT / "tests",  # At project root
+]
+
+# Find the first existing tests directory
+TESTS_DIR = None
+for test_dir in possible_test_dirs:
+    if test_dir.exists() and test_dir.is_dir():
+        TESTS_DIR = test_dir
+        logger.info(f"Found tests directory at: {TESTS_DIR}")
+        break
+
+# If none found, default to the most likely location (sibling to app/)
+if TESTS_DIR is None:
+    TESTS_DIR = APP_DIR.parent / "tests"
+    logger.warning(f"Tests directory not found in any expected location. Defaulting to: {TESTS_DIR}")
 
 # Test categories and their files (from run_tests.py)
 TEST_CATEGORIES = {
@@ -107,11 +132,23 @@ class TestListResponse(BaseModel):
 
 @router.get("/list", response_model=TestListResponse)
 async def list_tests():
-    """List all available test categories and files"""
-    return TestListResponse(
-        categories=TEST_CATEGORIES,
-        files=TEST_FILES
-    )
+    """List all available test categories and files - fast endpoint, returns static data"""
+    try:
+        logger.info(f"Returning test list: {len(TEST_CATEGORIES)} categories, {len(TEST_FILES)} files")
+        response = TestListResponse(
+            categories=TEST_CATEGORIES,
+            files=TEST_FILES
+        )
+        logger.debug(f"Response categories keys: {list(response.categories.keys())}")
+        logger.debug(f"Response files keys: {list(response.files.keys())}")
+        return response
+    except Exception as e:
+        logger.error(f"Error in list_tests: {e}", exc_info=True)
+        # Return empty response on error rather than failing
+        return TestListResponse(
+            categories={},
+            files={}
+        )
 
 
 @router.post("/run")
@@ -143,6 +180,13 @@ async def run_tests(request: TestRunRequest):
             # Default to all tests
             test_files = TEST_CATEGORIES["all"]["files"]
         
+        # Check if tests directory exists
+        if not TESTS_DIR.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Tests directory not found at {TESTS_DIR}. Please create the tests directory and add test files."
+            )
+        
         # Build pytest command
         cmd = ["python3", "-m", "pytest"]
         
@@ -165,6 +209,13 @@ async def run_tests(request: TestRunRequest):
                 resolved_path = Path(PROJECT_ROOT / file_path).resolve()
                 if resolved_path.exists():
                     resolved_files.append(file_path)
+        
+        # Check if any test files were found
+        if not resolved_files:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No test files found. Requested: {test_files}. Tests directory exists: {TESTS_DIR.exists()}"
+            )
         
         if not resolved_files:
             if TESTS_DIR.exists():
@@ -278,6 +329,11 @@ async def run_tests_stream(request: TestRunRequest):
             else:
                 test_files = TEST_CATEGORIES["all"]["files"]
             
+            # Check if tests directory exists
+            if not TESTS_DIR.exists():
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Tests directory not found at {TESTS_DIR}. Please create the tests directory and add test files.'})}\n\n"
+                return
+            
             # Build pytest command
             cmd = ["python3", "-m", "pytest"]
             
@@ -301,12 +357,10 @@ async def run_tests_stream(request: TestRunRequest):
                     if resolved_path.exists():
                         resolved_files.append(file_path)
             
+            # Check if any test files were found
             if not resolved_files:
-                if TESTS_DIR.exists():
-                    resolved_files = ["tests/"]
-                else:
-                    yield f"data: {json.dumps({'type': 'error', 'message': 'No test files found'})}\n\n"
-                    return
+                yield f"data: {json.dumps({'type': 'error', 'message': f'No test files found. Requested: {test_files}. Tests directory exists: {TESTS_DIR.exists()}'})}\n\n"
+                return
             
             cmd.extend(resolved_files)
             
@@ -380,12 +434,20 @@ async def run_tests_stream(request: TestRunRequest):
 
 @router.get("/status")
 async def get_test_status():
-    """Get status of test infrastructure"""
+    """Get status of test infrastructure - fast endpoint, no blocking operations"""
+    # Fast synchronous check - no async operations that could block
+    tests_dir_exists = TESTS_DIR.exists()
+    
+    # Return immediately with available metadata
+    # Don't scan for files as that could be slow
     return {
         "project_root": str(PROJECT_ROOT),
-        "tests_dir_exists": TESTS_DIR.exists(),
+        "tests_dir_exists": tests_dir_exists,
         "tests_dir": str(TESTS_DIR),
-        "available_categories": list(TEST_CATEGORIES.keys()),
-        "available_files": list(TEST_FILES.keys())
+        "available_categories": list(TEST_CATEGORIES.keys()),  # Return array, not count
+        "available_files": list(TEST_FILES.keys()),  # Return array, not count
+        "categories": list(TEST_CATEGORIES.keys()),
+        "files": list(TEST_FILES.keys()),
+        "status": "ok"
     }
 

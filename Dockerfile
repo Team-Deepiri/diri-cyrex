@@ -376,6 +376,9 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 # Copy application code
 COPY app /app/app
 
+# Copy tests directory (if it exists)
+COPY tests /app/tests
+
 # Switch to non-root user
 USER appuser
 
@@ -546,6 +549,9 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 
 # Copy application code
 COPY app /app/app
+
+# Copy tests directory (if it exists)
+COPY tests /app/tests
 
 # Switch to non-root user
 USER appuser

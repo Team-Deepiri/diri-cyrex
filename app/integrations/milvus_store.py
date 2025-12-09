@@ -76,23 +76,51 @@ class MilvusVectorStore:
         self.host = host or settings.MILVUS_HOST
         self.port = port or settings.MILVUS_PORT
         
-        # Initialize embeddings
+        # Initialize embeddings with robust error handling for PyTorch meta tensor issues
         if embedding_model:
             self.embeddings = embedding_model
         else:
-            if not HuggingFaceEmbeddings:
-                raise ImportError("HuggingFaceEmbeddings not available. Install langchain-huggingface (recommended) or langchain-community.")
             model_name = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-            self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
-            logger.info(f"Using embedding model: {model_name} (langchain-huggingface)")
+            
+            embedding_initialized = False
+            last_error = None
+            
+            # Method 1: Try HuggingFaceEmbeddings if available
+            if HuggingFaceEmbeddings:
+                try:
+                    self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+                    logger.info(f"Using embedding model: {model_name} (HuggingFaceEmbeddings)")
+                    embedding_initialized = True
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
+            
+            # Method 2: Use robust embeddings wrapper (bypasses HuggingFaceEmbeddings issues)
+            if not embedding_initialized:
+                try:
+                    from .embeddings_wrapper import get_robust_embeddings
+                    self.embeddings = get_robust_embeddings(model_name)
+                    logger.info(f"Using embedding model: {model_name} (RobustEmbeddings wrapper)")
+                    embedding_initialized = True
+                except Exception as e2:
+                    last_error = e2
+                    logger.error(f"RobustEmbeddings initialization failed: {e2}")
+            
+            if not embedding_initialized:
+                raise RuntimeError(f"Failed to initialize embeddings after all attempts: {last_error}") from last_error
         
         # Get embedding dimension
         if dimension:
             self.dimension = dimension
         else:
             # Test embedding to get dimension
-            test_embedding = self.embeddings.embed_query("test")
-            self.dimension = len(test_embedding)
+            try:
+                test_embedding = self.embeddings.embed_query("test")
+                self.dimension = len(test_embedding)
+            except Exception as e:
+                # If test embedding fails, use default dimension for all-MiniLM-L6-v2
+                logger.warning(f"Failed to get embedding dimension from test query: {e}, using default 384")
+                self.dimension = 384  # Default dimension for all-MiniLM-L6-v2
         
         # Try to connect to Milvus - fallback to in-memory if unavailable
         if not HAS_PYMILVUS or not connections:
@@ -163,22 +191,87 @@ class MilvusVectorStore:
             # Try new langchain_milvus package first, fallback to deprecated Milvus
             try:
                 from langchain_milvus import Milvus as MilvusVectorStore
-                # Explicitly pass connection_args with host and port to prevent localhost default
-                connection_args = {
-                    "host": self.host,  # Explicitly set host (not localhost)
-                    "port": self.port,
-                    "timeout": 10.0,  # Increased timeout for better reliability
-                }
-                logger.debug(f"Initializing LangChain Milvus wrapper with connection_args: {connection_args}")
+                # langchain_milvus creates MilvusClient internally which may need uri or connection_args
+                # Try both uri and connection_args approaches
+                logger.debug(f"Initializing LangChain Milvus wrapper with host={self.host}, port={self.port}")
                 
-                self.langchain_store = MilvusVectorStore(
-                    embedding_function=self.embeddings,
-                    connection_args=connection_args,
-                    collection_name=self.collection_name,
-                    vector_field="embedding",  # Use our field name, not default "vector"
-                    auto_id=True,
-                )
-                logger.info(f"LangChain Milvus wrapper initialized successfully with host={self.host}, port={self.port}")
+                # Ensure connection is established before creating wrapper
+                # The wrapper might create its own connection, so we ensure ours is ready
+                self._ensure_connection()
+                
+                # Try to initialize the wrapper - it may create its own connection
+                # If it fails (e.g., defaults to localhost), we'll catch and use fallback
+                # Try multiple connection methods since langchain_milvus API may vary
+                wrapper_initialized = False
+                last_error = None
+                
+                # Method 1: Try with uri parameter (MilvusClient supports this)
+                if not wrapper_initialized:
+                    try:
+                        uri = f"http://{self.host}:{self.port}"
+                        self.langchain_store = MilvusVectorStore(
+                            embedding_function=self.embeddings,
+                            uri=uri,
+                            collection_name=self.collection_name,
+                            vector_field="embedding",  # Use our field name, not default "vector"
+                            auto_id=True,
+                        )
+                        logger.info(f"LangChain Milvus wrapper initialized successfully with uri={uri}")
+                        wrapper_initialized = True
+                    except (TypeError, ValueError) as uri_err:
+                        # Parameter error - uri not supported, try next method
+                        logger.debug(f"uri parameter not supported, trying connection_args: {uri_err}")
+                        last_error = uri_err
+                    except Exception as uri_err:
+                        # Connection error - check if it's a localhost issue
+                        error_msg = str(uri_err).lower()
+                        if "localhost" in error_msg:
+                            logger.debug(f"uri method connected to localhost instead of {self.host}, trying connection_args: {uri_err}")
+                            last_error = uri_err
+                        else:
+                            # Other error, but might still work with different method
+                            logger.debug(f"uri method failed, trying connection_args: {uri_err}")
+                            last_error = uri_err
+                
+                # Method 2: Try with connection_args
+                if not wrapper_initialized:
+                    try:
+                        connection_args = {
+                            "host": self.host,  # Explicitly set host (not localhost)
+                            "port": self.port,
+                            "timeout": 10.0,  # Increased timeout for better reliability
+                        }
+                        self.langchain_store = MilvusVectorStore(
+                            embedding_function=self.embeddings,
+                            connection_args=connection_args,
+                            collection_name=self.collection_name,
+                            vector_field="embedding",  # Use our field name, not default "vector"
+                            auto_id=True,
+                        )
+                        logger.info(f"LangChain Milvus wrapper initialized successfully with connection_args (host={self.host}, port={self.port})")
+                        wrapper_initialized = True
+                    except Exception as conn_args_err:
+                        error_msg = str(conn_args_err).lower()
+                        if "localhost" in error_msg:
+                            logger.debug(f"connection_args connected to localhost instead of {self.host}, trying host/port: {conn_args_err}")
+                        else:
+                            logger.debug(f"connection_args failed, trying host/port parameters: {conn_args_err}")
+                        last_error = conn_args_err
+                
+                # Method 3: Removed - langchain_milvus.Milvus doesn't support host/port as separate parameters
+                
+                # If all methods failed, raise the last error
+                if not wrapper_initialized:
+                    if last_error:
+                        error_msg = str(last_error).lower()
+                        if "localhost" in error_msg or "closed channel" in error_msg or "connection" in error_msg:
+                            logger.warning(f"LangChain Milvus wrapper failed to connect (may be using wrong host or channel closed). Error: {last_error}")
+                        else:
+                            logger.warning(f"LangChain Milvus wrapper initialization failed: {last_error}")
+                        raise last_error  # Re-raise to be caught by outer except block
+                    else:
+                        # Should not happen, but handle gracefully
+                        raise RuntimeError("Failed to initialize LangChain Milvus wrapper: all connection methods failed")
             except ImportError:
                 # Fallback to deprecated version - it expects "vector" field by default
                 # We'll create the collection ourselves and let LangChain use it
@@ -337,8 +430,9 @@ class MilvusVectorStore:
         self._ensure_connection()
         
         try:
+            results = []
             if self.langchain_store:
-                return self.langchain_store.similarity_search(
+                results = self.langchain_store.similarity_search(
                     query=query,
                     k=k,
                     filter=filter,
@@ -347,20 +441,41 @@ class MilvusVectorStore:
             else:
                 # Fallback to in-memory if LangChain wrapper not available
                 logger.warning("LangChain wrapper not available, using in-memory fallback")
-                return self._memory_docs[:k]
+                results = self._memory_docs[:k]
+            
+            # Handle empty collection gracefully (no documents indexed yet)
+            if not results:
+                logger.debug(f"No documents found in collection '{self.collection_name}' (collection may be empty)")
+                return []
+            
+            return results
         except Exception as e:
+            error_msg = str(e).lower()
+            # Check if it's an empty collection error (not a connection error)
+            if "empty" in error_msg or "no entities" in error_msg or "collection is empty" in error_msg:
+                logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
+                return []
+            
             logger.error(f"Similarity search failed: {e}", exc_info=True)
             # Try to reconnect and retry once
             try:
                 self._ensure_connection()
                 if self.langchain_store:
-                    return self.langchain_store.similarity_search(
+                    results = self.langchain_store.similarity_search(
                         query=query,
                         k=k,
                         filter=filter,
                         **kwargs
                     )
+                    if not results:
+                        logger.debug(f"No documents found in collection '{self.collection_name}' after retry")
+                        return []
+                    return results
             except Exception as retry_error:
+                retry_error_msg = str(retry_error).lower()
+                if "empty" in retry_error_msg or "no entities" in retry_error_msg:
+                    logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
+                    return []
                 logger.error(f"Similarity search retry failed: {retry_error}")
             # Fallback to in-memory
             return self._memory_docs[:k]
@@ -381,8 +496,9 @@ class MilvusVectorStore:
         self._ensure_connection()
         
         try:
+            results = []
             if self.langchain_store and hasattr(self.langchain_store, 'asimilarity_search'):
-                return await self.langchain_store.asimilarity_search(
+                results = await self.langchain_store.asimilarity_search(
                     query=query,
                     k=k,
                     filter=filter,
@@ -390,7 +506,7 @@ class MilvusVectorStore:
                 )
             elif self.langchain_store:
                 import asyncio
-                return await asyncio.to_thread(
+                results = await asyncio.to_thread(
                     self.similarity_search,
                     query=query,
                     k=k,
@@ -400,20 +516,41 @@ class MilvusVectorStore:
             else:
                 # Fallback to in-memory if LangChain wrapper not available
                 logger.warning("LangChain wrapper not available, using in-memory fallback")
-                return self._memory_docs[:k]
+                results = self._memory_docs[:k]
+            
+            # Handle empty collection gracefully (no documents indexed yet)
+            if not results:
+                logger.debug(f"No documents found in collection '{self.collection_name}' (collection may be empty)")
+                return []
+            
+            return results
         except Exception as e:
+            error_msg = str(e).lower()
+            # Check if it's an empty collection error (not a connection error)
+            if "empty" in error_msg or "no entities" in error_msg or "collection is empty" in error_msg:
+                logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
+                return []
+            
             logger.error(f"Async similarity search failed: {e}", exc_info=True)
             # Try to reconnect and retry once
             try:
                 self._ensure_connection()
                 if self.langchain_store and hasattr(self.langchain_store, 'asimilarity_search'):
-                    return await self.langchain_store.asimilarity_search(
+                    results = await self.langchain_store.asimilarity_search(
                         query=query,
                         k=k,
                         filter=filter,
                         **kwargs
                     )
+                    if not results:
+                        logger.debug(f"No documents found in collection '{self.collection_name}' after retry")
+                        return []
+                    return results
             except Exception as retry_error:
+                retry_error_msg = str(retry_error).lower()
+                if "empty" in retry_error_msg or "no entities" in retry_error_msg:
+                    logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
+                    return []
                 logger.error(f"Async similarity search retry failed: {retry_error}")
             # Fallback to in-memory
             return self._memory_docs[:k]
@@ -486,6 +623,64 @@ class MilvusVectorStore:
                 # Fallback: wrap in RunnableLambda if BaseRetriever not available
                 logger.warning("BaseRetriever not available, using simple callable")
                 return lambda query: self._memory_docs[:4]
+        
+        if not self.langchain_store:
+            # If LangChain wrapper is not available, create a simple retriever that uses our search methods
+            logger.warning("LangChain Milvus wrapper not available, using fallback retriever")
+            if not HAS_BASE_RETRIEVER:
+                raise RuntimeError("LangChain retriever not available. Milvus connection may have failed.")
+            
+            # Create a custom retriever that wraps our similarity_search method
+            class MilvusRetriever(BaseRetriever):
+                store: Any  # MilvusVectorStore instance
+                k: int = 4  # default number of retrieved items
+                search_params: Optional[Dict[str, Any]] = None
+                filter: Optional[str] = None
+                output_fields: Optional[List[str]] = None
+                
+                class Config:
+                    arbitrary_types_allowed = True  # Allow non-pydantic objects like MilvusVectorStore
+                    extra = "ignore"  # Ignore additional fields without errors
+                
+                def __init__(self, store: 'MilvusVectorStore', **kwargs):
+                    # Initialize with proper field values
+                    # Extract known fields and pass to super
+                    k_value = kwargs.pop('k', 4)
+                    search_params = kwargs.pop('search_params', None)
+                    filter_str = kwargs.pop('filter', None)
+                    output_fields = kwargs.pop('output_fields', None)
+                    # Pass only defined fields to super (extra fields are ignored due to extra="ignore")
+                    super().__init__(
+                        store=store,
+                        k=k_value,
+                        search_params=search_params,
+                        filter=filter_str,
+                        output_fields=output_fields
+                    )
+                
+                def _get_relevant_documents(
+                    self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None
+                ) -> List[Document]:
+                    """Get relevant documents using store's similarity_search"""
+                    try:
+                        results = self.store.similarity_search(query, k=self.k)
+                        return results if results else []
+                    except Exception as e:
+                        logger.error(f"Error in retriever search: {e}")
+                        return []
+                
+                async def _aget_relevant_documents(
+                    self, query: str, *, run_manager: Optional[CallbackManagerForRetrieverRun] = None
+                ) -> List[Document]:
+                    """Async get relevant documents"""
+                    try:
+                        results = await self.store.asimilarity_search(query, k=self.k)
+                        return results if results else []
+                    except Exception as e:
+                        logger.error(f"Error in async retriever search: {e}")
+                        return []
+            
+            return MilvusRetriever(self, **kwargs)
         
         return self.langchain_store.as_retriever(**kwargs)
     

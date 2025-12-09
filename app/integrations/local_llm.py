@@ -104,6 +104,8 @@ class LocalLLMProvider:
         # Only pass parameters that are supported by Ollama API
         # Some LangChain versions try to pass unsupported parameters (tfs_z, mirostat, etc.)
         # which cause warnings but don't break functionality
+        # Use LOCAL_LLM_TIMEOUT for Ollama HTTP requests (longer than default REQUEST_TIMEOUT)
+        ollama_http_timeout = getattr(settings, 'LOCAL_LLM_TIMEOUT', 120)
         ollama_params = {
             "model": self.config.model_name,
             "base_url": base_url,
@@ -113,7 +115,7 @@ class LocalLLMProvider:
             "top_k": self.config.top_k,
             "repeat_penalty": self.config.repeat_penalty,
             "num_ctx": self.config.n_ctx,
-            "timeout": settings.REQUEST_TIMEOUT,
+            "timeout": float(ollama_http_timeout),  # Use LOCAL_LLM_TIMEOUT for Ollama HTTP requests
         }
         
         # Remove None values to avoid passing invalid parameters
@@ -338,13 +340,15 @@ class LocalLLMProvider:
             raise RuntimeError("LLM not initialized")
         
         # Local LLMs (especially on CPU) need more time than cloud APIs
-        # Use longer timeout for local LLMs, default to 600 seconds (10 minutes) for CPU inference
-        local_llm_timeout = getattr(settings, 'LOCAL_LLM_TIMEOUT', 600)
+        # Use reasonable timeout for local LLMs, default to 120 seconds (2 minutes) for CPU inference
+        local_llm_timeout = getattr(settings, 'LOCAL_LLM_TIMEOUT', 120)
         timeout = kwargs.pop('timeout', local_llm_timeout)
         
         # Ensure prompt is a string
         if not isinstance(prompt, str):
             prompt = str(prompt)
+        
+        logger.debug(f"Invoking LLM with prompt (length: {len(prompt)}) - timeout: {timeout}s")
         
         # For Ollama, try alternative URLs if connection fails
         if self.config.backend == LLMBackend.OLLAMA and self.ollama_alternative_urls:
@@ -400,11 +404,11 @@ class LocalLLMProvider:
                             logger.debug(f"Ollama connection failed at {url}: {retry_error}")
                             continue
                         except asyncio.TimeoutError:
-                            error_msg = f"LLM invocation timed out after {timeout} seconds"
+                            error_msg = f"LLM invocation timed out after {timeout} seconds. The model may be too slow or unresponsive. Try reducing max_tokens or using a faster model."
                             logger.error(error_msg)
                             raise TimeoutError(error_msg)
                 elif isinstance(e, asyncio.TimeoutError):
-                    error_msg = f"LLM invocation timed out after {timeout} seconds"
+                    error_msg = f"LLM invocation timed out after {timeout} seconds. The model may be too slow or unresponsive. Try reducing max_tokens or using a faster model."
                     logger.error(error_msg)
                     raise TimeoutError(error_msg)
                 else:
@@ -433,7 +437,7 @@ class LocalLLMProvider:
                 result = str(result) if result is not None else ""
             return result
         except asyncio.TimeoutError:
-            error_msg = f"LLM invocation timed out after {timeout} seconds"
+            error_msg = f"LLM invocation timed out after {timeout} seconds. The model may be too slow or unresponsive. Try reducing max_tokens or using a faster model."
             logger.error(error_msg)
             raise TimeoutError(error_msg)
         except Exception as e:
