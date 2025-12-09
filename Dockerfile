@@ -370,14 +370,19 @@ RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && 
 
 # Create non-root user and set up directories
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers && \
+    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \
     chown -R appuser:appuser /app
 
 # Copy application code
 COPY app /app/app
 
-# Copy tests directory (if it exists)
+# Copy tests directory if it exists in build context
+# Create placeholder first to ensure directory exists
+RUN touch /app/tests/__init__.py
+# Copy tests directory - will fail build if tests/ doesn't exist, which is expected
+# If tests directory is missing, create it manually before building
 COPY tests /app/tests
+RUN chown -R appuser:appuser /app/tests
 
 # Switch to non-root user
 USER appuser
@@ -544,14 +549,19 @@ RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && 
 
 # Create non-root user and set up directories
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers && \
+    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \
     chown -R appuser:appuser /app
 
 # Copy application code
 COPY app /app/app
 
-# Copy tests directory (if it exists)
+# Copy tests directory if it exists in build context
+# Create placeholder first to ensure directory exists
+RUN touch /app/tests/__init__.py
+# Copy tests directory - will fail build if tests/ doesn't exist, which is expected
+# If tests directory is missing, create it manually before building
 COPY tests /app/tests
+RUN chown -R appuser:appuser /app/tests
 
 # Switch to non-root user
 USER appuser

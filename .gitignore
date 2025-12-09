@@ -168,3 +168,4 @@ venv/
 .venv
 .venv*
 .gitconfig
+.csv
