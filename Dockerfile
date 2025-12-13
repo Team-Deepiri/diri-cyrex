@@ -132,7 +132,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=3 \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
     HF_HOME=/app/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
 
@@ -151,15 +150,30 @@ RUN if [ "$BUILD_TYPE" = "from-scratch" ]; then \
             && apt-get clean; \
     fi
 
+# Copy deepiri-modelkit first (needed for installation)
+COPY deepiri-modelkit /app/deepiri-modelkit
+
 # Copy requirements first for better caching
-COPY requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements.txt /app/requirements.txt
 
-# Remove torch from requirements.txt (already in base image for both types)
+# Remove torch and deepiri-modelkit editable install from requirements.txt
+# (torch already in base image, modelkit installed separately)
 RUN sed -i '/^torch/d' /app/requirements.txt && \
-    sed -i '/torch/d' /app/requirements.txt || true
+    sed -i '/torch/d' /app/requirements.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements.txt || true
 
-# Verify torch is removed
-RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
+# Verify torch and modelkit are removed
+RUN grep -v 'torch' /app/requirements.txt | grep -v 'modelkit' > /tmp/requirements_clean.txt || true
 
 # =============================================================================
 # STAGE 4: Download Heavy ML Packages (Staged for Resume)
@@ -373,15 +387,28 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \
     chown -R appuser:appuser /app
 
+# Copy deepiri-modelkit (shared library) before app code
+# This allows installing it as an editable package
+COPY deepiri-modelkit /app/deepiri-modelkit
+
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
 # Copy application code
-COPY app /app/app
+COPY diri-cyrex/app /app/app
 
 # Copy tests directory if it exists in build context
 # Create placeholder first to ensure directory exists
 RUN touch /app/tests/__init__.py
 # Copy tests directory - will fail build if tests/ doesn't exist, which is expected
 # If tests directory is missing, create it manually before building
-COPY tests /app/tests
+COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
 # Switch to non-root user
@@ -409,7 +436,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=3 \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
     HF_HOME=/app/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
 
@@ -423,15 +449,30 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 FROM base-from-scratch AS final-from-scratch
 
+# Copy deepiri-modelkit first (needed for installation)
+COPY deepiri-modelkit /app/deepiri-modelkit
+
 # Copy requirements and setup
-COPY requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements.txt /app/requirements.txt
 
-# Remove torch from requirements.txt (already installed in base-from-scratch)
+# Remove torch and deepiri-modelkit editable install from requirements.txt
+# (torch already installed in base-from-scratch, modelkit installed separately)
 RUN sed -i '/^torch/d' /app/requirements.txt && \
-    sed -i '/torch/d' /app/requirements.txt || true
+    sed -i '/torch/d' /app/requirements.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements.txt || true
 
-# Verify torch is removed
-RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
+# Verify torch and modelkit are removed
+RUN grep -v 'torch' /app/requirements.txt | grep -v 'modelkit' > /tmp/requirements_clean.txt || true
 
 # Copy downloaded ML packages (if available from download stage)
 # The download-ml-packages stage always creates /tmp/ml-packages (even if empty)
@@ -552,15 +593,28 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \
     chown -R appuser:appuser /app
 
+# Copy deepiri-modelkit (shared library) before app code
+# This allows installing it as an editable package
+COPY deepiri-modelkit /app/deepiri-modelkit
+
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
 # Copy application code
-COPY app /app/app
+COPY diri-cyrex/app /app/app
 
 # Copy tests directory if it exists in build context
 # Create placeholder first to ensure directory exists
 RUN touch /app/tests/__init__.py
 # Copy tests directory - will fail build if tests/ doesn't exist, which is expected
 # If tests directory is missing, create it manually before building
-COPY tests /app/tests
+COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
 # Switch to non-root user

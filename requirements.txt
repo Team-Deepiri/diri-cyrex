@@ -86,3 +86,7 @@ llama-cpp-python>=0.2.0  # llama.cpp bindings (optional, for direct model loadin
 # Note: Install llama-cpp-python separately with: pip install llama-cpp-python
 # For GPU support: CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
 # For CPU only: pip install llama-cpp-python
+
+# Deepiri ModelKit (shared contracts and utilities)
+# Installed from /app/deepiri-modelkit in Dockerfile
+# For local development: pip install -e ../deepiri-modelkit

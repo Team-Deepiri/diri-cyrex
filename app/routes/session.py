@@ -36,7 +36,7 @@ async def analyze_session(req: SessionRequest, request: Request):
         
         session_data = {
             'user_id': req.user_id,
-            'events': [e.dict() for e in req.events],
+            'events': [e.model_dump() for e in req.events],
             'start_time': req.start_time,
             'end_time': req.end_time
         }

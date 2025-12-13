@@ -22,18 +22,23 @@ try:
     # LangChain 1.x: Ollama moved to langchain-ollama, LlamaCpp still in community
     Ollama = None
     try:
-        # Try langchain-ollama first (LangChain 1.x)
+        # Try langchain-ollama first (LangChain 1.x) - eliminates deprecation warnings
         from langchain_ollama import OllamaLLM
         # Use OllamaLLM as Ollama for compatibility
         Ollama = OllamaLLM
-    except ImportError:
+    except ImportError as e1:
         try:
             # Fallback: try langchain-ollama with different import
             from langchain_ollama import Ollama
-        except ImportError:
+        except ImportError as e2:
             try:
-                # Fallback to community if langchain-ollama not available
+                # Fallback to deprecated community version (will show deprecation warning)
                 from langchain_community.llms import Ollama
+                logger.warning(
+                    f"Using deprecated langchain_community.llms.Ollama. "
+                    f"Install langchain-ollama to eliminate deprecation warnings. "
+                    f"Import errors: langchain_ollama.OllamaLLM={e1}, langchain_ollama.Ollama={e2}"
+                )
             except ImportError:
                 Ollama = None
     
