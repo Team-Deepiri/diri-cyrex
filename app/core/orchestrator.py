@@ -104,6 +104,7 @@ from ..integrations.milvus_store import MilvusVectorStore, get_milvus_store
 from ..integrations.rag_bridge import RAGBridge, get_rag_bridge
 from ..services.knowledge_retrieval_engine import KnowledgeRetrievalEngine
 from ..settings import settings
+from ..integrations.streaming.event_publisher import CyrexEventPublisher
 
 
 class WorkflowOrchestrator:
@@ -536,6 +537,27 @@ Final Answer: the final answer to the original input question"""),
                 tokens_used=len(response.split()),  # Approximate
                 model=model_name,
             )
+            
+            # Publish inference event to Synapse
+            try:
+                if not hasattr(self, '_event_publisher'):
+                    self._event_publisher = CyrexEventPublisher()
+                    await self._event_publisher.connect()
+                
+                # Get model version (default to "latest" if not available)
+                model_version = getattr(self.llm_provider, 'version', 'latest') if self.llm_provider else 'latest'
+                
+                await self._event_publisher.publish_inference(
+                    model_name=model_name,
+                    version=model_version,
+                    latency_ms=duration_ms,
+                    user_id=user_id,
+                    request_id=request_id,
+                    tokens_used=len(response.split()),
+                    confidence=output_safety.score if hasattr(output_safety, 'score') else None
+                )
+            except Exception as e:
+                self.logger.warning(f"Failed to publish inference event: {e}", exc_info=True)
             
             return {
                 "success": True,
