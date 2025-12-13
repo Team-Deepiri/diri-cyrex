@@ -1,3 +1,32 @@
+/* Import CSS Variables */
+@import './styles/variables.css';
+
+/* Global Resets */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-family-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background-color: var(--color-bg-page);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-base);
+}
+
+/* Global Animations */
 @keyframes shimmer {
   0% {
     background-position: -200% 0;
@@ -9,44 +38,4 @@
 
 .cyrex-shimmer {
   animation: shimmer 3s ease-in-out infinite;
-}
-
-/* Remove white border frame around page */
-body {
-  margin: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-}
-
-html {
-  margin: 0;
-  padding: 0;
-  border: none;
-  outline: none;
-}
-
-/* Orange hover for tab buttons */
-.tab-container button:hover {
-  background: #FFB84D !important;
-  color: #000 !important;
-}
-
-/* Logo styling - remove white background and blend with dark theme */
-.header-logo {
-  /* Remove white background by making it transparent */
-  mix-blend-mode: multiply;
-  background: transparent;
-}
-
-/* Alternative: Make logo white/inverted for dark theme */
-.header-logo-inverted {
-  filter: brightness(0) invert(1) drop-shadow(0 0 8px rgba(255, 184, 77, 0.4));
-  mix-blend-mode: screen;
-}
-
-/* Alternative: Keep original colors but remove white background */
-.header-logo-no-bg {
-  mix-blend-mode: darken;
-  background: transparent;
 }

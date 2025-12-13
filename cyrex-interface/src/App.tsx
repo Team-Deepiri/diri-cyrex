@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import './App.css';
+import { Sidebar } from './components/layout/Sidebar';
+import { useUI } from './context/UIContext';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -39,9 +41,10 @@ const getDefaultBaseUrl = () => {
 const defaultBaseUrl = getDefaultBaseUrl();
 
 export default function App() {
+  const { state: uiState } = useUI();
+  const activeTab = uiState.activeTab;
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
   const [apiKey, setApiKey] = useState('');
-  const [activeTab, setActiveTab] = useState('orchestration');
   
   // Orchestration state
   const [orchestrationInput, setOrchestrationInput] = useState('What are my tasks for today?');
@@ -1135,61 +1138,20 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui' }}>
-      <header style={{ 
-        background: '#1a1a1a', 
-        padding: '1.5rem', 
-        borderBottom: '1px solid #333',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem'
-      }}>
-        <div style={{
-          background: 'rgba(26, 26, 26, 0.9)',
-          padding: '0.5rem',
-          borderRadius: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '1px solid rgba(255, 255, 255, 0.1)'
-        }}>
-          <img 
-            src="/logo.png" 
-            alt="Deepiri Logo" 
-            className="header-logo"
-            style={{
-              height: '2.5rem',
-              width: 'auto',
-              objectFit: 'contain',
-              filter: 'brightness(1.1) contrast(1.1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3))'
-            }}
-          />
-        </div>
-        <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 600 }}>
-          <span
-            className="cyrex-shimmer"
-            style={{
-              background: 'linear-gradient(90deg, #FFD700 0%, #FFA500 25%, #FFD700 50%, #FFA500 75%, #FFD700 100%)',
-              backgroundSize: '200% 100%',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              display: 'inline-block',
-            }}
-          >
-            Cyrex
-          </span>
-          {' Testing Interface'}
-        </h1>
-        <p style={{ margin: '0.5rem 0 0', color: '#999', fontSize: '0.9rem' }}>
-          Comprehensive testing dashboard for orchestration, local LLMs, RAG, tools, and workflows
-        </p>
-      </header>
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui', display: 'flex' }}>
+      {/* Sidebar */}
+      <Sidebar />
 
-      {/* Connection Panel */}
+      {/* Main Content Area */}
+      <div style={{ 
+        flex: 1,
+        marginLeft: uiState.sidebarCollapsed ? '70px' : '250px',
+        transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100vh'
+      }}>
+        {/* Connection Panel */}
       <section style={{ 
         background: '#151515', 
         padding: '1rem 1.5rem', 
@@ -1250,58 +1212,15 @@ export default function App() {
         )}
       </section>
 
-      {/* Tabs */}
-      <div className="tab-container" style={{ 
-        display: 'flex', 
-        borderBottom: '1px solid #333', 
-        background: '#151515',
-        flexWrap: 'wrap',
-        overflowX: 'auto',
-        gap: '0.25rem'
-      }}>
-        {[
-          { id: 'testing', label: 'Testing Suite', icon: '' },
-          { id: 'orchestration', label: 'Orchestration', icon: '' },
-          { id: 'workflow', label: 'Workflows', icon: '' },
-          { id: 'llm', label: 'Local LLM', icon: '' },
-          { id: 'rag', label: 'RAG/Vector Store', icon: '' },
-          { id: 'tools', label: 'Tools', icon: '' },
-          { id: 'state', label: 'State Management', icon: '' },
-          { id: 'monitoring', label: 'Monitoring', icon: '' },
-          { id: 'safety', label: 'Safety/Guardrails', icon: '' },
-          { id: 'chat', label: 'Chat', icon: '' },
-          { id: 'history', label: 'Test History', icon: '' }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '0.75rem 1rem',
-              background: activeTab === tab.id ? '#FFB84D' : 'transparent',
-              border: 'none',
-              borderBottom: activeTab === tab.id ? '2px solid #FFA500' : '2px solid transparent',
-              color: activeTab === tab.id ? '#000' : '#999',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-              transition: 'background 0.2s, color 0.2s'
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
-      <div style={{ 
-        padding: '1rem', 
-        maxWidth: '100%', 
-        margin: '0 auto',
-        width: '100%',
-        boxSizing: 'border-box'
-      }}>
+        {/* Tab Content */}
+        <div style={{ 
+          padding: '1rem', 
+          maxWidth: '100%', 
+          margin: '0 auto',
+          width: '100%',
+          boxSizing: 'border-box',
+          flex: 1
+        }}>
         <React.Fragment>
           {/* Testing Tab */}
           {activeTab === 'testing' && (
@@ -3022,6 +2941,7 @@ export default function App() {
           </div>
           )}
         </React.Fragment>
+        </div>
       </div>
     </div>
   );
