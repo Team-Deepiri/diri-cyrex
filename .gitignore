@@ -136,6 +136,38 @@ app/train/models/
 *.jsonl
 synthetic_*.jsonl
 
+# ML Model Files (never commit models!)
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.h5
+*.pb
+*.onnx
+*.pkl
+*.pickle
+*.model
+*.tflite
+*.hdf5
+*.pth.tar
+*.pt.tar
+
+# Model directories
+models/
+checkpoints/
+saved_models/
+trained_models/
+model_cache/
+.cache/
+.huggingface/
+.transformers_cache/
+
+# Large data files
+*.parquet
+*.arrow
+*.feather
+
 # Test files
 test_*.py
 *_test.py
@@ -158,7 +190,7 @@ temp/
 minikube-*
 kubectl
 skaffold
-*.bin
+# Note: *.bin is already covered in ML Model Files section above
 binary/
 # Kubernetes binary (should be installed globally)
 kubectl

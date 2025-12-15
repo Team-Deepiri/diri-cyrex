@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
 import json
 from pathlib import Path
-from ...logging_config import get_logger
+from ..logging_config import get_logger
 
 logger = get_logger("rag.pipeline")
 
@@ -275,5 +275,3 @@ def initialize_rag_system():
     milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
     rag = RAGPipeline(milvus_host=milvus_host, milvus_port=milvus_port)
     return rag
-
-
