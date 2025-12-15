@@ -2802,7 +2802,7 @@ export default function App() {
             
             {/* Debug Panel for Chat */}
             {renderDebugPanel('chat')}
-            </div>
+          </div>
           )}
 
           {/* Test History Tab */}

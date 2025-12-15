@@ -35,9 +35,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not settings.OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not configured - AI features will be disabled")
     
+    # Initialize auto-model loader
+    try:
+        from .integrations.model_loader import get_auto_loader
+        auto_loader = await get_auto_loader()
+        logger.info("Auto-model loader started")
+    except Exception as e:
+        logger.warning(f"Failed to start auto-model loader: {e}")
+    
     yield
     
     # Shutdown
+    try:
+        from .integrations.model_loader import _auto_loader
+        if _auto_loader:
+            await _auto_loader.stop()
+    except Exception:
+        pass
+    
     logger.info("Shutting down Deepiri AI Challenge Service API")
 
 

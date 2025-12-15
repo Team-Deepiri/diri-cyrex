@@ -39,6 +39,7 @@ class RobustEmbeddings:
         """Initialize sentence-transformers model using proper PyTorch device handling."""
         try:
             import torch
+            import os
             from sentence_transformers import SentenceTransformer
             from transformers import AutoModel, AutoTokenizer
             
@@ -46,43 +47,103 @@ class RobustEmbeddings:
             target_device = self._get_target_device()
             logger.info(f"Initializing embedding model {self.model_name} on device: {target_device}")
             
+            # Set environment variables to prevent meta device usage
+            # These prevent transformers from using device_map which can cause meta device issues
+            os.environ['TRANSFORMERS_NO_ADVISORY_WARNINGS'] = '1'
+            # Disable accelerate's device_map to prevent meta device
+            os.environ['ACCELERATE_USE_CPU'] = '1' if target_device.type == 'cpu' else '0'
+            # Prevent accelerate from using device_map
+            os.environ['ACCELERATE_USE_DEVICE_MAP'] = '0'
+            # Force transformers to not use low_cpu_mem_usage which can cause meta device
+            # This is done by ensuring we pass low_cpu_mem_usage=False explicitly
+            
             initialization_success = False
             last_error = None
             
-            # Method 1: Load with explicit device_map and low_cpu_mem_usage to avoid meta device
+            # Method 1: Load model using config + state_dict approach to avoid meta device
             if not initialization_success:
                 try:
-                    # Use transformers directly with proper device mapping
+                    from transformers import AutoConfig
+                    from transformers.utils import cached_file
+                    from huggingface_hub import hf_hub_download
+                    import gc
+                    
+                    # Load tokenizer first
                     tokenizer = AutoTokenizer.from_pretrained(self.model_name)
                     
-                    # Determine device_map based on target device
-                    if target_device.type == 'cuda':
-                        device_map = "cuda:0"
-                    elif target_device.type == 'mps':
-                        device_map = "mps"
-                    else:
-                        device_map = "cpu"
+                    # Load config
+                    config = AutoConfig.from_pretrained(self.model_name)
                     
-                    # Load model with explicit device mapping and low memory usage
-                    # This prevents PyTorch from using meta device
-                    model = AutoModel.from_pretrained(
-                        self.model_name,
-                        torch_dtype=torch.float32,
-                        device_map=device_map,  # Explicit device mapping
-                        low_cpu_mem_usage=True,  # Prevents meta device usage
-                    )
+                    # Create model from config (this creates a model with random weights, not on meta device)
+                    model = AutoModel.from_config(config)
                     
-                    # Ensure model is on target device (should already be, but verify)
-                    if hasattr(model, 'to'):
-                        model = model.to(target_device)
+                    # Move model to target device (models from config are not on meta device)
+                    model = model.to(target_device)
+                    
+                    # Now load the state dict with explicit map_location to target device
+                    # This ensures weights load directly to target device, not meta device
+                    try:
+                        # Try to get the model file - use hf_hub_download for reliability
+                        try:
+                            model_file = hf_hub_download(
+                                repo_id=self.model_name,
+                                filename="pytorch_model.bin",
+                                cache_dir=None
+                            )
+                            # Load state dict with explicit map_location
+                            state_dict = torch.load(model_file, map_location=target_device, weights_only=False)
+                            model.load_state_dict(state_dict, strict=False)
+                        except Exception:
+                            # If pytorch_model.bin doesn't exist, try model.safetensors
+                            try:
+                                model_file = hf_hub_download(
+                                    repo_id=self.model_name,
+                                    filename="model.safetensors",
+                                    cache_dir=None
+                                )
+                                # For safetensors, we need to use safetensors library
+                                from safetensors.torch import load_file
+                                state_dict = load_file(model_file, device=str(target_device))
+                                model.load_state_dict(state_dict, strict=False)
+                            except Exception as safetensors_err:
+                                # If safetensors also fails, use cached_file as fallback
+                                logger.warning(f"Could not load from hub, trying cached_file: {safetensors_err}")
+                                model_file = cached_file(
+                                    self.model_name,
+                                    "pytorch_model.bin",
+                                    cache_dir=None
+                                )
+                                state_dict = torch.load(model_file, map_location=target_device, weights_only=False)
+                                model.load_state_dict(state_dict, strict=False)
+                    except Exception as load_err:
+                        # If all state dict loading fails, fall back to from_pretrained with error handling
+                        logger.warning(f"Could not load state dict directly, using from_pretrained fallback: {load_err}")
+                        del model
+                        gc.collect()
+                        
+                        # Try loading with explicit settings
+                        model = AutoModel.from_pretrained(
+                            self.model_name,
+                            torch_dtype=torch.float32,
+                            device_map=None,
+                            low_cpu_mem_usage=False,
+                        )
+                        
+                        # Try to move it, and if it fails with meta error, we'll catch it in the except block
+                        try:
+                            model = model.to(target_device)
+                        except RuntimeError as move_err:
+                            if "meta tensor" in str(move_err).lower() or "to_empty" in str(move_err).lower():
+                                # Still on meta - this shouldn't happen with our settings, but handle it
+                                raise RuntimeError(f"Model still on meta device despite settings: {move_err}")
+                            raise
                     
                     # Create SentenceTransformer with pre-loaded components
                     self.model = SentenceTransformer(modules=[model, tokenizer])
-                    # Ensure the SentenceTransformer wrapper is also on CPU
-                    if hasattr(self.model, 'to'):
-                        self.model = self.model.to(target_device)
+                    # Ensure SentenceTransformer is on target device
+                    self.model = self.model.to(target_device)
                     
-                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 1: explicit device mapping)")
+                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 1: config + state_dict loading)")
                     initialization_success = True
                 except Exception as e:
                     last_error = e
@@ -92,80 +153,35 @@ class RobustEmbeddings:
                     else:
                         logger.debug(f"Method 1 failed: {e}")
             
-            # Method 2: Handle meta tensor explicitly using to_empty() as PyTorch suggests
+            # Method 2: Use SentenceTransformer directly with environment variables set
             if not initialization_success:
                 try:
-                    tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                    
-                    # Load model - may end up on meta device
-                    model = AutoModel.from_pretrained(
+                    # SentenceTransformer handles device placement internally
+                    self.model = SentenceTransformer(
                         self.model_name,
-                        torch_dtype=torch.float32,
+                        device=str(target_device)  # Pass device as string
                     )
                     
-                    # Check if model is on meta device and handle it properly
-                    try:
-                        # Try normal .to() first
-                        model = model.to(target_device)
-                    except RuntimeError as move_error:
-                        error_msg = str(move_error).lower()
-                        if "meta tensor" in error_msg or "to_empty" in error_msg:
-                            # Model is on meta device - reload with explicit map_location
-                            logger.info("Detected meta device, reloading model with map_location to target device")
-                            
-                            # Clean up the meta model
-                            del model
-                            import gc
-                            gc.collect()
-                            
-                            # Reload with explicit map_location to prevent meta device
-                            # This is the most reliable way to avoid meta tensor issues
-                            model = AutoModel.from_pretrained(
-                                self.model_name,
-                                torch_dtype=torch.float32,
-                                map_location=target_device,  # Explicitly map to target device
-                            )
-                            
-                            # Verify model is on correct device
-                            first_param = next(model.parameters(), None)
-                            if first_param is not None:
-                                actual_device = first_param.device
-                                if actual_device != target_device:
-                                    logger.warning(f"Model loaded on {actual_device} instead of {target_device}, moving explicitly")
-                                    model = model.to(target_device)
-                        else:
-                            # Not a meta tensor error, re-raise
-                            raise
-                    
-                    # Create SentenceTransformer
-                    self.model = SentenceTransformer(modules=[model, tokenizer])
-                    if hasattr(self.model, 'to'):
-                        self.model = self.model.to(target_device)
-                    
-                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 2: meta device handling)")
+                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 2: SentenceTransformer direct)")
                     initialization_success = True
                 except Exception as e:
                     last_error = e
-                    logger.debug(f"Method 2 failed: {e}")
+                    error_msg = str(e).lower()
+                    if "meta" in error_msg or "to_empty" in error_msg:
+                        logger.warning(f"Meta tensor error in method 2, trying method 3: {e}")
+                    else:
+                        logger.debug(f"Method 2 failed: {e}")
             
-            # Method 3: Use from_pretrained with explicit map_location (prevents meta device)
+            # Method 3: Use SentenceTransformer with explicit CPU device (avoids meta device)
             if not initialization_success:
                 try:
-                    tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-                    
-                    # Use map_location to force loading on target device and prevent meta device
-                    model = AutoModel.from_pretrained(
+                    # Force CPU explicitly to avoid any meta device issues
+                    self.model = SentenceTransformer(
                         self.model_name,
-                        torch_dtype=torch.float32,
-                        map_location=target_device,  # Explicit map_location prevents meta device
+                        device='cpu'  # Explicitly use CPU string
                     )
                     
-                    # Create SentenceTransformer
-                    self.model = SentenceTransformer(modules=[model, tokenizer])
-                    if hasattr(self.model, 'to'):
-                        self.model = self.model.to(target_device)
-                    
-                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 3: map_location)")
+                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 3: SentenceTransformer with explicit CPU)")
                     initialization_success = True
                 except Exception as e:
                     last_error = e
@@ -186,29 +202,11 @@ class RobustEmbeddings:
                     
                     try:
                         logger.warning(f"Trying fallback model: {fallback_model}")
-                        # Store original model name
-                        original_model_name = self.model_name
-                        # Try with fallback model (non-recursive to avoid infinite loops)
-                        tokenizer = AutoTokenizer.from_pretrained(fallback_model)
-                        
-                        # Determine device_map based on target device
-                        if target_device.type == 'cuda':
-                            device_map = "cuda:0"
-                        elif target_device.type == 'mps':
-                            device_map = "mps"
-                        else:
-                            device_map = "cpu"
-                        
-                        model = AutoModel.from_pretrained(
+                        # Use SentenceTransformer directly for fallback models (most reliable)
+                        self.model = SentenceTransformer(
                             fallback_model,
-                            torch_dtype=torch.float32,
-                            device_map=device_map,
-                            low_cpu_mem_usage=True,
+                            device=str(target_device)
                         )
-                        model = model.to(target_device)
-                        self.model = SentenceTransformer(modules=[model, tokenizer])
-                        if hasattr(self.model, 'to'):
-                            self.model = self.model.to(target_device)
                         
                         # Update model name to reflect what we're actually using
                         self.model_name = fallback_model

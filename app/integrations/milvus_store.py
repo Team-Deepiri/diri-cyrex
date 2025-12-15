@@ -5,10 +5,16 @@ Integrates with existing KnowledgeRetrievalEngine
 """
 from typing import List, Dict, Optional, Any
 import os
+import warnings
+from pydantic import ConfigDict
 from ..logging_config import get_logger
 from ..settings import settings
 
 logger = get_logger("cyrex.milvus_store")
+
+# Suppress AsyncMilvusClient initialization warning - it's expected when initializing in sync context
+# The async client will be created automatically when async methods are called
+warnings.filterwarnings("ignore", message=".*AsyncMilvusClient.*no running event loop.*", category=Warning)
 
 # LangChain imports with graceful fallbacks
 HAS_LANGCHAIN_MILVUS = False
@@ -221,6 +227,28 @@ class MilvusVectorStore:
         # Initialize LangChain Milvus wrapper with explicit connection configuration
         # Use a separate connection alias to avoid conflicts with PyMilvus connection
         try:
+            # Ensure default connection is also set up (MilvusClient may use "default" alias)
+            # This is important because langchain_milvus.Milvus creates MilvusClient internally
+            # which might default to using the "default" connection alias if connection_args aren't properly passed
+            try:
+                # Disconnect default if it exists and reconnect to ensure correct host
+                if connections.has_connection("default"):
+                    try:
+                        connections.disconnect("default")
+                    except Exception:
+                        pass
+                
+                # Create/update default connection to use correct host
+                connections.connect(
+                    alias="default",
+                    host=self.host,
+                    port=self.port,
+                    timeout=10.0,
+                )
+                logger.debug(f"Ensured default connection alias points to {self.host}:{self.port}")
+            except Exception as default_conn_err:
+                logger.debug(f"Could not set up default connection alias: {default_conn_err}")
+            
             # Create a separate connection for LangChain to avoid channel conflicts
             try:
                 # Disconnect any existing connection with this alias first
@@ -284,7 +312,7 @@ class MilvusVectorStore:
                             logger.debug(f"uri method failed, trying connection_args: {uri_err}")
                             last_error = uri_err
                 
-                # Method 2: Try with connection_args
+                # Method 2: Try with connection_args (host and port explicitly)
                 if not wrapper_initialized:
                     try:
                         connection_args = {
@@ -304,12 +332,61 @@ class MilvusVectorStore:
                     except Exception as conn_args_err:
                         error_msg = str(conn_args_err).lower()
                         if "localhost" in error_msg:
-                            logger.debug(f"connection_args connected to localhost instead of {self.host}, trying host/port: {conn_args_err}")
+                            logger.debug(f"connection_args connected to localhost instead of {self.host}, trying direct host/port: {conn_args_err}")
                         else:
-                            logger.debug(f"connection_args failed, trying host/port parameters: {conn_args_err}")
+                            logger.debug(f"connection_args failed, trying direct host/port parameters: {conn_args_err}")
                         last_error = conn_args_err
                 
-                # Method 3: Removed - langchain_milvus.Milvus doesn't support host/port as separate parameters
+                # Method 3: Try with host and port as direct keyword arguments (if supported)
+                if not wrapper_initialized:
+                    try:
+                        self.langchain_store = MilvusVectorStore(
+                            embedding_function=self.embeddings,
+                            host=self.host,  # Pass host directly
+                            port=self.port,  # Pass port directly
+                            collection_name=self.collection_name,
+                            vector_field="embedding",
+                            auto_id=True,
+                        )
+                        logger.info(f"LangChain Milvus wrapper initialized successfully with direct host/port (host={self.host}, port={self.port})")
+                        wrapper_initialized = True
+                    except (TypeError, ValueError) as direct_err:
+                        # Parameter error - host/port not supported as direct params
+                        logger.debug(f"Direct host/port parameters not supported: {direct_err}")
+                        last_error = direct_err
+                    except Exception as direct_err:
+                        error_msg = str(direct_err).lower()
+                        if "localhost" in error_msg:
+                            logger.debug(f"Direct host/port method connected to localhost instead of {self.host}: {direct_err}")
+                            last_error = direct_err
+                        else:
+                            logger.debug(f"Direct host/port method failed: {direct_err}")
+                            last_error = direct_err
+                
+                # Method 4: Try with using parameter to reference existing default connection
+                if not wrapper_initialized:
+                    try:
+                        self.langchain_store = MilvusVectorStore(
+                            embedding_function=self.embeddings,
+                            using="default",  # Use the default connection we set up
+                            collection_name=self.collection_name,
+                            vector_field="embedding",
+                            auto_id=True,
+                        )
+                        logger.info(f"LangChain Milvus wrapper initialized successfully with using='default' connection")
+                        wrapper_initialized = True
+                    except (TypeError, ValueError) as using_err:
+                        # Parameter error - using not supported
+                        logger.debug(f"Using parameter not supported: {using_err}")
+                        last_error = using_err
+                    except Exception as using_err:
+                        error_msg = str(using_err).lower()
+                        if "localhost" in error_msg:
+                            logger.debug(f"Using method connected to localhost instead of {self.host}: {using_err}")
+                            last_error = using_err
+                        else:
+                            logger.debug(f"Using method failed: {using_err}")
+                            last_error = using_err
                 
                 # If all methods failed, raise the last error
                 if not wrapper_initialized:
@@ -813,9 +890,10 @@ class MilvusVectorStore:
                 filter: Optional[str] = None
                 output_fields: Optional[List[str]] = None
                 
-                class Config:
-                    arbitrary_types_allowed = True  # Allow non-pydantic objects like MilvusVectorStore
-                    extra = "ignore"  # Ignore additional fields without errors
+                model_config = ConfigDict(
+                    arbitrary_types_allowed=True,  # Allow non-pydantic objects like MilvusVectorStore
+                    extra="ignore"  # Ignore additional fields without errors
+                )
                 
                 def __init__(self, store: 'MilvusVectorStore', **kwargs):
                     # Initialize with proper field values

@@ -1,11 +1,15 @@
 """
 Auto-model loading from registry via streaming events
+<<<<<<< HEAD
 Subscribes to Helox model-ready events and automatically loads trained models
+=======
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
 """
 import asyncio
 import os
 from typing import Dict, Any, Optional
 from pathlib import Path
+<<<<<<< HEAD
 
 from deepiri_modelkit import (
     ModelRegistryClient,
@@ -15,17 +19,30 @@ from deepiri_modelkit import (
 )
 
 logger = get_logger("cyrex.model_loader")
+=======
+import logging
+
+from deepiri_modelkit import ModelRegistryClient
+from deepiri_modelkit.contracts.models import AIModel, ModelMetadata
+from .streaming.event_publisher import CyrexEventPublisher
+from deepiri_modelkit.contracts.events import ModelReadyEvent
+
+logger = logging.getLogger("cyrex.model_loader")
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
 
 
 class AutoModelLoader:
     """
     Automatically loads models from registry when Helox publishes model-ready events
+<<<<<<< HEAD
     
     Flow:
     1. Helox trains model → registers in MLflow + S3
     2. Helox publishes ModelReadyEvent to Redis Streams
     3. Cyrex receives event → downloads model → loads into memory
     4. Model available for inference
+=======
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
     """
     
     def __init__(self):
@@ -39,10 +56,14 @@ class AutoModelLoader:
             s3_bucket=os.getenv("S3_BUCKET", "mlflow-artifacts")
         )
         
+<<<<<<< HEAD
         self.streaming = StreamingClient(
             redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
         )
         
+=======
+        self.streaming = CyrexEventPublisher()
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
         self.model_cache: Dict[str, Any] = {}
         self.cache_dir = Path(os.getenv("MODEL_CACHE_DIR", "/app/models/cache"))
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -51,7 +72,11 @@ class AutoModelLoader:
         self._subscription_task = None
     
     async def start(self):
+<<<<<<< HEAD
         """Start auto-loading models from events"""
+=======
+        """Start auto-loading models"""
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
         await self.streaming.connect()
         self._running = True
         
@@ -60,15 +85,20 @@ class AutoModelLoader:
             self._subscribe_and_load()
         )
         
+<<<<<<< HEAD
         logger.info("auto_model_loader_started", 
                     registry_uri=self.registry.mlflow_tracking_uri,
                     cache_dir=str(self.cache_dir))
+=======
+        logger.info("Auto-model loader started")
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
     
     async def stop(self):
         """Stop auto-loading"""
         self._running = False
         if self._subscription_task:
             self._subscription_task.cancel()
+<<<<<<< HEAD
             try:
                 await self._subscription_task
             except asyncio.CancelledError:
@@ -145,6 +175,99 @@ class AutoModelLoader:
     
     def get_model(self, model_name: str, version: Optional[str] = None) -> Optional[Dict]:
         """Get model from cache"""
+=======
+        await self.streaming.client.disconnect()
+        logger.info("Auto-model loader stopped")
+    
+    async def _subscribe_and_load(self):
+        """Subscribe to model events and auto-load"""
+        async for event in self.streaming.subscribe_to_model_events(
+            callback=self._on_model_ready
+        ):
+            await self._load_model(event)
+    
+    async def _on_model_ready(self, event_data: Dict[str, Any]):
+        """Callback when model-ready event received"""
+        logger.info(f"Model ready event: {event_data.get('model_name')} v{event_data.get('version')}")
+    
+    async def _load_model(self, event: ModelReadyEvent):
+        """Load model from registry"""
+        try:
+            model_name = event.model_name
+            version = event.version
+            
+            cache_key = f"{model_name}:{version}"
+            
+            # Check if already loaded
+            if cache_key in self.model_cache:
+                logger.info(f"Model {cache_key} already loaded")
+                return
+            
+            logger.info(f"Loading model: {model_name} v{version} from {event.registry_path}")
+            
+            # Download model
+            cache_path = self.cache_dir / model_name / version
+            cache_path.mkdir(parents=True, exist_ok=True)
+            
+            model_path = self.registry.download_model(
+                model_name=model_name,
+                version=version,
+                destination=str(cache_path)
+            )
+            
+            # Load model (implementation depends on model type)
+            model = await self._load_model_file(model_path, model_name)
+            
+            # Cache model
+            self.model_cache[cache_key] = {
+                "model": model,
+                "metadata": event.metadata,
+                "path": model_path,
+                "loaded_at": event.timestamp
+            }
+            
+            logger.info(f"✅ Model {cache_key} loaded and cached")
+            
+            # Publish model-loaded event
+            await self.streaming.client.publish(
+                "model-events",
+                {
+                    "event": "model-loaded",
+                    "source": "cyrex",
+                    "model_name": model_name,
+                    "version": version,
+                    "load_time_ms": 0,  # TODO: measure actual load time
+                    "cache_location": str(cache_path)
+                }
+            )
+        
+        except Exception as e:
+            logger.error(f"Failed to load model {event.model_name} v{event.version}: {e}")
+            
+            # Publish model-failed event
+            await self.streaming.client.publish(
+                "model-events",
+                {
+                    "event": "model-failed",
+                    "source": "cyrex",
+                    "model_name": event.model_name,
+                    "version": event.version,
+                    "error": str(e)
+                }
+            )
+    
+    async def _load_model_file(self, model_path: str, model_name: str) -> Any:
+        """
+        Load model from file
+        Implementation depends on model type (PyTorch, ONNX, etc.)
+        """
+        # TODO: Implement model loading based on file type
+        # For now, return path
+        return model_path
+    
+    def get_model(self, model_name: str, version: Optional[str] = None) -> Optional[Any]:
+        """Get cached model"""
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
         if version:
             cache_key = f"{model_name}:{version}"
         else:
@@ -152,6 +275,7 @@ class AutoModelLoader:
             matching = [k for k in self.model_cache.keys() if k.startswith(f"{model_name}:")]
             if not matching:
                 return None
+<<<<<<< HEAD
             cache_key = sorted(matching)[-1]  # Latest by name
         
         return self.model_cache.get(cache_key)
@@ -162,17 +286,44 @@ class AutoModelLoader:
 
 
 # Singleton instance
+=======
+            cache_key = max(matching)  # Latest version
+        
+        if cache_key in self.model_cache:
+            return self.model_cache[cache_key]["model"]
+        
+        return None
+    
+    def list_loaded_models(self) -> list:
+        """List all loaded models"""
+        return [
+            {
+                "key": key,
+                "metadata": info["metadata"],
+                "loaded_at": info["loaded_at"]
+            }
+            for key, info in self.model_cache.items()
+        ]
+
+
+# Global instance
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
 _auto_loader: Optional[AutoModelLoader] = None
 
 
 async def get_auto_loader() -> AutoModelLoader:
+<<<<<<< HEAD
     """Get or create singleton auto-loader instance"""
+=======
+    """Get or create auto model loader instance"""
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
     global _auto_loader
     if _auto_loader is None:
         _auto_loader = AutoModelLoader()
         await _auto_loader.start()
     return _auto_loader
 
+<<<<<<< HEAD
 
 async def shutdown_auto_loader():
     """Shutdown singleton auto-loader"""
@@ -181,3 +332,5 @@ async def shutdown_auto_loader():
         await _auto_loader.stop()
         _auto_loader = None
 
+=======
+>>>>>>> 87ac0a3b871d936687efc3e7822b7b811d189c0d
