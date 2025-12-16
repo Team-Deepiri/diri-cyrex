@@ -1292,6 +1292,43 @@ export default function App() {
                 <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Test Runner</h2>
                 {renderConnectionPanel()}
               </div>
+              
+              {/* Test Infrastructure Status */}
+              <div style={{
+                background: '#1a1a1a',
+                padding: '1rem',
+                borderRadius: '8px',
+                border: '1px solid #333',
+                marginBottom: '1.5rem'
+              }}>
+                <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
+                {testStatus ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
+                    <div>
+                      <span style={{ color: '#666' }}>Tests Dir:</span>{' '}
+                      <span style={{ color: testStatus.tests_dir_exists ? '#00aa00' : '#ff4444' }}>
+                        {testStatus.tests_dir_exists ? 'Exists' : 'Missing'}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#666' }}>Categories:</span>{' '}
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories || testStatus.categories?.length || 0}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#666' }}>Files:</span>{' '}
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_files || testStatus.files?.length || 0}</span>
+                    </div>
+                    {testStatus.status === 'error' && testStatus.error && (
+                      <div style={{ gridColumn: '1 / -1', color: '#ff4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                        Error: {testStatus.error}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ color: '#666', fontSize: '0.85rem' }}>Loading status...</div>
+                )}
+              </div>
+
               <div style={{ display: 'grid', gap: '1.5rem' }}>
               {/* Test Selection, Options, and Output - Side by Side */}
               <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -1674,41 +1711,6 @@ export default function App() {
                   )}
                 </div>
               )}
-
-              {/* Test Status */}
-              <div style={{
-                background: '#1a1a1a',
-                padding: '1rem',
-                borderRadius: '8px',
-                border: '1px solid #333'
-              }}>
-                <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
-                {testStatus ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
-                    <div>
-                      <span style={{ color: '#666' }}>Tests Dir:</span>{' '}
-                      <span style={{ color: testStatus.tests_dir_exists ? '#00aa00' : '#ff4444' }}>
-                        {testStatus.tests_dir_exists ? 'Exists' : 'Missing'}
-                      </span>
-                    </div>
-                    <div>
-                      <span style={{ color: '#666' }}>Categories:</span>{' '}
-                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories || testStatus.categories?.length || 0}</span>
-                    </div>
-                    <div>
-                      <span style={{ color: '#666' }}>Files:</span>{' '}
-                      <span style={{ color: '#00aaff' }}>{testStatus.available_files || testStatus.files?.length || 0}</span>
-                    </div>
-                    {testStatus.status === 'error' && testStatus.error && (
-                      <div style={{ gridColumn: '1 / -1', color: '#ff4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-                        Error: {testStatus.error}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ color: '#666', fontSize: '0.85rem' }}>Loading status...</div>
-                )}
-              </div>
 
               {error && (
                 <div style={{
