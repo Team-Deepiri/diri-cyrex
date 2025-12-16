@@ -1175,6 +1175,37 @@ export default function App() {
             {showDebug[tabId] ? '▼ Hide' : '▶ Show'}
           </button>
         </div>
+        <div style={{ marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+          <span style={{ color: '#999' }}>Status: </span>
+          <span style={{ 
+            color: (() => {
+              if (debug.error) return '#ff4444';
+              if (debug.duration === undefined) return '#ffaa00';
+              // Check response for success/failure
+              if (debug.response && typeof debug.response === 'object' && debug.response !== null) {
+                const resp = debug.response as Record<string, any>;
+                if (resp.success === false || (resp.return_code !== undefined && resp.return_code !== 0)) {
+                  return '#ff4444';
+                }
+              }
+              return '#44ff44';
+            })(),
+            fontWeight: '500'
+          }}>
+            {(() => {
+              if (debug.error) return 'Failed';
+              if (debug.duration === undefined) return 'Loading';
+              // Check response for success/failure
+              if (debug.response && typeof debug.response === 'object' && debug.response !== null) {
+                const resp = debug.response as Record<string, any>;
+                if (resp.success === false || (resp.return_code !== undefined && resp.return_code !== 0)) {
+                  return 'Failed';
+                }
+              }
+              return 'Success';
+            })()}
+          </span>
+        </div>
         {showDebug[tabId] && (
           <div style={{ display: 'grid', gap: '1rem' }}>
             {debug.timestamp && (
@@ -1213,7 +1244,20 @@ export default function App() {
                   fontSize: '0.8rem',
                   overflow: 'auto',
                   maxHeight: '300px',
-                  border: '1px solid #333'
+                  border: '1px solid #333',
+                  color: (() => {
+                    const response = debug.response;
+                    if (typeof response === 'object' && response !== null) {
+                      const resp = response as Record<string, any>;
+                      if (resp.success === false || (resp.return_code !== undefined && resp.return_code !== 0)) {
+                        return '#ff4444';
+                      }
+                      if (resp.success === true || (resp.return_code !== undefined && resp.return_code === 0)) {
+                        return '#44ff44';
+                      }
+                    }
+                    return '#ccc';
+                  })()
                 }}>
                   {pretty(debug.response)}
                 </pre>
