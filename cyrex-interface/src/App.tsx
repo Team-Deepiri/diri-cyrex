@@ -1,5 +1,7 @@
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import './App.css';
+import { Sidebar } from './components/layout/Sidebar';
+import { useUI } from './context/UIContext';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -38,10 +40,47 @@ const getDefaultBaseUrl = () => {
 
 const defaultBaseUrl = getDefaultBaseUrl();
 
+// Switch Toggle Component
+const Switch = ({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) => {
+  return (
+    <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', userSelect: 'none' }}>
+      <div
+        onClick={() => onChange(!checked)}
+        style={{
+          position: 'relative',
+          width: '44px',
+          height: '24px',
+          borderRadius: '12px',
+          background: checked ? '#4CAF50' : '#555',
+          transition: 'background 0.3s ease',
+          cursor: 'pointer',
+          flexShrink: 0
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: '2px',
+            left: checked ? '22px' : '2px',
+            width: '20px',
+            height: '20px',
+            borderRadius: '50%',
+            background: '#fff',
+            transition: 'left 0.3s ease',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.2)'
+          }}
+        />
+      </div>
+      <span style={{ fontSize: '0.9rem', color: '#e0e0e0' }}>{label}</span>
+    </label>
+  );
+};
+
 export default function App() {
+  const { state: uiState } = useUI();
+  const activeTab = uiState.activeTab;
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
   const [apiKey, setApiKey] = useState('');
-  const [activeTab, setActiveTab] = useState('orchestration');
   
   // Orchestration state
   const [orchestrationInput, setOrchestrationInput] = useState('What are my tasks for today?');
@@ -99,6 +138,22 @@ export default function App() {
   const [chatInput, setChatInput] = useState('');
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [chatProvider, setChatProvider] = useState<'api' | 'local'>('api');
+  const [showProviderDropdown, setShowProviderDropdown] = useState(false);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (showProviderDropdown && !target.closest('[data-provider-dropdown]')) {
+        setShowProviderDropdown(false);
+      }
+    };
+
+    if (showProviderDropdown) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showProviderDropdown]);
   const [chatLocalLLMService, setChatLocalLLMService] = useState<string>('');
   const [chatLocalLLMModel, setChatLocalLLMModel] = useState<string>('llama3:8b');
   const [chatLocalLLMBackend, setChatLocalLLMBackend] = useState<string>('ollama');
@@ -309,6 +364,8 @@ export default function App() {
 
   // Orchestration tests
   const testOrchestration = async () => {
+    setStreamingResponse(''); // Clear streaming response when using regular process
+    setOrchestrationResult(''); // Clear previous result
     try {
       const result = await callEndpoint('/orchestration/process', {
         user_input: orchestrationInput,
@@ -316,7 +373,8 @@ export default function App() {
         use_rag: useRAG,
         use_tools: useTools
       }, 'POST', 'orchestration');
-      setOrchestrationResult(pretty(result));
+      const formattedResult = result ? pretty(result) : 'No response received';
+      setOrchestrationResult(formattedResult);
     } catch (err: any) {
       setOrchestrationResult(`Error: ${err.message}`);
     }
@@ -324,6 +382,7 @@ export default function App() {
 
   const testStreaming = async () => {
     setIsStreaming(true);
+    setOrchestrationResult(''); // Clear regular result when using streaming
     setStreamingResponse('');
     try {
       // Try the agent message stream endpoint
@@ -1019,6 +1078,74 @@ export default function App() {
   const isLoading = (key: string) => loading === key;
 
   // Helper function to render debug panel
+  const renderConnectionPanel = () => (
+    <section style={{ 
+      background: 'transparent', 
+      padding: '0.75rem 1.25rem', 
+      borderRadius: '12px',
+      border: 'none',
+      display: 'flex',
+      gap: '1rem',
+      alignItems: 'flex-start',
+      flexWrap: 'wrap',
+      boxShadow: 'none',
+      flex: '0 0 auto'
+    }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ color: '#999', fontSize: '0.9rem' }}>Base URL:</span>
+        <input
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          style={{
+            padding: '0.5rem',
+            background: '#222',
+            border: '1px solid #444',
+            borderRadius: '4px',
+            color: '#e0e0e0',
+            minWidth: '200px',
+            fontSize: '0.9rem'
+          }}
+        />
+      </label>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ color: '#999', fontSize: '0.9rem' }}>API Key:</span>
+        <input
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          placeholder="change-me"
+          style={{
+            padding: '0.5rem',
+            background: '#222',
+            border: '1px solid #444',
+            borderRadius: '4px',
+            color: '#e0e0e0',
+            minWidth: '150px',
+            fontSize: '0.9rem'
+          }}
+        />
+      </label>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
+        <button
+          onClick={loadSystemStatus}
+          disabled={isLoading('/orchestration/status')}
+          style={{
+            padding: '0.5rem 1rem',
+            background: isLoading('/orchestration/status') ? '#444' : '#FFB84D',
+            border: 'none',
+            borderRadius: '4px',
+            color: '#fff',
+            cursor: isLoading('/orchestration/status') ? 'not-allowed' : 'pointer',
+            fontSize: '0.9rem',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          {isLoading('/orchestration/status') ? 'Loading...' : 'Refresh Status'}
+        </button>
+      </div>
+    </section>
+  );
+
   const renderDebugPanel = (tabId: string) => {
     const debug = debugInfo[tabId];
     if (!debug) return null;
@@ -1032,7 +1159,7 @@ export default function App() {
         marginTop: '1rem'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-          <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>🔍 Debug Information</h3>
+          <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Debug Information</h3>
           <button
             onClick={() => setShowDebug(prev => ({ ...prev, [tabId]: !prev[tabId] }))}
             style={{
@@ -1047,6 +1174,37 @@ export default function App() {
           >
             {showDebug[tabId] ? '▼ Hide' : '▶ Show'}
           </button>
+        </div>
+        <div style={{ marginBottom: '0.5rem', fontSize: '0.85rem' }}>
+          <span style={{ color: '#999' }}>Status: </span>
+          <span style={{ 
+            color: (() => {
+              if (debug.error) return '#ff4444';
+              if (debug.duration === undefined) return '#ffaa00';
+              // Check response for success/failure
+              if (debug.response && typeof debug.response === 'object' && debug.response !== null) {
+                const resp = debug.response as Record<string, any>;
+                if (resp.success === false || (resp.return_code !== undefined && resp.return_code !== 0)) {
+                  return '#ff4444';
+                }
+              }
+              return '#44ff44';
+            })(),
+            fontWeight: '500'
+          }}>
+            {(() => {
+              if (debug.error) return 'Failed';
+              if (debug.duration === undefined) return 'Loading';
+              // Check response for success/failure
+              if (debug.response && typeof debug.response === 'object' && debug.response !== null) {
+                const resp = debug.response as Record<string, any>;
+                if (resp.success === false || (resp.return_code !== undefined && resp.return_code !== 0)) {
+                  return 'Failed';
+                }
+              }
+              return 'Success';
+            })()}
+          </span>
         </div>
         {showDebug[tabId] && (
           <div style={{ display: 'grid', gap: '1rem' }}>
@@ -1086,7 +1244,20 @@ export default function App() {
                   fontSize: '0.8rem',
                   overflow: 'auto',
                   maxHeight: '300px',
-                  border: '1px solid #333'
+                  border: '1px solid #333',
+                  color: (() => {
+                    const response = debug.response;
+                    if (typeof response === 'object' && response !== null) {
+                      const resp = response as Record<string, any>;
+                      if (resp.success === false || (resp.return_code !== undefined && resp.return_code !== 0)) {
+                        return '#ff4444';
+                      }
+                      if (resp.success === true || (resp.return_code !== undefined && resp.return_code === 0)) {
+                        return '#44ff44';
+                      }
+                    }
+                    return '#ccc';
+                  })()
                 }}>
                   {pretty(debug.response)}
                 </pre>
@@ -1135,406 +1306,356 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui' }}>
-      <header style={{ 
-        background: '#1a1a1a', 
-        padding: '1.5rem', 
-        borderBottom: '1px solid #333',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem'
-      }}>
-        <div style={{
-          background: 'rgba(26, 26, 26, 0.9)',
-          padding: '0.5rem',
-          borderRadius: '8px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          border: '1px solid rgba(255, 255, 255, 0.1)'
-        }}>
-          <img 
-            src="/logo.png" 
-            alt="Deepiri Logo" 
-            className="header-logo"
-            style={{
-              height: '2.5rem',
-              width: 'auto',
-              objectFit: 'contain',
-              filter: 'brightness(1.1) contrast(1.1) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3))'
-            }}
-          />
-        </div>
-        <h1 style={{ margin: 0, fontSize: '2.5rem', fontWeight: 600 }}>
-          <span
-            className="cyrex-shimmer"
-            style={{
-              background: 'linear-gradient(90deg, #FFD700 0%, #FFA500 25%, #FFD700 50%, #FFA500 75%, #FFD700 100%)',
-              backgroundSize: '200% 100%',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              display: 'inline-block',
-            }}
-          >
-            Cyrex
-          </span>
-          {' Testing Interface'}
-        </h1>
-        <p style={{ margin: '0.5rem 0 0', color: '#999', fontSize: '0.9rem' }}>
-          Comprehensive testing dashboard for orchestration, local LLMs, RAG, tools, and workflows
-        </p>
-      </header>
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui', display: 'flex' }}>
+      {/* Sidebar */}
+      <Sidebar />
 
-      {/* Connection Panel */}
-      <section style={{ 
-        background: '#151515', 
-        padding: '1rem 1.5rem', 
-        borderBottom: '1px solid #333',
-        display: 'flex',
-        gap: '1rem',
-        alignItems: 'center',
-        flexWrap: 'wrap'
-      }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ color: '#999' }}>Base URL:</span>
-          <input
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            style={{
-              padding: '0.5rem',
-              background: '#222',
-              border: '1px solid #444',
-              borderRadius: '4px',
-              color: '#e0e0e0',
-              minWidth: '250px'
-            }}
-          />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ color: '#999' }}>API Key:</span>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="change-me"
-            style={{
-              padding: '0.5rem',
-              background: '#222',
-              border: '1px solid #444',
-              borderRadius: '4px',
-              color: '#e0e0e0',
-              minWidth: '200px'
-            }}
-          />
-        </label>
-        <button
-          onClick={loadSystemStatus}
-          disabled={isLoading('/orchestration/status')}
-          style={{
-            padding: '0.5rem 1rem',
-            background: isLoading('/orchestration/status') ? '#444' : '#FFB84D',
-            border: 'none',
-            borderRadius: '4px',
-            color: '#fff',
-            cursor: isLoading('/orchestration/status') ? 'not-allowed' : 'pointer'
-          }}
-        >
-          {isLoading('/orchestration/status') ? 'Loading...' : '🔄 Refresh Status'}
-        </button>
-        {error && (
-          <span style={{ color: '#ff4444', fontSize: '0.9rem' }}>{error}</span>
-        )}
-      </section>
-
-      {/* Tabs */}
-      <div className="tab-container" style={{ 
-        display: 'flex', 
-        borderBottom: '1px solid #333', 
-        background: '#151515',
-        flexWrap: 'wrap',
-        overflowX: 'auto',
-        gap: '0.25rem'
-      }}>
-        {[
-          { id: 'testing', label: 'Testing Suite', icon: '' },
-          { id: 'orchestration', label: 'Orchestration', icon: '' },
-          { id: 'workflow', label: 'Workflows', icon: '' },
-          { id: 'llm', label: 'Local LLM', icon: '' },
-          { id: 'rag', label: 'RAG/Vector Store', icon: '' },
-          { id: 'tools', label: 'Tools', icon: '' },
-          { id: 'state', label: 'State Management', icon: '' },
-          { id: 'monitoring', label: 'Monitoring', icon: '' },
-          { id: 'safety', label: 'Safety/Guardrails', icon: '' },
-          { id: 'chat', label: 'Chat', icon: '' },
-          { id: 'history', label: 'Test History', icon: '' }
-        ].map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '0.75rem 1rem',
-              background: activeTab === tab.id ? '#FFB84D' : 'transparent',
-              border: 'none',
-              borderBottom: activeTab === tab.id ? '2px solid #FFA500' : '2px solid transparent',
-              color: activeTab === tab.id ? '#000' : '#999',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === tab.id ? 600 : 400,
-              whiteSpace: 'nowrap',
-              flexShrink: 0,
-              transition: 'background 0.2s, color 0.2s'
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab Content */}
+      {/* Main Content Area */}
       <div style={{ 
-        padding: '1rem', 
-        maxWidth: '100%', 
-        margin: '0 auto',
-        width: '100%',
-        boxSizing: 'border-box'
+        flex: 1,
+        marginLeft: uiState.sidebarCollapsed ? '70px' : '250px',
+        transition: 'margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100vh'
       }}>
+        {/* Tab Content */}
+        <div style={{ 
+          padding: '1rem', 
+          maxWidth: '100%', 
+          margin: '0 auto',
+          width: '100%',
+          boxSizing: 'border-box',
+          flex: 1
+        }}>
         <React.Fragment>
           {/* Testing Tab */}
           {activeTab === 'testing' && (
             <div>
-              <h2 style={{ marginTop: 0 }}>Test Runner</h2>
-              <div style={{ display: 'grid', gap: '1.5rem' }}>
-              {/* Test Selection */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Test Runner</h2>
+                {renderConnectionPanel()}
+              </div>
+              
+              {/* Test Infrastructure Status */}
               <div style={{
                 background: '#1a1a1a',
-                padding: '1.5rem',
+                padding: '1rem',
                 borderRadius: '8px',
-                border: '1px solid #333'
+                border: '1px solid #333',
+                marginBottom: '1.5rem'
               }}>
-                <h3 style={{ marginTop: 0, color: '#999' }}>Test Selection</h3>
-                <div style={{ display: 'grid', gap: '1rem' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                      Run by Category
-                    </label>
-                    <select
-                      value={selectedTestCategory}
-                      onChange={(e) => {
-                        setSelectedTestCategory(e.target.value);
-                        setSelectedTestFile('');
-                        setSelectedTestPath('');
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem',
-                        background: '#222',
-                        border: '1px solid #444',
-                        borderRadius: '4px',
-                        color: '#e0e0e0'
-                      }}
-                    >
-                      <option value="">-- Select Category --</option>
-                      {Object.entries(testCategories).map(([key, cat]: [string, any]) => (
-                        <option key={key} value={key}>
-                          {cat.name} - {cat.description}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div style={{ textAlign: 'center', color: '#666' }}>OR</div>
-                  
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                      Run by File
-                    </label>
-                    <select
-                      value={selectedTestFile}
-                      onChange={(e) => {
-                        setSelectedTestFile(e.target.value);
-                        setSelectedTestCategory('');
-                        setSelectedTestPath('');
-                      }}
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem',
-                        background: '#222',
-                        border: '1px solid #444',
-                        borderRadius: '4px',
-                        color: '#e0e0e0'
-                      }}
-                    >
-                      <option value="">-- Select File --</option>
-                      {Object.entries(testFiles).map(([key, path]) => (
-                        <option key={key} value={key}>
-                          {key} - {path}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  {selectedTestFile && (
+                <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
+                {testStatus ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
                     <div>
-                      <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                        Specific Test (optional, e.g., TestClass::test_method)
-                      </label>
-                      <input
-                        value={selectedTestPath}
-                        onChange={(e) => setSelectedTestPath(e.target.value)}
-                        placeholder="TestClass::test_method"
-                        style={{
-                          width: '100%',
-                          padding: '0.75rem',
-                          background: '#222',
-                          border: '1px solid #444',
-                          borderRadius: '4px',
-                          color: '#e0e0e0'
-                        }}
+                      <span style={{ color: '#666' }}>Tests Dir:</span>{' '}
+                      <span style={{ color: testStatus.tests_dir_exists ? '#00aa00' : '#ff4444' }}>
+                        {testStatus.tests_dir_exists ? 'Exists' : 'Missing'}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#666' }}>Categories:</span>{' '}
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories || testStatus.categories?.length || 0}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#666' }}>Files:</span>{' '}
+                      <span style={{ color: '#00aaff' }}>{testStatus.available_files || testStatus.files?.length || 0}</span>
+                    </div>
+                    {testStatus.status === 'error' && testStatus.error && (
+                      <div style={{ gridColumn: '1 / -1', color: '#ff4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                        Error: {testStatus.error}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ color: '#666', fontSize: '0.85rem' }}>Loading status...</div>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+              {/* Test Selection, Options, and Output - Side by Side */}
+              <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                {/* Left Column: Test Selection and Options */}
+                <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                  {/* Test Selection */}
+                  <div style={{
+                    background: '#1a1a1a',
+                    padding: '1.5rem',
+                    borderRadius: '8px',
+                    border: '1px solid #333'
+                  }}>
+                    <h3 style={{ marginTop: 0, color: '#999' }}>Test Selection</h3>
+                    <div style={{ display: 'grid', gap: '1rem' }}>
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                          Run by Category
+                        </label>
+                        <select
+                          value={selectedTestCategory}
+                          onChange={(e) => {
+                            setSelectedTestCategory(e.target.value);
+                            setSelectedTestFile('');
+                            setSelectedTestPath('');
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0'
+                          }}
+                        >
+                          <option value="">-- Select Category --</option>
+                          {Object.entries(testCategories).map(([key, cat]: [string, any]) => (
+                            <option key={key} value={key}>
+                              {cat.name} - {cat.description}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                          Run by File
+                        </label>
+                        <select
+                          value={selectedTestFile}
+                          onChange={(e) => {
+                            setSelectedTestFile(e.target.value);
+                            setSelectedTestCategory('');
+                            setSelectedTestPath('');
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0'
+                          }}
+                        >
+                          <option value="">-- Select File --</option>
+                          {Object.entries(testFiles).map(([key, path]) => (
+                            <option key={key} value={key}>
+                              {key} - {path}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      {selectedTestFile && (
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Specific Test (optional, e.g., TestClass::test_method)
+                          </label>
+                          <input
+                            value={selectedTestPath}
+                            onChange={(e) => setSelectedTestPath(e.target.value)}
+                            placeholder="TestClass::test_method"
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Test Options */}
+                  <div style={{
+                    background: '#1a1a1a',
+                    padding: '1.5rem',
+                    borderRadius: '8px',
+                    border: '1px solid #333'
+                  }}>
+                    <h3 style={{ marginTop: 0, color: '#999' }}>Test Options</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                      <Switch
+                        checked={testVerbose}
+                        onChange={setTestVerbose}
+                        label="Verbose Output"
                       />
+                      <Switch
+                        checked={testCoverage}
+                        onChange={setTestCoverage}
+                        label="Coverage Report"
+                      />
+                      <Switch
+                        checked={testSkipSlow}
+                        onChange={setTestSkipSlow}
+                        label="Skip Slow Tests"
+                      />
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999', fontSize: '0.9rem' }}>
+                          Timeout (seconds)
+                        </label>
+                        <input
+                          type="number"
+                          value={testTimeout}
+                          onChange={(e) => setTestTimeout(Number(e.target.value))}
+                          min="0"
+                          style={{
+                            width: '100%',
+                            padding: '0.5rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0'
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Test Controls */}
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', width: '100%', minWidth: 0, overflow: 'visible', position: 'relative', zIndex: 1 }}>
+                    <button
+                      onClick={runTestsStream}
+                      disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        background: testRunning ? '#444' : '#FFB84D',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: testRunning ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        fontSize: '1rem',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}
+                    >
+                      {testRunning ? 'Running...' : 'Run Tests (Streaming)'}
+                    </button>
+                    <button
+                      onClick={runTestsSync}
+                      disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        background: testRunning ? '#444' : '#00aa00',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: testRunning ? 'not-allowed' : 'pointer',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}
+                    >
+                      {testRunning ? 'Running...' : 'Run Tests (Sync)'}
+                    </button>
+                    {testRunning && (
+                      <button
+                        onClick={stopTests}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: '#ff4444',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        Stop Tests
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        setTestOutput([]);
+                        setTestResult(null);
+                        setTestSummary(null);
+                        setError(null);
+                      }}
+                      disabled={testRunning}
+                      style={{
+                        padding: '0.75rem 1.5rem',
+                        background: '#666',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: '#fff',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}
+                    >
+                      Clear Output
+                    </button>
+                    {testResult && (
+                      <div style={{
+                        padding: '0.5rem 1rem',
+                        background: testResult.success ? '#00aa0020' : '#ff444420',
+                        border: `1px solid ${testResult.success ? '#00aa00' : '#ff4444'}`,
+                        borderRadius: '4px',
+                        color: testResult.success ? '#00aa00' : '#ff4444',
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        flexShrink: 0
+                      }}>
+                        {testResult.success ? 'PASSED' : 'FAILED'} (Code: {testResult.return_code})
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right Column: Test Output */}
+                <div style={{
+                  background: '#0a0a0a',
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  border: '1px solid #333',
+                  height: '567px',
+                  overflow: 'auto',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85rem',
+                  lineHeight: '1.5',
+                  flex: '2',
+                  minWidth: '300px',
+                  position: 'relative',
+                  zIndex: 0
+                }}>
+                  {testOutput.length === 0 ? (
+                    <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                      No test output yet. Select tests and click "Run Tests" to start.
+                    </div>
+                  ) : (
+                    <div style={{ color: '#e0e0e0' }}>
+                      {testOutput.map((line, idx) => {
+                        // Color code different types of output
+                        let color = '#e0e0e0';
+                        if (line.includes('PASSED') || line.includes('passed')) {
+                          color = '#00aa00';
+                        } else if (line.includes('FAILED') || line.includes('FAILED') || line.includes('Error')) {
+                          color = '#ff4444';
+                        } else if (line.includes('WARNING')) {
+                          color = '#ffaa00';
+                        } else if (line.includes('test_') || line.includes('::')) {
+                          color = '#FFB84D';
+                        }
+                        
+                        return (
+                          <div key={idx} style={{ color, marginBottom: '0.25rem', whiteSpace: 'pre-wrap' }}>
+                            {line}
+                          </div>
+                        );
+                      })}
+                      {testRunning && (
+                        <div style={{ color: '#FFB84D', marginTop: '0.5rem' }}>
+                          Running...
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
-              </div>
-
-              {/* Test Options */}
-              <div style={{
-                background: '#1a1a1a',
-                padding: '1.5rem',
-                borderRadius: '8px',
-                border: '1px solid #333'
-              }}>
-                <h3 style={{ marginTop: 0, color: '#999' }}>Test Options</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={testVerbose}
-                      onChange={(e) => setTestVerbose(e.target.checked)}
-                    />
-                    <span>Verbose Output</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={testCoverage}
-                      onChange={(e) => setTestCoverage(e.target.checked)}
-                    />
-                    <span>Coverage Report</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={testSkipSlow}
-                      onChange={(e) => setTestSkipSlow(e.target.checked)}
-                    />
-                    <span>Skip Slow Tests</span>
-                  </label>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999', fontSize: '0.9rem' }}>
-                      Timeout (seconds)
-                    </label>
-                    <input
-                      type="number"
-                      value={testTimeout}
-                      onChange={(e) => setTestTimeout(Number(e.target.value))}
-                      min="0"
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem',
-                        background: '#222',
-                        border: '1px solid #444',
-                        borderRadius: '4px',
-                        color: '#e0e0e0'
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Test Controls */}
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                <button
-                  onClick={runTestsStream}
-                  disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: testRunning ? '#444' : '#FFB84D',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: testRunning ? 'not-allowed' : 'pointer',
-                    fontWeight: 600,
-                    fontSize: '1rem'
-                  }}
-                >
-                  {testRunning ? 'Running...' : 'Run Tests (Streaming)'}
-                </button>
-                <button
-                  onClick={runTestsSync}
-                  disabled={testRunning || (!selectedTestCategory && !selectedTestFile)}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: testRunning ? '#444' : '#00aa00',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: testRunning ? 'not-allowed' : 'pointer',
-                    fontWeight: 600
-                  }}
-                >
-                  {testRunning ? 'Running...' : 'Run Tests (Sync)'}
-                </button>
-                {testRunning && (
-                  <button
-                    onClick={stopTests}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      background: '#ff4444',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: '#fff',
-                      cursor: 'pointer',
-                      fontWeight: 600
-                    }}
-                  >
-                    ⏹ Stop Tests
-                  </button>
-                )}
-                <button
-                  onClick={() => {
-                    setTestOutput([]);
-                    setTestResult(null);
-                    setTestSummary(null);
-                    setError(null);
-                  }}
-                  disabled={testRunning}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#666',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Clear Output
-                </button>
-                {testResult && (
-                  <div style={{
-                    padding: '0.5rem 1rem',
-                    background: testResult.success ? '#00aa0020' : '#ff444420',
-                    border: `1px solid ${testResult.success ? '#00aa00' : '#ff4444'}`,
-                    borderRadius: '4px',
-                    color: testResult.success ? '#00aa00' : '#ff4444',
-                    fontWeight: 600
-                  }}>
-                    {testResult.success ? 'PASSED' : 'FAILED'} (Code: {testResult.return_code})
-                  </div>
-                )}
               </div>
 
               {/* Test Summary */}
@@ -1634,89 +1755,6 @@ export default function App() {
                   )}
                 </div>
               )}
-              </div>
-
-              {/* Test Output */}
-              <div style={{
-                background: '#0a0a0a',
-                padding: '1rem',
-                borderRadius: '8px',
-                border: '1px solid #333',
-                minHeight: '400px',
-                maxHeight: '600px',
-                overflow: 'auto',
-                fontFamily: 'monospace',
-                fontSize: '0.85rem',
-                lineHeight: '1.5'
-              }}>
-                {testOutput.length === 0 ? (
-                  <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
-                    No test output yet. Select tests and click "Run Tests" to start.
-                  </div>
-                ) : (
-                  <div style={{ color: '#e0e0e0' }}>
-                    {testOutput.map((line, idx) => {
-                      // Color code different types of output
-                      let color = '#e0e0e0';
-                      if (line.includes('PASSED') || line.includes('passed')) {
-                        color = '#00aa00';
-                      } else if (line.includes('FAILED') || line.includes('FAILED') || line.includes('Error')) {
-                        color = '#ff4444';
-                      } else if (line.includes('WARNING')) {
-                        color = '#ffaa00';
-                      } else if (line.includes('test_') || line.includes('::')) {
-                        color = '#FFB84D';
-                      }
-                      
-                      return (
-                        <div key={idx} style={{ color, marginBottom: '0.25rem', whiteSpace: 'pre-wrap' }}>
-                          {line}
-                        </div>
-                      );
-                    })}
-                    {testRunning && (
-                      <div style={{ color: '#FFB84D', marginTop: '0.5rem' }}>
-                        Running...
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Test Status */}
-              <div style={{
-                background: '#1a1a1a',
-                padding: '1rem',
-                borderRadius: '8px',
-                border: '1px solid #333'
-              }}>
-                <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Test Infrastructure Status</h3>
-                {testStatus ? (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem', fontSize: '0.85rem' }}>
-                    <div>
-                      <span style={{ color: '#666' }}>Tests Dir:</span>{' '}
-                      <span style={{ color: testStatus.tests_dir_exists ? '#00aa00' : '#ff4444' }}>
-                        {testStatus.tests_dir_exists ? 'Exists' : 'Missing'}
-                      </span>
-                    </div>
-                    <div>
-                      <span style={{ color: '#666' }}>Categories:</span>{' '}
-                      <span style={{ color: '#00aaff' }}>{testStatus.available_categories || testStatus.categories?.length || 0}</span>
-                    </div>
-                    <div>
-                      <span style={{ color: '#666' }}>Files:</span>{' '}
-                      <span style={{ color: '#00aaff' }}>{testStatus.available_files || testStatus.files?.length || 0}</span>
-                    </div>
-                    {testStatus.status === 'error' && testStatus.error && (
-                      <div style={{ gridColumn: '1 / -1', color: '#ff4444', fontSize: '0.8rem', marginTop: '0.5rem' }}>
-                        Error: {testStatus.error}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{ color: '#666', fontSize: '0.85rem' }}>Loading status...</div>
-                )}
-              </div>
 
               {error && (
                 <div style={{
@@ -1732,112 +1770,145 @@ export default function App() {
 
               {/* Debug Panel */}
               {renderDebugPanel('testing')}
+              </div>
             </div>
           )}
 
           {/* Orchestration Tab */}
           {activeTab === 'orchestration' && (
             <div>
-              <h2 style={{ marginTop: 0 }}>Orchestration Testing</h2>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  User Input
-                </label>
-                <textarea
-                  value={orchestrationInput}
-                  onChange={(e) => setOrchestrationInput(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '100px',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0',
-                    fontFamily: 'monospace'
-                  }}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Orchestration Testing</h2>
+                {renderConnectionPanel()}
               </div>
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={useRAG}
-                    onChange={(e) => setUseRAG(e.target.checked)}
-                  />
-                  <span>Use RAG</span>
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={useTools}
-                    onChange={(e) => setUseTools(e.target.checked)}
-                  />
-                  <span>Use Tools</span>
-                </label>
-                <button
-                  onClick={testOrchestration}
-                  disabled={isLoading('/orchestration/process')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#FFB84D',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontWeight: 600
-                  }}
-                >
-                  {isLoading('/orchestration/process') ? 'Processing...' : 'Process Request'}
-                </button>
-                <button
-                  onClick={testStreaming}
-                  disabled={isStreaming}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#00aa00',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer'
-                  }}
-                >
-                  {isStreaming ? 'Streaming...' : '📡 Stream Response'}
-                </button>
-              </div>
-              {orchestrationResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Response:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input, Options, and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start' }}>
+                  {/* Left Column: Input, Options, and Controls */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0 }}>
+                    {/* User Input */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>User Input</h3>
+                      <textarea
+                        value={orchestrationInput}
+                        onChange={(e) => setOrchestrationInput(e.target.value)}
+                        style={{
+                          width: '100%',
+                          minHeight: '150px',
+                          padding: '0.75rem',
+                          background: '#222',
+                          border: '1px solid #444',
+                          borderRadius: '4px',
+                          color: '#e0e0e0',
+                          fontFamily: 'monospace',
+                          resize: 'vertical'
+                        }}
+                      />
+                    </div>
+
+                    {/* Options */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Options</h3>
+                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <Switch
+                          checked={useRAG}
+                          onChange={setUseRAG}
+                          label="Use RAG"
+                        />
+                        <Switch
+                          checked={useTools}
+                          onChange={setUseTools}
+                          label="Use Tools"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={testOrchestration}
+                        disabled={isLoading('/orchestration/process')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: isLoading('/orchestration/process') ? '#444' : '#FFB84D',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: isLoading('/orchestration/process') ? 'not-allowed' : 'pointer',
+                          fontWeight: 600
+                        }}
+                      >
+                        {isLoading('/orchestration/process') ? 'Processing...' : 'Process Request'}
+                      </button>
+                      <button
+                        onClick={testStreaming}
+                        disabled={isStreaming}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: isStreaming ? '#444' : '#00aa00',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: isStreaming ? 'not-allowed' : 'pointer',
+                          fontWeight: 600
+                        }}
+                      >
+                        {isStreaming ? 'Streaming...' : 'Stream Response'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Response Output */}
+                  <div style={{
+                    background: '#0a0a0a',
                     padding: '1rem',
-                    borderRadius: '4px',
-                    overflow: 'auto',
-                    maxHeight: '400px',
-                    border: '1px solid #333'
-                  }}>
-                    {orchestrationResult}
-                  </pre>
-                </div>
-              )}
-              {streamingResponse && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Streaming Response:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
-                    padding: '1rem',
-                    borderRadius: '4px',
-                    overflow: 'auto',
-                    maxHeight: '400px',
+                    borderRadius: '8px',
                     border: '1px solid #333',
-                    whiteSpace: 'pre-wrap'
+                    height: '400px',
+                    overflow: 'auto',
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: 0
                   }}>
-                    {streamingResponse}
-                  </pre>
+                    {(orchestrationResult && orchestrationResult.trim()) || (streamingResponse && streamingResponse.trim()) ? (
+                      <>
+                        {orchestrationResult && orchestrationResult.trim() && (
+                          <div>
+                            <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Response:</h3>
+                            <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                              {orchestrationResult}
+                            </div>
+                          </div>
+                        )}
+                        {streamingResponse && streamingResponse.trim() && (
+                          <div style={{ marginTop: (orchestrationResult && orchestrationResult.trim()) ? '2rem' : 0 }}>
+                            <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Streaming Response:</h3>
+                            <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                              {streamingResponse}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No response yet. Enter input and click "Process Request" or "Stream Response" to start.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
             
             {/* Debug Panel for Orchestration */}
             {renderDebugPanel('orchestration')}
@@ -1847,76 +1918,118 @@ export default function App() {
           {/* Workflow Tab */}
           {activeTab === 'workflow' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>Workflow Execution</h2>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  Workflow ID
-                </label>
-                <input
-                  value={workflowId}
-                  onChange={(e) => setWorkflowId(e.target.value)}
-                  placeholder="workflow_123 (auto-generated if empty)"
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0'
-                  }}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Workflow Execution</h2>
+                {renderConnectionPanel()}
               </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  Workflow Steps (JSON)
-                </label>
-                <textarea
-                  value={workflowSteps}
-                  onChange={(e) => setWorkflowSteps(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '200px',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0',
-                    fontFamily: 'monospace'
-                  }}
-                />
-              </div>
-              <button
-                onClick={testWorkflow}
-                disabled={isLoading('/orchestration/workflow')}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#0066ff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                {isLoading('/orchestration/workflow') ? 'Executing...' : 'Execute Workflow'}
-              </button>
-              {workflowResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Result:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Left Column: Input and Controls */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                    {/* Workflow Configuration */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Workflow Configuration</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Workflow ID
+                          </label>
+                          <input
+                            value={workflowId}
+                            onChange={(e) => setWorkflowId(e.target.value)}
+                            placeholder="workflow_123 (auto-generated if empty)"
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Workflow Steps (JSON)
+                          </label>
+                          <textarea
+                            value={workflowSteps}
+                            onChange={(e) => setWorkflowSteps(e.target.value)}
+                            style={{
+                              width: '100%',
+                              minHeight: '200px',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              fontFamily: 'monospace',
+                              resize: 'vertical'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={testWorkflow}
+                        disabled={isLoading('/orchestration/workflow')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: isLoading('/orchestration/workflow') ? '#444' : '#FFB84D',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: isLoading('/orchestration/workflow') ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        {isLoading('/orchestration/workflow') ? 'Executing...' : 'Execute Workflow'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Result Output */}
+                  <div style={{
+                    background: '#0a0a0a',
                     padding: '1rem',
-                    borderRadius: '4px',
+                    borderRadius: '8px',
+                    border: '1px solid #333',
+                    height: '425px',
                     overflow: 'auto',
-                    maxHeight: '400px',
-                    border: '1px solid #333'
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: '300px',
+                    position: 'relative',
+                    zIndex: 0
                   }}>
-                    {workflowResult}
-                  </pre>
+                    {workflowResult && workflowResult.trim() ? (
+                      <div>
+                        <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Result:</h3>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                          {workflowResult}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No result yet. Configure workflow and click "Execute Workflow" to start.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
             
             {/* Debug Panel for Workflow */}
             {renderDebugPanel('workflow')}
@@ -1926,100 +2039,141 @@ export default function App() {
           {/* Local LLM Tab */}
           {activeTab === 'llm' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>Local LLM Testing</h2>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                    Backend
-                  </label>
-                  <select
-                    value={llmBackend}
-                    onChange={(e) => setLlmBackend(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      background: '#1a1a1a',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: '#e0e0e0'
-                    }}
-                  >
-                    <option value="ollama">Ollama</option>
-                    <option value="llama_cpp">llama.cpp</option>
-                    <option value="transformers">Transformers</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                    Model
-                  </label>
-                  <input
-                    value={llmModel}
-                    onChange={(e) => setLlmModel(e.target.value)}
-                    placeholder="llama3:8b"
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      background: '#1a1a1a',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: '#e0e0e0'
-                    }}
-                  />
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Local LLM Testing</h2>
+                {renderConnectionPanel()}
               </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  Prompt
-                </label>
-                <textarea
-                  value={llmPrompt}
-                  onChange={(e) => setLlmPrompt(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '100px',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0',
-                    fontFamily: 'monospace'
-                  }}
-                />
-              </div>
-              <button
-                onClick={testLocalLLM}
-                disabled={isLoading('/orchestration/process')}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#0066ff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                {isLoading('/orchestration/process') ? 'Generating...' : 'Generate Response'}
-              </button>
-              {llmResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Response:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Left Column: Configuration and Controls */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                    {/* LLM Configuration */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>LLM Configuration</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                          <div>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                              Backend
+                            </label>
+                            <select
+                              value={llmBackend}
+                              onChange={(e) => setLlmBackend(e.target.value)}
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                background: '#222',
+                                border: '1px solid #444',
+                                borderRadius: '4px',
+                                color: '#e0e0e0'
+                              }}
+                            >
+                              <option value="ollama">Ollama</option>
+                              <option value="llama_cpp">llama.cpp</option>
+                              <option value="transformers">Transformers</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                              Model
+                            </label>
+                            <input
+                              value={llmModel}
+                              onChange={(e) => setLlmModel(e.target.value)}
+                              placeholder="llama3:8b"
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                background: '#222',
+                                border: '1px solid #444',
+                                borderRadius: '4px',
+                                color: '#e0e0e0'
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Prompt
+                          </label>
+                          <textarea
+                            value={llmPrompt}
+                            onChange={(e) => setLlmPrompt(e.target.value)}
+                            style={{
+                              width: '100%',
+                              minHeight: '150px',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              fontFamily: 'monospace',
+                              resize: 'vertical'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={testLocalLLM}
+                        disabled={isLoading('/orchestration/process')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: isLoading('/orchestration/process') ? '#444' : '#FFB84D',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: isLoading('/orchestration/process') ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        {isLoading('/orchestration/process') ? 'Generating...' : 'Generate Response'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Result Output */}
+                  <div style={{
+                    background: '#0a0a0a',
                     padding: '1rem',
-                    borderRadius: '4px',
-                    overflow: 'auto',
-                    maxHeight: '400px',
+                    borderRadius: '8px',
                     border: '1px solid #333',
-                    whiteSpace: 'pre-wrap'
+                    height: '376px',
+                    overflow: 'auto',
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: '300px',
+                    position: 'relative',
+                    zIndex: 0
                   }}>
-                    {llmResult}
-                  </pre>
+                    {llmResult && llmResult.trim() ? (
+                      <div>
+                        <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Response:</h3>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                          {llmResult}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No response yet. Enter a prompt and click "Generate Response" to start.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
             
             {/* Debug Panel for Local LLM */}
             {renderDebugPanel('llm')}
@@ -2029,120 +2183,169 @@ export default function App() {
           {/* RAG Tab */}
           {activeTab === 'rag' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>RAG / Vector Store Testing</h2>
-            <div style={{ display: 'grid', gap: '1.5rem' }}>
-              <div>
-                <h3 style={{ color: '#999' }}>Query Documents</h3>
-                <div style={{ display: 'grid', gap: '1rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
-                    <input
-                      value={ragQuery}
-                      onChange={(e) => setRagQuery(e.target.value)}
-                      placeholder="Search query..."
-                      style={{
-                        padding: '0.75rem',
-                        background: '#1a1a1a',
-                        border: '1px solid #333',
-                        borderRadius: '4px',
-                        color: '#e0e0e0'
-                      }}
-                    />
-                    <input
-                      type="number"
-                      value={ragTopK}
-                      onChange={(e) => setRagTopK(Number(e.target.value))}
-                      placeholder="Top K"
-                      style={{
-                        padding: '0.75rem',
-                        background: '#1a1a1a',
-                        border: '1px solid #333',
-                        borderRadius: '4px',
-                        color: '#e0e0e0'
-                      }}
-                    />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>RAG / Vector Store Testing</h2>
+                {renderConnectionPanel()}
+              </div>
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Left Column: Query Documents and Add Document */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                    {/* Query Documents */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Query Documents</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', minWidth: 0 }}>
+                          <input
+                            value={ragQuery}
+                            onChange={(e) => setRagQuery(e.target.value)}
+                            placeholder="Search query..."
+                            style={{
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              width: '100%',
+                              minWidth: 0,
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                          <input
+                            type="number"
+                            value={ragTopK}
+                            onChange={(e) => setRagTopK(Number(e.target.value))}
+                            placeholder="Top K"
+                            style={{
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              width: '100%',
+                              minWidth: 0,
+                              boxSizing: 'border-box'
+                            }}
+                          />
+                        </div>
+                        <button
+                          onClick={testRAGQuery}
+                          disabled={isLoading('/rag/query')}
+                          style={{
+                            padding: '0.75rem 1.5rem',
+                            background: isLoading('/rag/query') ? '#444' : '#FFB84D',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: '#fff',
+                            cursor: isLoading('/rag/query') ? 'not-allowed' : 'pointer',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0
+                          }}
+                        >
+                          {isLoading('/rag/query') ? 'Searching...' : 'Search'}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Add Document */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Add Document</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <textarea
+                          value={documentContent}
+                          onChange={(e) => setDocumentContent(e.target.value)}
+                          placeholder="Document content..."
+                          style={{
+                            width: '100%',
+                            minHeight: '100px',
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0',
+                            resize: 'vertical'
+                          }}
+                        />
+                        <textarea
+                          value={documentMetadata}
+                          onChange={(e) => setDocumentMetadata(e.target.value)}
+                          placeholder='{"source": "test", "type": "document"}'
+                          style={{
+                            width: '100%',
+                            minHeight: '60px',
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0',
+                            fontFamily: 'monospace',
+                            resize: 'vertical'
+                          }}
+                        />
+                        <button
+                          onClick={testAddDocument}
+                          disabled={isLoading('/rag/index')}
+                          style={{
+                            padding: '0.75rem 1.5rem',
+                            background: isLoading('/rag/index') ? '#444' : '#00aa00',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: '#fff',
+                            cursor: isLoading('/rag/index') ? 'not-allowed' : 'pointer',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0
+                          }}
+                        >
+                          {isLoading('/rag/index') ? 'Adding...' : 'Add Document'}
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <button
-                    onClick={testRAGQuery}
-                    disabled={isLoading('/rag/query')}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      background: '#FFB84D',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isLoading('/rag/query') ? 'Searching...' : '🔍 Search'}
-                  </button>
-                </div>
-              </div>
-              
-              <div>
-                <h3 style={{ color: '#999' }}>Add Document</h3>
-                <div style={{ display: 'grid', gap: '1rem' }}>
-                  <textarea
-                    value={documentContent}
-                    onChange={(e) => setDocumentContent(e.target.value)}
-                    placeholder="Document content..."
-                    style={{
-                      width: '100%',
-                      minHeight: '100px',
-                      padding: '0.75rem',
-                      background: '#1a1a1a',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: '#e0e0e0'
-                    }}
-                  />
-                  <textarea
-                    value={documentMetadata}
-                    onChange={(e) => setDocumentMetadata(e.target.value)}
-                    placeholder='{"source": "test", "type": "document"}'
-                    style={{
-                      width: '100%',
-                      minHeight: '60px',
-                      padding: '0.75rem',
-                      background: '#1a1a1a',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: '#e0e0e0',
-                      fontFamily: 'monospace'
-                    }}
-                  />
-                  <button
-                    onClick={testAddDocument}
-                    disabled={isLoading('/rag/index')}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      background: '#00aa00',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isLoading('/rag/index') ? 'Adding...' : '➕ Add Document'}
-                  </button>
-                </div>
-              </div>
-              
-              {ragResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Result:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
+
+                  {/* Right Column: Result Output */}
+                  <div style={{
+                    background: '#0a0a0a',
                     padding: '1rem',
-                    borderRadius: '4px',
+                    borderRadius: '8px',
+                    border: '1px solid #333',
+                    height: '546px',
                     overflow: 'auto',
-                    maxHeight: '400px',
-                    border: '1px solid #333'
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: '300px',
+                    position: 'relative',
+                    zIndex: 0
                   }}>
-                    {ragResult}
-                  </pre>
+                    {ragResult && ragResult.trim() ? (
+                      <div>
+                        <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Result:</h3>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                          {ragResult}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No result yet. Query documents or add a document to see results.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
             
             {/* Debug Panel for RAG */}
             {renderDebugPanel('rag')}
@@ -2152,130 +2355,175 @@ export default function App() {
           {/* Tools Tab */}
           {activeTab === 'tools' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>Tool Registry Testing</h2>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                  <button
-                    onClick={loadTools}
-                    disabled={isLoading('/orchestration/status')}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      background: '#FFB84D',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isLoading('/orchestration/status') ? 'Loading...' : '🔄 Load Tools'}
-                  </button>
-                <span style={{ color: '#999' }}>
-                  {toolsList.length} tools available
-                </span>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Tool Registry Testing</h2>
+                {renderConnectionPanel()}
               </div>
-              
-              {toolsList.length > 0 && (
-                <div style={{
-                  background: '#1a1a1a',
-                  padding: '1rem',
-                  borderRadius: '4px',
-                  border: '1px solid #333',
-                  maxHeight: '300px',
-                  overflow: 'auto'
-                }}>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0 }}>Available Tools:</h3>
-                  <div style={{ display: 'grid', gap: '0.5rem' }}>
-                    {toolsList.map((tool: any, idx: number) => (
-                      <div
-                        key={idx}
-                        style={{
-                          padding: '0.75rem',
-                          background: '#222',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          border: '1px solid #333'
-                        }}
-                        onClick={() => {
-                          setToolName(tool.name || '');
-                          setToolInput('{}');
-                        }}
-                      >
-                        <strong style={{ color: '#00aaff' }}>{tool.name}</strong>
-                        <div style={{ color: '#999', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                          {tool.description}
-                        </div>
-                        <div style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                          Category: {tool.category} | Calls: {tool.calls || 0}
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Left Column: Tools List and Execute Tool */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                    {/* Load Tools */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          onClick={loadTools}
+                          disabled={isLoading('/orchestration/status')}
+                          style={{
+                            padding: '0.75rem 1.5rem',
+                            background: isLoading('/orchestration/status') ? '#444' : '#FFB84D',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: '#fff',
+                            cursor: isLoading('/orchestration/status') ? 'not-allowed' : 'pointer',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0
+                          }}
+                        >
+                          {isLoading('/orchestration/status') ? 'Loading...' : 'Load Tools'}
+                        </button>
+                        <span style={{ color: '#999' }}>
+                          {toolsList.length} tools available
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Available Tools */}
+                    {toolsList.length > 0 && (
+                      <div style={{
+                        background: '#1a1a1a',
+                        padding: '1.5rem',
+                        borderRadius: '8px',
+                        border: '1px solid #333',
+                        maxHeight: '300px',
+                        overflow: 'auto'
+                      }}>
+                        <h3 style={{ marginTop: 0, color: '#999' }}>Available Tools:</h3>
+                        <div style={{ display: 'grid', gap: '0.5rem' }}>
+                          {toolsList.map((tool: any, idx: number) => (
+                            <div
+                              key={idx}
+                              style={{
+                                padding: '0.75rem',
+                                background: '#222',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                border: '1px solid #333'
+                              }}
+                              onClick={() => {
+                                setToolName(tool.name || '');
+                                setToolInput('{}');
+                              }}
+                            >
+                              <strong style={{ color: '#00aaff' }}>{tool.name}</strong>
+                              <div style={{ color: '#999', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                                {tool.description}
+                              </div>
+                              <div style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.25rem' }}>
+                                Category: {tool.category} | Calls: {tool.calls || 0}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
-                    ))}
+                    )}
+
+                    {/* Execute Tool */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Execute Tool</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <input
+                          value={toolName}
+                          onChange={(e) => setToolName(e.target.value)}
+                          placeholder="Tool name"
+                          style={{
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0'
+                          }}
+                        />
+                        <textarea
+                          value={toolInput}
+                          onChange={(e) => setToolInput(e.target.value)}
+                          placeholder='{"param1": "value1"}'
+                          style={{
+                            width: '100%',
+                            minHeight: '100px',
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0',
+                            fontFamily: 'monospace',
+                            resize: 'vertical'
+                          }}
+                        />
+                        <button
+                          onClick={testTool}
+                          disabled={!toolName || isLoading('/orchestration/process')}
+                          style={{
+                            padding: '0.75rem 1.5rem',
+                            background: (!toolName || isLoading('/orchestration/process')) ? '#444' : '#FFB84D',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: '#fff',
+                            cursor: (!toolName || isLoading('/orchestration/process')) ? 'not-allowed' : 'pointer',
+                            fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0
+                          }}
+                        >
+                          {isLoading('/orchestration/process') ? 'Executing...' : 'Execute Tool'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Result Output */}
+                  <div style={{
+                    background: '#0a0a0a',
+                    padding: '1rem',
+                    borderRadius: '8px',
+                    border: '1px solid #333',
+                    height: '424px',
+                    overflow: 'auto',
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: '300px',
+                    position: 'relative',
+                    zIndex: 0
+                  }}>
+                    {toolResult && toolResult.trim() ? (
+                      <div>
+                        <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Result:</h3>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                          {toolResult}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No result yet. Load tools, select a tool, and click "Execute Tool" to see results.
+                      </div>
+                    )}
                   </div>
                 </div>
-              )}
-              
-              <div>
-                <h3 style={{ color: '#999' }}>Execute Tool</h3>
-                <div style={{ display: 'grid', gap: '1rem' }}>
-                  <input
-                    value={toolName}
-                    onChange={(e) => setToolName(e.target.value)}
-                    placeholder="Tool name"
-                    style={{
-                      padding: '0.75rem',
-                      background: '#1a1a1a',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: '#e0e0e0'
-                    }}
-                  />
-                  <textarea
-                    value={toolInput}
-                    onChange={(e) => setToolInput(e.target.value)}
-                    placeholder='{"param1": "value1"}'
-                    style={{
-                      width: '100%',
-                      minHeight: '80px',
-                      padding: '0.75rem',
-                      background: '#1a1a1a',
-                      border: '1px solid #333',
-                      borderRadius: '4px',
-                      color: '#e0e0e0',
-                      fontFamily: 'monospace'
-                    }}
-                  />
-                  <button
-                    onClick={testTool}
-                    disabled={!toolName || isLoading('/orchestration/process')}
-                    style={{
-                      padding: '0.75rem 1.5rem',
-                      background: '#FFB84D',
-                      border: 'none',
-                      borderRadius: '4px',
-                      color: '#fff',
-                      cursor: 'pointer'
-                    }}
-                  >
-                    {isLoading('/orchestration/process') ? 'Executing...' : 'Execute Tool'}
-                  </button>
-                </div>
               </div>
-              
-              {toolResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Result:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
-                    padding: '1rem',
-                    borderRadius: '4px',
-                    overflow: 'auto',
-                    maxHeight: '400px',
-                    border: '1px solid #333'
-                  }}>
-                    {toolResult}
-                  </pre>
-                </div>
-              )}
-            </div>
             
             {/* Debug Panel for Tools */}
             {renderDebugPanel('tools')}
@@ -2285,123 +2533,170 @@ export default function App() {
           {/* State Management Tab */}
           {activeTab === 'state' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>State Management</h2>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  Workflow ID
-                </label>
-                <input
-                  value={stateWorkflowId}
-                  onChange={(e) => setStateWorkflowId(e.target.value)}
-                  placeholder="workflow_123"
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0'
-                  }}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>State Management</h2>
+                {renderConnectionPanel()}
               </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  State Data (JSON)
-                </label>
-                <textarea
-                  value={stateData}
-                  onChange={(e) => setStateData(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '100px',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0',
-                    fontFamily: 'monospace'
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  Checkpoint Name
-                </label>
-                <input
-                  value={checkpointName}
-                  onChange={(e) => setCheckpointName(e.target.value)}
-                  placeholder="checkpoint_1"
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0'
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <button
-                  onClick={testCreateState}
-                  disabled={isLoading('/orchestration/workflow')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#FFB84D',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Create State
-                </button>
-                <button
-                  onClick={testCheckpoint}
-                  disabled={!stateWorkflowId || isLoading('/orchestration/workflow')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#00aa00',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer'
-                  }}
-                >
-                  📍 Create Checkpoint
-                </button>
-                <button
-                  onClick={loadWorkflowStates}
-                  disabled={!stateWorkflowId}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#666',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer'
-                  }}
-                >
-                  🔄 Load State
-                </button>
-              </div>
-              {stateResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Result:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Left Column: Configuration and Controls */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                    {/* State Configuration */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>State Configuration</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Workflow ID
+                          </label>
+                          <input
+                            value={stateWorkflowId}
+                            onChange={(e) => setStateWorkflowId(e.target.value)}
+                            placeholder="workflow_123"
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            State Data (JSON)
+                          </label>
+                          <textarea
+                            value={stateData}
+                            onChange={(e) => setStateData(e.target.value)}
+                            style={{
+                              width: '100%',
+                              minHeight: '100px',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              fontFamily: 'monospace',
+                              resize: 'vertical'
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                            Checkpoint Name
+                          </label>
+                          <input
+                            value={checkpointName}
+                            onChange={(e) => setCheckpointName(e.target.value)}
+                            placeholder="checkpoint_1"
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={testCreateState}
+                        disabled={isLoading('/orchestration/workflow')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: isLoading('/orchestration/workflow') ? '#444' : '#FFB84D',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: isLoading('/orchestration/workflow') ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        Create State
+                      </button>
+                      <button
+                        onClick={testCheckpoint}
+                        disabled={!stateWorkflowId || isLoading('/orchestration/workflow')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: (!stateWorkflowId || isLoading('/orchestration/workflow')) ? '#444' : '#00aa00',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: (!stateWorkflowId || isLoading('/orchestration/workflow')) ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        Create Checkpoint
+                      </button>
+                      <button
+                        onClick={loadWorkflowStates}
+                        disabled={!stateWorkflowId}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: !stateWorkflowId ? '#444' : '#666',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: !stateWorkflowId ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        Load State
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Result Output */}
+                  <div style={{
+                    background: '#0a0a0a',
                     padding: '1rem',
-                    borderRadius: '4px',
+                    borderRadius: '8px',
+                    border: '1px solid #333',
+                    height: '414px',
                     overflow: 'auto',
-                    maxHeight: '400px',
-                    border: '1px solid #333'
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: '300px',
+                    position: 'relative',
+                    zIndex: 0
                   }}>
-                    {stateResult}
-                  </pre>
+                    {stateResult && stateResult.trim() ? (
+                      <div>
+                        <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Result:</h3>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                          {stateResult}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No result yet. Configure state and click an action button to see results.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
             
             {/* Debug Panel for State Management */}
             {renderDebugPanel('state')}
@@ -2411,7 +2706,10 @@ export default function App() {
           {/* Monitoring Tab */}
           {activeTab === 'monitoring' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>System Monitoring</h2>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>System Monitoring</h2>
+                {renderConnectionPanel()}
+              </div>
             <div style={{ display: 'grid', gap: '1rem' }}>
               {systemStatus && (
                 <div>
@@ -2453,57 +2751,97 @@ export default function App() {
           {/* Safety Tab */}
           {activeTab === 'safety' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>Safety & Guardrails Testing</h2>
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                  Test Input (will be checked for safety)
-                </label>
-                <textarea
-                  value={safetyInput}
-                  onChange={(e) => setSafetyInput(e.target.value)}
-                  style={{
-                    width: '100%',
-                    minHeight: '100px',
-                    padding: '0.75rem',
-                    background: '#1a1a1a',
-                    border: '1px solid #333',
-                    borderRadius: '4px',
-                    color: '#e0e0e0'
-                  }}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Safety & Guardrails Testing</h2>
+                {renderConnectionPanel()}
               </div>
-              <button
-                onClick={testSafety}
-                disabled={isLoading('/orchestration/process')}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#ff6600',
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: '#fff',
-                  cursor: 'pointer',
-                  fontWeight: 600
-                }}
-              >
-                {isLoading('/orchestration/process') ? 'Checking...' : 'Test Safety'}
-              </button>
-              {safetyResult && (
-                <div>
-                  <h3 style={{ color: '#999', fontSize: '0.9rem' }}>Safety Check Result:</h3>
-                  <pre style={{
-                    background: '#1a1a1a',
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Input and Output - Side by Side */}
+                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                  {/* Left Column: Configuration and Controls */}
+                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+                    {/* Safety Test Input */}
+                    <div style={{
+                      background: '#1a1a1a',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Test Input</h3>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <label style={{ display: 'block', color: '#999', fontSize: '0.9rem' }}>
+                          Input to be checked for safety
+                        </label>
+                        <textarea
+                          value={safetyInput}
+                          onChange={(e) => setSafetyInput(e.target.value)}
+                          style={{
+                            width: '100%',
+                            minHeight: '150px',
+                            padding: '0.75rem',
+                            background: '#222',
+                            border: '1px solid #444',
+                            borderRadius: '4px',
+                            color: '#e0e0e0',
+                            resize: 'vertical'
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={testSafety}
+                        disabled={isLoading('/orchestration/process')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: isLoading('/orchestration/process') ? '#444' : '#FFB84D',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#fff',
+                          cursor: isLoading('/orchestration/process') ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
+                        }}
+                      >
+                        {isLoading('/orchestration/process') ? 'Checking...' : 'Test Safety'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Result Output */}
+                  <div style={{
+                    background: '#0a0a0a',
                     padding: '1rem',
-                    borderRadius: '4px',
+                    borderRadius: '8px',
+                    border: '1px solid #333',
+                    height: '284px',
                     overflow: 'auto',
-                    maxHeight: '400px',
-                    border: '1px solid #333'
+                    fontFamily: 'monospace',
+                    fontSize: '0.85rem',
+                    lineHeight: '1.5',
+                    flex: '2',
+                    minWidth: '300px',
+                    position: 'relative',
+                    zIndex: 0
                   }}>
-                    {safetyResult}
-                  </pre>
+                    {safetyResult && safetyResult.trim() ? (
+                      <div>
+                        <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Safety Check Result:</h3>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                          {safetyResult}
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                        No result yet. Enter test input and click "Test Safety" to see results.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
             
             {/* Debug Panel for Safety */}
             {renderDebugPanel('safety')}
@@ -2513,292 +2851,356 @@ export default function App() {
           {/* Chat Tab */}
           {activeTab === 'chat' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>Interactive Chat</h2>
-            
-            {/* Provider Selection */}
-            <div style={{
-              background: '#1a1a1a',
-              padding: '1rem',
-              borderRadius: '4px',
-              border: '1px solid #333',
-              marginBottom: '1rem'
-            }}>
-              <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Provider Configuration</h3>
-              <div style={{ display: 'grid', gap: '1rem' }}>
-                <div>
-                  <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                    Provider
-                  </label>
-                  <select
-                    value={chatProvider}
-                    onChange={(e) => setChatProvider(e.target.value as 'api' | 'local')}
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      background: '#222',
-                      border: '1px solid #444',
-                      borderRadius: '4px',
-                      color: '#e0e0e0'
-                    }}
-                  >
-                    <option value="api">API Key (OpenAI/Cloud)</option>
-                    <option value="local">Local LLM (Ollama/LocalAI)</option>
-                  </select>
-                </div>
-                
-                {chatProvider === 'local' && (
-                  <>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <button
-                        onClick={scanForLLMServices}
-                        disabled={scanningLLMServices}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Interactive Chat</h2>
+                {renderConnectionPanel()}
+              </div>
+              <div style={{ display: 'grid', gap: '1.5rem' }}>
+                {/* Chat Box - Full Width */}
+                <div style={{
+                  background: '#0a0a0a',
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  border: '1px solid #333',
+                  height: '600px',
+                  fontFamily: 'monospace',
+                  fontSize: '0.85rem',
+                  lineHeight: '1.5',
+                  position: 'relative',
+                  zIndex: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  width: '100%'
+                }}>
+                    <div style={{ flex: 1, overflow: 'auto', marginBottom: '1rem' }}>
+                      {chatHistory.length === 0 ? (
+                        <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
+                          No messages yet. Start a conversation!
+                        </div>
+                      ) : (
+                        chatHistory.map((msg, idx) => (
+                          <div
+                            key={idx}
+                            style={{
+                              marginBottom: '1rem',
+                              padding: '0.75rem',
+                              background: msg.role === 'user' ? '#FFB84D20' : msg.role === 'assistant' ? '#00aa0020' : '#ff660020',
+                              borderRadius: '4px',
+                              borderLeft: `3px solid ${
+                                msg.role === 'user' ? '#FFB84D' : msg.role === 'assistant' ? '#00aa00' : '#ff6600'
+                              }`
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                              <strong style={{ color: msg.role === 'user' ? '#FFB84D' : msg.role === 'assistant' ? '#00aa00' : '#ff6600' }}>
+                                {msg.role.toUpperCase()}
+                              </strong>
+                              {msg.timestamp && (
+                                <span style={{ color: '#666', fontSize: '0.75rem' }}>
+                                  {new Date(msg.timestamp).toLocaleTimeString()}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ whiteSpace: 'pre-wrap', color: '#e0e0e0' }}>{msg.content}</div>
+                            {msg.meta && (
+                              <details style={{ marginTop: '0.5rem' }}>
+                                <summary style={{ cursor: 'pointer', color: '#999', fontSize: '0.85rem' }}>Details</summary>
+                                <pre style={{
+                                  marginTop: '0.5rem',
+                                  padding: '0.5rem',
+                                  background: '#1a1a1a',
+                                  borderRadius: '4px',
+                                  fontSize: '0.8rem',
+                                  overflow: 'auto',
+                                  color: '#e0e0e0'
+                                }}>
+                                  {pretty(msg.meta)}
+                                </pre>
+                              </details>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                    {/* Chat Input at Bottom */}
+                    <div style={{ display: 'flex', gap: '0.5rem', paddingTop: '1rem', borderTop: '1px solid #333', alignItems: 'center' }}>
+                      <input
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
+                        placeholder="Type your message..."
                         style={{
-                          padding: '0.5rem 1rem',
-                          background: scanningLLMServices ? '#444' : '#FFB84D',
+                          flex: 1,
+                          padding: '0.75rem',
+                          background: '#222',
+                          border: '1px solid #444',
+                          borderRadius: '4px',
+                          color: '#e0e0e0'
+                        }}
+                      />
+                      {/* Model Button */}
+                      <div style={{ position: 'relative' }} data-provider-dropdown>
+                        <button
+                          onClick={() => setShowProviderDropdown(!showProviderDropdown)}
+                          style={{
+                            padding: '0.75rem 1rem',
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#999',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            fontSize: '0.9rem',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
+                          <span>{chatProvider === 'api' ? 'API Key' : 'Local LLM'}</span>
+                          <span style={{ fontSize: '0.75rem', marginLeft: '0.25rem' }}>▼</span>
+                        </button>
+                        {showProviderDropdown && (
+                          <div style={{
+                            position: 'absolute',
+                            bottom: '100%',
+                            right: 0,
+                            marginBottom: '0.5rem',
+                            background: '#1a1a1a',
+                            border: '1px solid #333',
+                            borderRadius: '4px',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
+                            minWidth: '200px',
+                            zIndex: 1000
+                          }}>
+                            <button
+                              onClick={() => {
+                                setChatProvider('api');
+                                setShowProviderDropdown(false);
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem 1rem',
+                                background: chatProvider === 'api' ? '#222' : 'transparent',
+                                border: 'none',
+                                color: '#e0e0e0',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontSize: '0.9rem'
+                              }}
+                            >
+                              API Key (OpenAI/Cloud)
+                            </button>
+                            <button
+                              onClick={() => {
+                                setChatProvider('local');
+                                setShowProviderDropdown(false);
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem 1rem',
+                                background: chatProvider === 'local' ? '#222' : 'transparent',
+                                border: 'none',
+                                borderTop: '1px solid #333',
+                                color: '#e0e0e0',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontSize: '0.9rem'
+                              }}
+                            >
+                              Local LLM (Ollama/LocalAI)
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={handleChatSend}
+                        disabled={!chatInput.trim() || isLoading('/orchestration/process')}
+                        style={{
+                          padding: '0.75rem 1.5rem',
+                          background: (!chatInput.trim() || isLoading('/orchestration/process')) ? '#444' : '#FFB84D',
                           border: 'none',
                           borderRadius: '4px',
                           color: '#fff',
-                          cursor: scanningLLMServices ? 'not-allowed' : 'pointer',
-                          fontSize: '0.85rem'
+                          cursor: (!chatInput.trim() || isLoading('/orchestration/process')) ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0
                         }}
                       >
-                        {scanningLLMServices ? 'Scanning...' : '🔍 Scan for Services'}
+                        Send
                       </button>
-                      <span style={{ color: '#999', fontSize: '0.85rem' }}>
-                        {availableLLMServices.length} service(s) found
-                      </span>
                     </div>
-                    
-                    {availableLLMServices.length > 0 && (
-                      <>
-                        <div>
-                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                            Service
-                          </label>
-                          <select
-                            value={chatLocalLLMService}
-                            onChange={(e) => {
-                              setChatLocalLLMService(e.target.value);
-                              const service = availableLLMServices.find(s => s.name === e.target.value);
-                              if (service) {
-                                if (service.models && service.models.length > 0) {
-                                  setChatLocalLLMModel(service.models[0]);
-                                }
-                                if (service.type) {
-                                  setChatLocalLLMBackend(service.type);
-                                }
-                              }
-                            }}
-                            style={{
-                              width: '100%',
-                              padding: '0.75rem',
-                              background: '#222',
-                              border: '1px solid #444',
-                              borderRadius: '4px',
-                              color: '#e0e0e0'
-                            }}
-                          >
-                            {availableLLMServices.map(service => (
-                              <option key={service.name} value={service.name}>
-                                {service.name} ({service.type}) - {service.base_url}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        
-                        <div>
-                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                            Backend
-                          </label>
-                          <select
-                            value={chatLocalLLMBackend}
-                            onChange={(e) => setChatLocalLLMBackend(e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '0.75rem',
-                              background: '#222',
-                              border: '1px solid #444',
-                              borderRadius: '4px',
-                              color: '#e0e0e0'
-                            }}
-                          >
-                            <option value="ollama">Ollama</option>
-                            <option value="llama_cpp">llama.cpp</option>
-                            <option value="transformers">Transformers</option>
-                          </select>
-                        </div>
-                        
-                        <div>
-                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                            Model
-                          </label>
-                          {(() => {
-                            const selectedService = availableLLMServices.find(s => s.name === chatLocalLLMService);
-                            const models = selectedService?.models || [];
-                            
-                            if (models.length > 0) {
-                              return (
-                                <select
-                                  value={chatLocalLLMModel}
-                                  onChange={(e) => setChatLocalLLMModel(e.target.value)}
-                                  style={{
-                                    width: '100%',
-                                    padding: '0.75rem',
-                                    background: '#222',
-                                    border: '1px solid #444',
-                                    borderRadius: '4px',
-                                    color: '#e0e0e0'
-                                  }}
-                                >
-                                  {models.map(model => (
-                                    <option key={model} value={model}>{model}</option>
-                                  ))}
-                                </select>
-                              );
-                            } else {
-                              return (
-                                <input
-                                  value={chatLocalLLMModel}
-                                  onChange={(e) => setChatLocalLLMModel(e.target.value)}
-                                  placeholder="llama3:8b"
-                                  style={{
-                                    width: '100%',
-                                    padding: '0.75rem',
-                                    background: '#222',
-                                    border: '1px solid #444',
-                                    borderRadius: '4px',
-                                    color: '#e0e0e0'
-                                  }}
-                                />
-                              );
-                            }
-                          })()}
-                        </div>
-                        
-                        <div>
-                          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
-                            Max Tokens (lower = faster, default: 200)
-                          </label>
-                          <input
-                            type="number"
-                            value={chatMaxTokens}
-                            onChange={(e) => setChatMaxTokens(Number(e.target.value))}
-                            min="50"
-                            max="2000"
-                            style={{
-                              width: '100%',
-                              padding: '0.75rem',
-                              background: '#222',
-                              border: '1px solid #444',
-                              borderRadius: '4px',
-                              color: '#e0e0e0'
-                            }}
-                          />
-                        </div>
-                      </>
-                    )}
-                    
-                    {availableLLMServices.length === 0 && !scanningLLMServices && (
-                      <div style={{ color: '#ffaa00', fontSize: '0.85rem', padding: '0.5rem', background: '#ffaa0020', borderRadius: '4px' }}>
-                        No local LLM services found. Click "Scan for Services" to discover services on the Docker network.
-                      </div>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-            
-            <div style={{
-              background: '#1a1a1a',
-              border: '1px solid #333',
-              borderRadius: '4px',
-              padding: '1rem',
-              minHeight: '400px',
-              display: 'flex',
-              flexDirection: 'column',
-              width: '100%',
-              boxSizing: 'border-box'
-            }}>
-              <div style={{ flex: 1, overflow: 'auto', marginBottom: '1rem' }}>
-                {chatHistory.length === 0 && (
-                  <div style={{ color: '#666', textAlign: 'center', padding: '2rem' }}>
-                    No messages yet. Start a conversation!
                   </div>
-                )}
-                {chatHistory.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      marginBottom: '1rem',
-                      padding: '0.75rem',
-                      background: msg.role === 'user' ? '#FFB84D20' : msg.role === 'assistant' ? '#00aa0020' : '#ff660020',
-                      borderRadius: '4px',
-                      borderLeft: `3px solid ${
-                        msg.role === 'user' ? '#FFB84D' : msg.role === 'assistant' ? '#00aa00' : '#ff6600'
-                      }`
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                      <strong style={{ color: msg.role === 'user' ? '#FFB84D' : msg.role === 'assistant' ? '#00aa00' : '#ff6600' }}>
-                        {msg.role.toUpperCase()}
-                      </strong>
-                      {msg.timestamp && (
-                        <span style={{ color: '#666', fontSize: '0.75rem' }}>
-                          {new Date(msg.timestamp).toLocaleTimeString()}
+
+                {/* Local LLM Configuration - Below Chat Box */}
+                {chatProvider === 'local' && (
+                  <div style={{
+                    background: '#1a1a1a',
+                    padding: '1.5rem',
+                    borderRadius: '8px',
+                    border: '1px solid #333'
+                  }}>
+                    <h3 style={{ marginTop: 0, color: '#999' }}>Local LLM Configuration</h3>
+                    <div style={{ display: 'grid', gap: '1rem' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                        <button
+                          onClick={scanForLLMServices}
+                          disabled={scanningLLMServices}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            background: scanningLLMServices ? '#444' : '#FFB84D',
+                            border: 'none',
+                            borderRadius: '4px',
+                            color: '#fff',
+                            cursor: scanningLLMServices ? 'not-allowed' : 'pointer',
+                            fontSize: '0.85rem',
+                            fontWeight: 600
+                          }}
+                        >
+                          {scanningLLMServices ? 'Scanning...' : 'Scan for Services'}
+                        </button>
+                        <span style={{ color: '#999', fontSize: '0.85rem' }}>
+                          {availableLLMServices.length} service(s) found
                         </span>
+                      </div>
+                      
+                      {availableLLMServices.length > 0 && (
+                        <>
+                          <div>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                              Service
+                            </label>
+                            <select
+                              value={chatLocalLLMService}
+                              onChange={(e) => {
+                                setChatLocalLLMService(e.target.value);
+                                const service = availableLLMServices.find(s => s.name === e.target.value);
+                                if (service) {
+                                  if (service.models && service.models.length > 0) {
+                                    setChatLocalLLMModel(service.models[0]);
+                                  }
+                                  if (service.type) {
+                                    setChatLocalLLMBackend(service.type);
+                                  }
+                                }
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                background: '#222',
+                                border: '1px solid #444',
+                                borderRadius: '4px',
+                                color: '#e0e0e0'
+                              }}
+                            >
+                              {availableLLMServices.map(service => (
+                                <option key={service.name} value={service.name}>
+                                  {service.name} ({service.type}) - {service.base_url}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          
+                          <div>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                              Backend
+                            </label>
+                            <select
+                              value={chatLocalLLMBackend}
+                              onChange={(e) => setChatLocalLLMBackend(e.target.value)}
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                background: '#222',
+                                border: '1px solid #444',
+                                borderRadius: '4px',
+                                color: '#e0e0e0'
+                              }}
+                            >
+                              <option value="ollama">Ollama</option>
+                              <option value="llama_cpp">llama.cpp</option>
+                              <option value="transformers">Transformers</option>
+                            </select>
+                          </div>
+                          
+                          <div>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                              Model
+                            </label>
+                            {(() => {
+                              const selectedService = availableLLMServices.find(s => s.name === chatLocalLLMService);
+                              const models = selectedService?.models || [];
+                              
+                              if (models.length > 0) {
+                                return (
+                                  <select
+                                    value={chatLocalLLMModel}
+                                    onChange={(e) => setChatLocalLLMModel(e.target.value)}
+                                    style={{
+                                      width: '100%',
+                                      padding: '0.75rem',
+                                      background: '#222',
+                                      border: '1px solid #444',
+                                      borderRadius: '4px',
+                                      color: '#e0e0e0'
+                                    }}
+                                  >
+                                    {models.map(model => (
+                                      <option key={model} value={model}>{model}</option>
+                                    ))}
+                                  </select>
+                                );
+                              } else {
+                                return (
+                                  <input
+                                    value={chatLocalLLMModel}
+                                    onChange={(e) => setChatLocalLLMModel(e.target.value)}
+                                    placeholder="llama3:8b"
+                                    style={{
+                                      width: '100%',
+                                      padding: '0.75rem',
+                                      background: '#222',
+                                      border: '1px solid #444',
+                                      borderRadius: '4px',
+                                      color: '#e0e0e0'
+                                    }}
+                                  />
+                                );
+                              }
+                            })()}
+                          </div>
+                          
+                          <div>
+                            <label style={{ display: 'block', marginBottom: '0.5rem', color: '#999' }}>
+                              Max Tokens (lower = faster, default: 200)
+                            </label>
+                            <input
+                              type="number"
+                              value={chatMaxTokens}
+                              onChange={(e) => setChatMaxTokens(Number(e.target.value))}
+                              min="50"
+                              max="2000"
+                              style={{
+                                width: '100%',
+                                padding: '0.75rem',
+                                background: '#222',
+                                border: '1px solid #444',
+                                borderRadius: '4px',
+                                color: '#e0e0e0'
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      
+                      {availableLLMServices.length === 0 && !scanningLLMServices && (
+                        <div style={{ color: '#ffaa00', fontSize: '0.85rem', padding: '0.5rem', background: '#ffaa0020', borderRadius: '4px' }}>
+                          No local LLM services found. Click "Scan for Services" to discover services on the Docker network.
+                        </div>
                       )}
                     </div>
-                    <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-                    {msg.meta && (
-                      <details style={{ marginTop: '0.5rem' }}>
-                        <summary style={{ cursor: 'pointer', color: '#999', fontSize: '0.85rem' }}>Details</summary>
-                        <pre style={{
-                          marginTop: '0.5rem',
-                          padding: '0.5rem',
-                          background: '#0a0a0a',
-                          borderRadius: '4px',
-                          fontSize: '0.8rem',
-                          overflow: 'auto'
-                        }}>
-                          {pretty(msg.meta)}
-                        </pre>
-                      </details>
-                    )}
                   </div>
-                ))}
+                )}
               </div>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleChatSend()}
-                  placeholder="Type your message..."
-                  style={{
-                    flex: 1,
-                    padding: '0.75rem',
-                    background: '#222',
-                    border: '1px solid #444',
-                    borderRadius: '4px',
-                    color: '#e0e0e0'
-                  }}
-                />
-                <button
-                  onClick={handleChatSend}
-                  disabled={!chatInput.trim() || isLoading('/orchestration/process')}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    background: '#FFB84D',
-                    border: 'none',
-                    borderRadius: '4px',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontWeight: 600
-                  }}
-                >
-                  Send
-                </button>
-              </div>
-            </div>
             
             {/* Debug Panel for Chat */}
             {renderDebugPanel('chat')}
@@ -2808,7 +3210,10 @@ export default function App() {
           {/* Test History Tab */}
           {activeTab === 'history' && (
             <div>
-            <h2 style={{ marginTop: 0 }}>Test History</h2>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Test History</h2>
+                {renderConnectionPanel()}
+              </div>
             <div style={{ 
               display: 'grid', 
               gap: '0.5rem',
@@ -2895,8 +3300,8 @@ export default function App() {
                           gap: '0.75rem',
                           flexWrap: 'wrap'
                         }}>
-                          <span>⏱ {durationStr}</span>
-                          <span>🕐 {new Date(test.timestamp).toLocaleString()}</span>
+                          <span>{durationStr}</span>
+                          <span>{new Date(test.timestamp).toLocaleString()}</span>
                         </div>
                       </div>
                     </div>
@@ -2923,7 +3328,7 @@ export default function App() {
                         marginBottom: '0.25rem',
                         fontWeight: 600
                       }}>
-                        📤 Request:
+                        Request:
                       </div>
                       <div style={{
                         background: '#0a0a0a',
@@ -2950,7 +3355,7 @@ export default function App() {
                           marginBottom: '0.25rem',
                           fontWeight: 600
                         }}>
-                          📥 Response:
+                          Response:
                         </div>
                         <div style={{
                           background: '#0a0a0a',
@@ -2980,7 +3385,7 @@ export default function App() {
                         borderRadius: '4px',
                         border: '1px solid #333'
                       }}>
-                        🔍 View Full Details
+                        View Full Details
                       </summary>
                       <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
                         <div>
@@ -3022,6 +3427,7 @@ export default function App() {
           </div>
           )}
         </React.Fragment>
+        </div>
       </div>
     </div>
   );
