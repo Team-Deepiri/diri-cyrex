@@ -15,6 +15,7 @@ export type TabId =
   | 'monitoring'
   | 'safety'
   | 'chat'
+  | 'health'
   | 'history';
 
 interface UIState {

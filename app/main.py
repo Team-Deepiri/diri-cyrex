@@ -100,7 +100,8 @@ async def add_request_id_and_metrics(request: Request, call_next):
     try:
         # API key guard for non-health/metrics endpoints
         # Allow OPTIONS requests (CORS preflight) and requests from desktop IDE (Electron) and web app
-        if not path.startswith("/health") and not path.startswith("/metrics") and method != "OPTIONS":
+        # Also allow health-comprehensive endpoint
+        if not path.startswith("/health") and not path.startswith("/metrics") and not path.startswith("/orchestration/health-comprehensive") and method != "OPTIONS":
             api_key = request.headers.get("x-api-key")
             # Check if request is from desktop IDE (has x-desktop-client header) or has valid API key
             is_desktop_client = request.headers.get("x-desktop-client") == "true"

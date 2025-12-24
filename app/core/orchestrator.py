@@ -763,7 +763,13 @@ Final Answer: the final answer to the original input question"""),
         return status
 
 
+# Singleton orchestrator instance
+_orchestrator = None
+
 def get_orchestrator() -> WorkflowOrchestrator:
-    """Get global orchestrator instance"""
-    return WorkflowOrchestrator()
+    """Get global orchestrator instance (singleton)"""
+    global _orchestrator
+    if _orchestrator is None:
+        _orchestrator = WorkflowOrchestrator()
+    return _orchestrator
 

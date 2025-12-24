@@ -99,45 +99,18 @@ class MilvusVectorStore:
             last_error = None
             errors = []
             
-            # Method 1: Try HuggingFaceEmbeddings if available
-            if HuggingFaceEmbeddings:
-                try:
-                    logger.info(f"Attempting to initialize {model_name} with HuggingFaceEmbeddings...")
-                    self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
-                    # Test the embedding to ensure it works
-                    test_embedding = self.embeddings.embed_query("test")
-                    if test_embedding and len(test_embedding) > 0:
-                        logger.info(f"Successfully initialized embedding model: {model_name} (HuggingFaceEmbeddings, dim={len(test_embedding)})")
-                        embedding_initialized = True
-                    else:
-                        raise RuntimeError("Embedding test returned empty result")
-                except Exception as e:
-                    error_msg = str(e)
-                    errors.append(f"HuggingFaceEmbeddings: {error_msg}")
-                    last_error = e
-                    if "meta tensor" in error_msg.lower() or "to_empty" in error_msg.lower():
-                        logger.warning(f"HuggingFaceEmbeddings failed with meta tensor error: {e}, trying robust wrapper")
-                    else:
-                        logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
-            
-            # Method 2: Use robust embeddings wrapper (bypasses HuggingFaceEmbeddings issues)
-            if not embedding_initialized:
-                try:
-                    logger.info(f"Attempting to initialize {model_name} with RobustEmbeddings wrapper...")
-                    from .embeddings_wrapper import get_robust_embeddings
-                    self.embeddings = get_robust_embeddings(model_name)
-                    # Test the embedding to ensure it works
-                    test_embedding = self.embeddings.embed_query("test")
-                    if test_embedding and len(test_embedding) > 0:
-                        logger.info(f"Successfully initialized embedding model: {model_name} (RobustEmbeddings wrapper, dim={len(test_embedding)})")
-                        embedding_initialized = True
-                    else:
-                        raise RuntimeError("Embedding test returned empty result")
-                except Exception as e2:
-                    error_msg = str(e2)
-                    errors.append(f"RobustEmbeddings: {error_msg}")
-                    last_error = e2
-                    logger.error(f"RobustEmbeddings initialization failed: {e2}", exc_info=True)
+            try:
+                logger.info(f"Initializing {model_name} with cached RobustEmbeddings wrapper...")
+                from .embeddings_wrapper import get_robust_embeddings
+                self.embeddings = get_robust_embeddings(model_name)
+                # Don't test embedding here to avoid reloading - trust the cache
+                logger.info(f"Successfully initialized embedding model: {model_name} (cached RobustEmbeddings)")
+                embedding_initialized = True
+            except Exception as e2:
+                error_msg = str(e2)
+                errors.append(f"RobustEmbeddings: {error_msg}")
+                last_error = e2
+                logger.error(f"RobustEmbeddings initialization failed: {e2}", exc_info=True)
             
             if not embedding_initialized:
                 error_summary = "; ".join(errors) if errors else str(last_error)
@@ -176,13 +149,46 @@ class MilvusVectorStore:
         
         try:
             # Connect with default alias for PyMilvus operations
-            logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
-            connections.connect(
-                alias=self.connection_alias,
-                host=self.host,
-                port=self.port,
-                timeout=10.0,  # Increased timeout for better reliability
-            )
+            # Check if connection already exists and is valid before creating new one
+            connection_exists = False
+            try:
+                if connections.has_connection(self.connection_alias):
+                    # Connection exists, verify it's still valid by trying a simple operation
+                    try:
+                        # Try to list collections to verify connection is alive
+                        utility.list_collections()
+                        connection_exists = True
+                        logger.debug(f"Reusing existing Milvus connection: {self.connection_alias}")
+                    except Exception as verify_error:
+                        error_msg = str(verify_error).lower()
+                        if "closed channel" in error_msg or "rpc" in error_msg:
+                            # Connection exists but channel is closed, disconnect and reconnect
+                            logger.warning(f"Existing connection has closed channel, reconnecting...")
+                            try:
+                                connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            connection_exists = False
+                        else:
+                            # Other error, might still be valid, but reconnect to be safe
+                            logger.debug(f"Connection verification failed: {verify_error}, reconnecting...")
+                            try:
+                                connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            connection_exists = False
+            except Exception:
+                # has_connection check failed, assume no connection
+                connection_exists = False
+            
+            if not connection_exists:
+                logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
+                connections.connect(
+                    alias=self.connection_alias,
+                    host=self.host,
+                    port=self.port,
+                    timeout=10.0,  # Increased timeout for better reliability
+                )
             
             # Verify connection by checking server version
             try:
@@ -392,10 +398,13 @@ class MilvusVectorStore:
                 if not wrapper_initialized:
                     if last_error:
                         error_msg = str(last_error).lower()
-                        if "localhost" in error_msg or "closed channel" in error_msg or "connection" in error_msg:
-                            logger.warning(f"LangChain Milvus wrapper failed to connect (may be using wrong host or channel closed). Error: {last_error}")
+                        # Suppress common compatibility errors - fallback works fine
+                        if "unexpected keyword argument" in error_msg or "using" in error_msg:
+                            logger.debug(f"LangChain Milvus wrapper not compatible with this version (common): {last_error}")
+                        elif "localhost" in error_msg or "closed channel" in error_msg or "connection" in error_msg:
+                            logger.debug(f"LangChain Milvus wrapper failed to connect (may be using wrong host or channel closed): {last_error}")
                         else:
-                            logger.warning(f"LangChain Milvus wrapper initialization failed: {last_error}")
+                            logger.debug(f"LangChain Milvus wrapper initialization failed: {last_error}")
                         raise last_error  # Re-raise to be caught by outer except block
                     else:
                         # Should not happen, but handle gracefully
@@ -417,7 +426,12 @@ class MilvusVectorStore:
                     collection_name=self.collection_name,
                 )
         except Exception as e:
-            logger.warning(f"Failed to create LangChain Milvus wrapper, using in-memory fallback: {e}", exc_info=True)
+            # Suppress verbose errors for known compatibility issues
+            error_msg = str(e).lower()
+            if "unexpected keyword argument" in error_msg or "using" in error_msg:
+                logger.debug(f"LangChain Milvus wrapper not compatible, using fallback: {e}")
+            else:
+                logger.debug(f"Failed to create LangChain Milvus wrapper, using fallback: {e}")
             # Don't mark as unavailable - PyMilvus connection still works
             # Just disable LangChain wrapper features
             self.langchain_store = None
@@ -434,8 +448,38 @@ class MilvusVectorStore:
             return
         
         try:
-            # Check default connection
-            if not connections.has_connection(self.connection_alias):
+            # Check default connection - verify it's actually alive, not just registered
+            connection_needs_reconnect = True
+            try:
+                if connections.has_connection(self.connection_alias):
+                    # Connection exists, verify it's still valid
+                    try:
+                        # Try a simple operation to verify connection is alive
+                        utility.list_collections()
+                        connection_needs_reconnect = False
+                    except Exception as verify_error:
+                        error_msg = str(verify_error).lower()
+                        if "closed channel" in error_msg or "rpc" in error_msg:
+                            # Connection channel is closed, need to reconnect
+                            logger.debug(f"Connection channel closed, will reconnect: {verify_error}")
+                            try:
+                                connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            connection_needs_reconnect = True
+                        else:
+                            # Other error, might be transient, but reconnect to be safe
+                            logger.debug(f"Connection verification failed, will reconnect: {verify_error}")
+                            try:
+                                connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            connection_needs_reconnect = True
+            except Exception:
+                # has_connection check failed, assume no connection
+                connection_needs_reconnect = True
+            
+            if connection_needs_reconnect:
                 logger.info(f"Reconnecting to Milvus at {self.host}:{self.port}")
                 connections.connect(
                     alias=self.connection_alias,
@@ -446,7 +490,24 @@ class MilvusVectorStore:
             
             # Check LangChain connection if it exists
             if hasattr(self, 'langchain_connection_alias') and self.langchain_connection_alias != self.connection_alias:
-                if not connections.has_connection(self.langchain_connection_alias):
+                langchain_needs_reconnect = True
+                try:
+                    if connections.has_connection(self.langchain_connection_alias):
+                        # Verify it's alive
+                        try:
+                            utility.list_collections()
+                            langchain_needs_reconnect = False
+                        except Exception:
+                            # Channel might be closed, reconnect
+                            try:
+                                connections.disconnect(self.langchain_connection_alias)
+                            except Exception:
+                                pass
+                            langchain_needs_reconnect = True
+                except Exception:
+                    langchain_needs_reconnect = True
+                
+                if langchain_needs_reconnect:
                     logger.info(f"Reconnecting LangChain connection to Milvus at {self.host}:{self.port}")
                     connections.connect(
                         alias=self.langchain_connection_alias,
@@ -521,18 +582,21 @@ class MilvusVectorStore:
                 health_status["errors"].append(f"Collection check failed: {e}")
                 health_status["healthy"] = False
         
-        # Check embeddings
+        # Check embeddings - just verify it's initialized, don't actually generate embeddings
+        # (generating embeddings in health check causes model to reload repeatedly)
         if self.embeddings:
             try:
-                # Test embedding generation
-                test_embedding = self.embeddings.embed_query("health check")
-                if test_embedding and len(test_embedding) > 0:
-                    health_status["embeddings"]["dimension"] = len(test_embedding)
+                # Just check if the embeddings object has the required methods
+                if hasattr(self.embeddings, 'embed_query') and hasattr(self.embeddings, 'embed_documents'):
+                    # If we have a cached dimension, use it
+                    if hasattr(self, 'dimension') and self.dimension:
+                        health_status["embeddings"]["dimension"] = self.dimension
+                    health_status["embeddings"]["status"] = "initialized"
                 else:
-                    health_status["errors"].append("Embedding test returned empty result")
+                    health_status["errors"].append("Embeddings object missing required methods")
                     health_status["healthy"] = False
             except Exception as e:
-                health_status["errors"].append(f"Embedding test failed: {e}")
+                health_status["errors"].append(f"Embedding check failed: {e}")
                 health_status["healthy"] = False
         
         # Overall health is True only if all components are healthy
@@ -543,21 +607,119 @@ class MilvusVectorStore:
     
     def _get_or_create_collection(self) -> Collection:
         """Get existing collection or create new one"""
-        try:
-            if utility.has_collection(self.collection_name):
-                collection = Collection(self.collection_name)
-                logger.info(f"Using existing collection: {self.collection_name}")
-            else:
-                collection = self._create_collection()
-                logger.info(f"Created new collection: {self.collection_name}")
-            
-            # Load collection into memory
-            collection.load()
-            return collection
+        # Ensure connection is alive before checking collection
+        self._ensure_connection()
         
-        except Exception as e:
-            logger.error(f"Failed to get/create collection: {e}", exc_info=True)
-            raise
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                # Check if collection exists - this can fail if RPC channel is closed
+                collection_exists = False
+                try:
+                    collection_exists = utility.has_collection(self.collection_name)
+                except Exception as check_error:
+                    error_msg = str(check_error).lower()
+                    if "closed channel" in error_msg or "rpc" in error_msg:
+                        # Connection channel was closed, reconnect and retry
+                        logger.warning(f"RPC channel closed during has_collection check (attempt {attempt + 1}/{max_retries}): {check_error}")
+                        if attempt < max_retries - 1:
+                            # Reconnect and retry
+                            try:
+                                if connections.has_connection(self.connection_alias):
+                                    connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            
+                            connections.connect(
+                                alias=self.connection_alias,
+                                host=self.host,
+                                port=self.port,
+                                timeout=10.0,
+                            )
+                            logger.info(f"Reconnected to Milvus, retrying collection check...")
+                            continue  # Retry the has_collection check
+                        else:
+                            # Last attempt failed, try to get collection anyway (might exist)
+                            logger.warning(f"Failed to check collection existence after {max_retries} attempts, attempting to get collection directly")
+                            collection_exists = None  # Unknown state, try to get it
+                    else:
+                        # Other error, re-raise
+                        raise
+                
+                # If we know the collection exists, use it
+                if collection_exists is True:
+                    collection = Collection(self.collection_name)
+                    logger.info(f"Using existing collection: {self.collection_name}")
+                elif collection_exists is False:
+                    # Collection doesn't exist, create it
+                    collection = self._create_collection()
+                    logger.info(f"Created new collection: {self.collection_name}")
+                else:
+                    # Unknown state (collection_exists is None), try to get it
+                    try:
+                        collection = Collection(self.collection_name)
+                        logger.info(f"Using existing collection: {self.collection_name} (existence check failed, but collection accessible)")
+                    except Exception as get_error:
+                        # Collection doesn't exist, create it
+                        logger.info(f"Collection not accessible, creating new one: {get_error}")
+                        collection = self._create_collection()
+                        logger.info(f"Created new collection: {self.collection_name}")
+                
+                # Load collection into memory
+                try:
+                    collection.load()
+                except Exception as load_error:
+                    error_msg = str(load_error).lower()
+                    if "closed channel" in error_msg or "rpc" in error_msg:
+                        # Connection closed during load, reconnect and retry
+                        if attempt < max_retries - 1:
+                            logger.warning(f"RPC channel closed during collection.load() (attempt {attempt + 1}/{max_retries}), reconnecting...")
+                            try:
+                                if connections.has_connection(self.connection_alias):
+                                    connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            
+                            connections.connect(
+                                alias=self.connection_alias,
+                                host=self.host,
+                                port=self.port,
+                                timeout=10.0,
+                            )
+                            # Re-get the collection after reconnection
+                            collection = Collection(self.collection_name)
+                            collection.load()
+                        else:
+                            raise
+                    else:
+                        raise
+                
+                return collection
+            
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    error_msg = str(e).lower()
+                    if "closed channel" in error_msg or "rpc" in error_msg:
+                        logger.warning(f"RPC channel error during collection operation (attempt {attempt + 1}/{max_retries}): {e}")
+                        # Reconnect and retry
+                        try:
+                            if connections.has_connection(self.connection_alias):
+                                connections.disconnect(self.connection_alias)
+                        except Exception:
+                            pass
+                        
+                        connections.connect(
+                            alias=self.connection_alias,
+                            host=self.host,
+                            port=self.port,
+                            timeout=10.0,
+                        )
+                        logger.info(f"Reconnected to Milvus, retrying collection operation...")
+                        continue
+                
+                # Last attempt or non-recoverable error
+                logger.error(f"Failed to get/create collection after {attempt + 1} attempts: {e}", exc_info=True)
+                raise
     
     def _create_collection(self) -> Collection:
         """Create new Milvus collection with schema"""
@@ -977,13 +1139,16 @@ class MilvusVectorStore:
             }
 
 
+# Global cache for MilvusVectorStore instances (keyed by collection_name)
+_milvus_store_cache = {}
+
 def get_milvus_store(
     collection_name: str,
     embedding_model: Optional[Embeddings] = None,
     **kwargs
 ) -> MilvusVectorStore:
     """
-    Factory function to get Milvus vector store
+    Factory function to get Milvus vector store (cached singleton per collection)
     
     Args:
         collection_name: Name of the collection
@@ -991,11 +1156,20 @@ def get_milvus_store(
         **kwargs: Additional configuration
     
     Returns:
-        Configured MilvusVectorStore instance
+        Configured MilvusVectorStore instance (cached)
     """
-    return MilvusVectorStore(
-        collection_name=collection_name,
-        embedding_model=embedding_model,
-        **kwargs
-    )
+    global _milvus_store_cache
+    
+    # Use collection_name as cache key
+    if collection_name not in _milvus_store_cache:
+        logger.info(f"Creating new MilvusVectorStore instance for collection: {collection_name}")
+        _milvus_store_cache[collection_name] = MilvusVectorStore(
+            collection_name=collection_name,
+            embedding_model=embedding_model,
+            **kwargs
+        )
+    else:
+        logger.debug(f"Returning cached MilvusVectorStore instance for collection: {collection_name}")
+    
+    return _milvus_store_cache[collection_name]
 

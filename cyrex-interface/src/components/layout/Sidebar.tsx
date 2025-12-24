@@ -15,6 +15,7 @@ import {
   FaShieldAlt,
   FaComments,
   FaHistory,
+  FaHeartbeat,
   FaChevronLeft,
   FaChevronRight
 } from 'react-icons/fa';
@@ -38,6 +39,7 @@ const navigationItems: NavigationItem[] = [
   { id: 'monitoring', label: 'Monitoring', icon: <FaChartLine /> },
   { id: 'safety', label: 'Safety / Guardrails', icon: <FaShieldAlt /> },
   { id: 'chat', label: 'Chat', icon: <FaComments /> },
+  { id: 'health', label: 'Health', icon: <FaHeartbeat /> },
   { id: 'history', label: 'History', icon: <FaHistory /> }
 ];
 

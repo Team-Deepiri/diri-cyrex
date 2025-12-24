@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     # Performance Configuration
     MAX_CONCURRENT_REQUESTS: int = 10
     REQUEST_TIMEOUT: int = 30
-    LOCAL_LLM_TIMEOUT: int = 120  # Timeout for local LLMs (2 minutes - reasonable for most models)
+    LOCAL_LLM_TIMEOUT: int = 300  # Timeout for local LLMs (5 minutes - accommodates slower CPU inference)
     
     # AI Configuration
     AI_TEMPERATURE: float = 0.7
