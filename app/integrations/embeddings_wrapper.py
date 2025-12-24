@@ -268,6 +268,17 @@ class RobustEmbeddings:
         return self.embed_documents(texts)
 
 
+# Global cache for embeddings instances
+_embeddings_cache = {}
+
 def get_robust_embeddings(model_name: str = "sentence-transformers/all-MiniLM-L6-v2") -> RobustEmbeddings:
-    """Factory function to get robust embeddings instance."""
-    return RobustEmbeddings(model_name)
+    """Factory function to get robust embeddings instance (cached)."""
+    global _embeddings_cache
+    
+    if model_name not in _embeddings_cache:
+        logger.info(f"Creating new RobustEmbeddings instance for {model_name}")
+        _embeddings_cache[model_name] = RobustEmbeddings(model_name)
+    else:
+        logger.debug(f"Returning cached RobustEmbeddings instance for {model_name}")
+    
+    return _embeddings_cache[model_name]

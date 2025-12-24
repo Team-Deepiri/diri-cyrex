@@ -26,6 +26,7 @@ class ProcessRequestInput(BaseModel):
     llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., llama3:8b)")
     llm_base_url: Optional[str] = Field(None, description="Local LLM base URL (e.g., http://ollama:11434)")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate (default: 500 for local LLM, 2000 for OpenAI)")
+    request_timeout: Optional[float] = Field(None, description="Request timeout in seconds (default: uses LOCAL_LLM_TIMEOUT setting)")
 
 
 class WorkflowStep(BaseModel):
@@ -58,6 +59,8 @@ async def process_request(
             backend_str = input.llm_backend or settings.LOCAL_LLM_BACKEND
             model_str = input.llm_model or settings.LOCAL_LLM_MODEL
             
+            logger.info(f"Force local LLM requested: backend={backend_str}, model={model_str}, use_tools={input.use_tools}")
+            
             try:
                 backend = LLMBackend(backend_str)
                 # Pass max_tokens if provided, otherwise use default (200 for local LLM on CPU - faster responses)
@@ -66,6 +69,8 @@ async def process_request(
                 base_url = input.llm_base_url
                 if not base_url and backend == LLMBackend.OLLAMA:
                     base_url = settings.OLLAMA_BASE_URL
+                
+                logger.info(f"Initializing local LLM: backend={backend.value}, model={model_str}, base_url={base_url}")
                 local_llm = get_local_llm(
                     backend=backend.value,
                     model_name=model_str,
@@ -77,15 +82,29 @@ async def process_request(
                     # Create a temporary orchestrator with local LLM only
                     # Note: We'll try to use it even if health check failed - actual invocation will handle errors
                     try:
+                        # Import here to avoid circular imports
+                        import asyncio
+                        
+                        logger.info(f"Creating temporary orchestrator with local LLM (use_tools={input.use_tools})")
                         temp_orchestrator = WorkflowOrchestrator(llm_provider=local_llm)
-                        result = await temp_orchestrator.process_request(
-                            user_input=input.user_input,
-                            user_id=input.user_id,
-                            workflow_id=input.workflow_id,
-                            use_rag=input.use_rag,
-                            use_tools=input.use_tools,
-                            max_tokens=max_tokens_for_llm,
+                        
+                        logger.info(f"Processing request with local LLM: user_input length={len(input.user_input)}, max_tokens={max_tokens_for_llm}")
+                        # Use request timeout if provided, otherwise use settings value
+                        request_timeout = input.request_timeout if input.request_timeout is not None else float(settings.LOCAL_LLM_TIMEOUT)
+                        logger.info(f"Using timeout: {request_timeout}s for local LLM request")
+                        # Add timeout protection for local LLM requests
+                        result = await asyncio.wait_for(
+                            temp_orchestrator.process_request(
+                                user_input=input.user_input,
+                                user_id=input.user_id,
+                                workflow_id=input.workflow_id,
+                                use_rag=input.use_rag,
+                                use_tools=input.use_tools,
+                                max_tokens=max_tokens_for_llm,
+                            ),
+                            timeout=request_timeout
                         )
+                        logger.info(f"Local LLM request completed successfully")
                         # Check if result indicates failure
                         if isinstance(result, dict) and result.get("success") is False:
                             error_msg = result.get("error", "Unknown error")
@@ -95,9 +114,10 @@ async def process_request(
                         )
                         return result
                     except TimeoutError as e:
+                        request_timeout = input.request_timeout if input.request_timeout is not None else float(settings.LOCAL_LLM_TIMEOUT)
                         raise HTTPException(
                             status_code=504,
-                            detail=f"Local LLM ({backend_str}) request timed out after 120 seconds. The model may be too slow or unresponsive. Try reducing max_tokens or using a faster model. Error: {str(e)}"
+                            detail=f"Local LLM ({backend_str}) request timed out after {request_timeout} seconds. The model may be too slow or unresponsive. Try reducing max_tokens, increasing request_timeout, or using a faster model. Error: {str(e)}"
                         )
                     except Exception as e:
                         error_msg = str(e)
@@ -241,3 +261,156 @@ async def discover_llm_services():
             "count": 0,
             "error": str(e)
         }
+
+
+@router.get("/health-comprehensive")
+async def get_comprehensive_health(
+    orchestrator: WorkflowOrchestrator = Depends(get_orchestrator),
+):
+    """Get comprehensive health status of all runtime services"""
+    import asyncio
+    import time
+    from ..settings import settings
+    
+    # Initialize default response structure
+    health_status = {
+        "timestamp": time.time(),
+        "version": "3.0.0",
+        "services": {},
+        "configuration": {},
+        "errors": []
+    }
+    
+    try:
+        # Get orchestrator status (with timeout)
+        orchestrator_status = {}
+        try:
+            orchestrator_status = await asyncio.wait_for(
+                orchestrator.get_status(),
+                timeout=5.0
+            )
+        except asyncio.TimeoutError:
+            orchestrator_status = {"error": "Status check timed out", "status": "timeout"}
+            health_status["errors"].append("Orchestrator status check timed out")
+        except Exception as e:
+            logger.warning(f"Failed to get orchestrator status: {e}")
+            orchestrator_status = {"error": str(e), "status": "error"}
+            health_status["errors"].append(f"Orchestrator status error: {str(e)}")
+        
+        # Get modelkit status
+        modelkit_status = {
+            "status": "unknown",
+            "loaded": False,
+            "models": [],
+            "error": None
+        }
+        try:
+            # Check if modelkit is importable
+            try:
+                import deepiri_modelkit
+                modelkit_status["status"] = "available"
+                modelkit_status["version"] = getattr(deepiri_modelkit, "__version__", "unknown")
+            except ImportError:
+                modelkit_status["status"] = "not_installed"
+                modelkit_status["error"] = "deepiri_modelkit not installed"
+            
+            # Check for loaded models
+            try:
+                from ..integrations.model_loader import get_auto_loader, _auto_loader
+                auto_loader = _auto_loader or await get_auto_loader()
+                if auto_loader and hasattr(auto_loader, 'list_loaded_models'):
+                    loaded_models = auto_loader.list_loaded_models()
+                    modelkit_status["loaded"] = len(loaded_models) > 0
+                    # Format models for display
+                    modelkit_status["models"] = [
+                        {
+                            "name": model.get("key", "unknown"),
+                            "version": model.get("metadata", {}).get("version", "unknown") if isinstance(model.get("metadata"), dict) else "unknown",
+                            "loaded_at": model.get("loaded_at", "unknown")
+                        }
+                        for model in loaded_models
+                    ]
+            except Exception as e:
+                modelkit_status["error"] = f"Failed to check loaded models: {str(e)}"
+        except Exception as e:
+            modelkit_status["error"] = str(e)
+            modelkit_status["status"] = "error"
+        
+        # Get LLM services
+        llm_services = []
+        try:
+            from ..utils.docker_scanner import scan_docker_network
+            loop = asyncio.get_event_loop()
+            services = await asyncio.wait_for(
+                loop.run_in_executor(None, scan_docker_network),
+                timeout=10.0
+            )
+            llm_services = services
+        except Exception as e:
+            logger.debug(f"Failed to discover LLM services: {e}")
+        
+        # Get detailed Milvus status separately
+        milvus_status = {
+            "status": "unknown",
+            "healthy": False,
+            "connection": {},
+            "collection": {},
+            "error": None
+        }
+        try:
+            if orchestrator_status.get("vector_store"):
+                vs_status = orchestrator_status["vector_store"]
+                milvus_status = {
+                    "status": "healthy" if vs_status.get("healthy") else "unhealthy",
+                    "healthy": vs_status.get("healthy", False),
+                    "connection": {
+                        "host": vs_status.get("host") or vs_status.get("connection", {}).get("host", "unknown"),
+                        "port": vs_status.get("port") or vs_status.get("connection", {}).get("port", "unknown"),
+                        "connected": vs_status.get("connection", {}).get("connected", False) if isinstance(vs_status.get("connection"), dict) else False,
+                    },
+                    "collection": {
+                        "name": vs_status.get("collection_name") or vs_status.get("collection", {}).get("name", "unknown"),
+                        "exists": vs_status.get("collection", {}).get("exists", False) if isinstance(vs_status.get("collection"), dict) else False,
+                        "num_entities": vs_status.get("num_entities") or vs_status.get("collection", {}).get("num_entities", 0),
+                        "loaded": vs_status.get("collection", {}).get("loaded", False) if isinstance(vs_status.get("collection"), dict) else False,
+                        "mode": vs_status.get("mode", "unknown"),
+                    },
+                    "embeddings": vs_status.get("embeddings", {}),
+                    "errors": vs_status.get("errors", []),
+                }
+            else:
+                milvus_status["error"] = "Vector store not initialized"
+                milvus_status["status"] = "not_initialized"
+        except Exception as e:
+            milvus_status["error"] = str(e)
+            milvus_status["status"] = "error"
+        
+        # Compile comprehensive health status
+        health_status["services"] = {
+            "orchestrator": orchestrator_status,
+            "modelkit": modelkit_status,
+            "milvus": milvus_status,
+            "llm_services": llm_services,
+        }
+        
+        # Get configuration safely
+        try:
+            health_status["configuration"] = {
+                "local_llm_backend": getattr(settings, 'LOCAL_LLM_BACKEND', 'unknown'),
+                "local_llm_model": getattr(settings, 'LOCAL_LLM_MODEL', 'unknown'),
+                "ollama_base_url": getattr(settings, 'OLLAMA_BASE_URL', 'unknown'),
+                "openai_configured": bool(getattr(settings, 'OPENAI_API_KEY', None)),
+                "milvus_host": getattr(settings, 'MILVUS_HOST', 'unknown'),
+                "milvus_port": getattr(settings, 'MILVUS_PORT', 'unknown'),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get configuration: {e}")
+            health_status["configuration"] = {"error": str(e)}
+            health_status["errors"].append(f"Configuration error: {str(e)}")
+        
+        return health_status
+    except Exception as e:
+        logger.error(f"Failed to get comprehensive health: {e}", exc_info=True)
+        # Return partial results even on error
+        health_status["errors"].append(f"Critical error: {str(e)}")
+        return health_status

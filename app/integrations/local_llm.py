@@ -489,17 +489,28 @@ class LocalLLMProvider:
         logger.info("LLM configuration updated and reinitialized")
     
     def health_check(self) -> Dict[str, Any]:
-        """Check LLM health and availability"""
+        """Check LLM health and availability - with fast timeout to prevent hanging"""
         try:
             if self.config.backend == LLMBackend.OLLAMA:
                 base_url = self.config.base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-                response = httpx.get(f"{base_url}/api/tags", timeout=5.0)
-                return {
-                    "status": "healthy" if response.status_code == 200 else "unhealthy",
-                    "backend": "ollama",
-                    "model": self.config.model_name,
-                    "base_url": base_url,
-                }
+                # Use shorter timeout (2 seconds) to prevent hanging status checks
+                try:
+                    response = httpx.get(f"{base_url}/api/tags", timeout=2.0)
+                    return {
+                        "status": "healthy" if response.status_code == 200 else "unhealthy",
+                        "backend": "ollama",
+                        "model": self.config.model_name,
+                        "base_url": base_url,
+                    }
+                except (httpx.TimeoutException, httpx.ConnectError) as e:
+                    # Fast failure for connection/timeout issues
+                    return {
+                        "status": "unhealthy",
+                        "error": f"Connection failed: {str(e)}",
+                        "backend": "ollama",
+                        "model": self.config.model_name,
+                        "base_url": base_url,
+                    }
             else:
                 # For other backends, just check if LLM is initialized
                 return {

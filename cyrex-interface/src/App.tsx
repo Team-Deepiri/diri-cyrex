@@ -130,6 +130,9 @@ export default function App() {
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
   const [testHistory, setTestHistory] = useState<TestResult[]>([]);
   
+  // Health state
+  const [healthStatus, setHealthStatus] = useState<Record<string, any> | null>(null);
+  
   // Safety/Guardrails state
   const [safetyInput, setSafetyInput] = useState('Generate a summary of my tasks');
   const [safetyResult, setSafetyResult] = useState('');
@@ -154,6 +157,7 @@ export default function App() {
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
   }, [showProviderDropdown]);
+
   const [chatLocalLLMService, setChatLocalLLMService] = useState<string>('');
   const [chatLocalLLMModel, setChatLocalLLMModel] = useState<string>('llama3:8b');
   const [chatLocalLLMBackend, setChatLocalLLMBackend] = useState<string>('ollama');
@@ -1076,6 +1080,36 @@ export default function App() {
   }, [baseUrl, apiKey, scanForLLMServices, loadTestList, loadTestStatus]);
 
   const isLoading = (key: string) => loading === key;
+
+  // Auto-load health status when health tab is opened
+  useEffect(() => {
+    if (activeTab === 'health' && !healthStatus && !isLoading('/orchestration/health-comprehensive')) {
+      const loadHealth = async () => {
+        try {
+          const health = await callEndpoint('/orchestration/health-comprehensive', {}, 'GET', 'health');
+          if (health) {
+            setHealthStatus(health);
+            // Clear any previous errors if we got data
+            if (health.errors && health.errors.length === 0) {
+              setError(null);
+            }
+          }
+        } catch (err: any) {
+          console.error('Health status load error:', err);
+          setError(`Failed to load health status: ${err.message || 'Unknown error'}`);
+          // Set a minimal health status so the UI can still render
+          setHealthStatus({
+            timestamp: Date.now() / 1000,
+            version: 'unknown',
+            services: {},
+            configuration: {},
+            errors: [err.message || 'Failed to load health status']
+          });
+        }
+      };
+      loadHealth();
+    }
+  }, [activeTab, healthStatus, callEndpoint]);
 
   // Helper function to render debug panel
   const renderConnectionPanel = () => (
@@ -3205,6 +3239,466 @@ export default function App() {
             {/* Debug Panel for Chat */}
             {renderDebugPanel('chat')}
           </div>
+          )}
+
+          {/* Health Tab */}
+          {activeTab === 'health' && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>System Health</h2>
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const health = await callEndpoint('/orchestration/health-comprehensive', {}, 'GET', 'health');
+                        setHealthStatus(health);
+                      } catch (err: any) {
+                        setError(`Failed to load health status: ${err.message}`);
+                      }
+                    }}
+                    disabled={isLoading('/orchestration/health-comprehensive')}
+                    style={{
+                      padding: '0.5rem 1rem',
+                      background: isLoading('/orchestration/health-comprehensive') ? '#444' : '#FFB84D',
+                      color: '#000',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: isLoading('/orchestration/health-comprehensive') ? 'not-allowed' : 'pointer',
+                      fontWeight: 600,
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    {isLoading('/orchestration/health-comprehensive') ? 'Refreshing...' : 'Refresh Health'}
+                  </button>
+                  {renderConnectionPanel()}
+                </div>
+              </div>
+
+              {isLoading('/orchestration/health-comprehensive') ? (
+                <div style={{ 
+                  color: '#999', 
+                  textAlign: 'center', 
+                  padding: '2rem',
+                  background: '#1a1a1a',
+                  borderRadius: '8px',
+                  border: '1px solid #333'
+                }}>
+                  Loading health status...
+                </div>
+              ) : !healthStatus ? (
+                <div style={{ 
+                  color: '#666', 
+                  textAlign: 'center', 
+                  padding: '2rem',
+                  background: '#1a1a1a',
+                  borderRadius: '8px',
+                  border: '1px solid #333'
+                }}>
+                  Failed to load health status. Click "Refresh Health" to retry.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gap: '1rem' }}>
+                  {/* Error Display */}
+                  {healthStatus.errors && healthStatus.errors.length > 0 && (
+                    <div style={{
+                      background: '#ff444420',
+                      borderRadius: '8px',
+                      padding: '1rem',
+                      border: '1px solid #ff4444'
+                    }}>
+                      <h4 style={{ margin: '0 0 0.5rem 0', color: '#ff4444' }}>Errors:</h4>
+                      <ul style={{ margin: 0, paddingLeft: '1.5rem', color: '#ff4444' }}>
+                        {healthStatus.errors.map((err: string, idx: number) => (
+                          <li key={idx} style={{ fontSize: '0.9rem' }}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Orchestrator Status */}
+                  {healthStatus.services?.orchestrator && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: healthStatus.services.orchestrator.llm?.status === 'healthy' ? '#00aa00' : '#ff4444' }}>●</span>
+                        Orchestrator
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        {healthStatus.services.orchestrator.llm && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>LLM Provider</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <div>
+                                <div style={{ fontWeight: 600 }}>{healthStatus.services.orchestrator.llm.backend || 'Unknown'}</div>
+                                {healthStatus.services.orchestrator.llm.model && (
+                                  <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                                    Model: {healthStatus.services.orchestrator.llm.model}
+                                  </div>
+                                )}
+                              </div>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '4px',
+                                background: healthStatus.services.orchestrator.llm.status === 'healthy' ? '#00aa0020' : '#ff444420',
+                                color: healthStatus.services.orchestrator.llm.status === 'healthy' ? '#00aa00' : '#ff4444',
+                                fontSize: '0.85rem',
+                                fontWeight: 600
+                              }}>
+                                {healthStatus.services.orchestrator.llm.status || 'unknown'}
+                              </span>
+                            </div>
+                            {healthStatus.services.orchestrator.llm.error && (
+                              <div style={{ color: '#ff4444', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                                Error: {healthStatus.services.orchestrator.llm.error}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {healthStatus.services.orchestrator.vector_store && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Vector Store</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <div style={{ fontWeight: 600 }}>
+                                {healthStatus.services.orchestrator.vector_store.type || 'Milvus'}
+                              </div>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '4px',
+                                background: healthStatus.services.orchestrator.vector_store.healthy ? '#00aa0020' : '#ff444420',
+                                color: healthStatus.services.orchestrator.vector_store.healthy ? '#00aa00' : '#ff4444',
+                                fontSize: '0.85rem',
+                                fontWeight: 600
+                              }}>
+                                {healthStatus.services.orchestrator.vector_store.healthy ? 'healthy' : 'unhealthy'}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.orchestrator.tools && Object.keys(healthStatus.services.orchestrator.tools).length > 0 && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Tools</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ fontWeight: 600 }}>
+                                {healthStatus.services.orchestrator.tools.total || 0} tools available
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ModelKit Status */}
+                  {healthStatus.services?.modelkit && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: healthStatus.services.modelkit.status === 'available' ? '#00aa00' : '#ff4444' }}>●</span>
+                        ModelKit
+                        {healthStatus.services.modelkit.version && (
+                          <span style={{ fontSize: '0.85rem', color: '#999', fontWeight: 400 }}>
+                            v{healthStatus.services.modelkit.version}
+                          </span>
+                        )}
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          background: '#0a0a0a', 
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>Status</div>
+                            <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                              {healthStatus.services.modelkit.status === 'available' ? 'Installed and available' : 
+                               healthStatus.services.modelkit.status === 'not_installed' ? 'Not installed' : 
+                               healthStatus.services.modelkit.status}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '4px',
+                            background: healthStatus.services.modelkit.status === 'available' ? '#00aa0020' : '#ff444420',
+                            color: healthStatus.services.modelkit.status === 'available' ? '#00aa00' : '#ff4444',
+                            fontSize: '0.85rem',
+                            fontWeight: 600
+                          }}>
+                            {healthStatus.services.modelkit.status || 'unknown'}
+                          </span>
+                        </div>
+                        {healthStatus.services.modelkit.models && healthStatus.services.modelkit.models.length > 0 && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.5rem' }}>
+                              Loaded Models ({healthStatus.services.modelkit.models.length})
+                            </div>
+                            <div style={{ display: 'grid', gap: '0.5rem' }}>
+                              {healthStatus.services.modelkit.models.map((model: any, idx: number) => (
+                                <div key={idx} style={{
+                                  padding: '0.75rem',
+                                  background: '#0a0a0a',
+                                  borderRadius: '4px',
+                                  border: '1px solid #333'
+                                }}>
+                                  <div style={{ fontWeight: 600 }}>{model.name || model}</div>
+                                  {model.version && (
+                                    <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                                      Version: {model.version}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.modelkit.error && (
+                          <div style={{ 
+                            padding: '0.75rem', 
+                            background: '#ff444420', 
+                            borderRadius: '4px',
+                            color: '#ff4444',
+                            fontSize: '0.85rem'
+                          }}>
+                            Error: {healthStatus.services.modelkit.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Milvus Status */}
+                  {healthStatus.services?.milvus && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: healthStatus.services.milvus.healthy ? '#00aa00' : '#ff4444' }}>●</span>
+                        Milvus Vector Store
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          background: '#0a0a0a', 
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>Status</div>
+                            <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                              {healthStatus.services.milvus.status || 'unknown'}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '4px',
+                            background: healthStatus.services.milvus.healthy ? '#00aa0020' : '#ff444420',
+                            color: healthStatus.services.milvus.healthy ? '#00aa00' : '#ff4444',
+                            fontSize: '0.85rem',
+                            fontWeight: 600
+                          }}>
+                            {healthStatus.services.milvus.healthy ? 'healthy' : 'unhealthy'}
+                          </span>
+                        </div>
+                        {healthStatus.services.milvus.connection && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Connection</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.85rem' }}>
+                                <div>Host: {healthStatus.services.milvus.connection.host || 'unknown'}</div>
+                                <div>Port: {healthStatus.services.milvus.connection.port || 'unknown'}</div>
+                                <div style={{ color: healthStatus.services.milvus.connection.connected ? '#00aa00' : '#ff4444' }}>
+                                  Connected: {healthStatus.services.milvus.connection.connected ? 'Yes' : 'No'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.milvus.collection && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Collection</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.85rem' }}>
+                                <div>Name: {healthStatus.services.milvus.collection.name || 'unknown'}</div>
+                                <div>Entities: {healthStatus.services.milvus.collection.num_entities || 0}</div>
+                                <div>Mode: {healthStatus.services.milvus.collection.mode || 'unknown'}</div>
+                                <div style={{ color: healthStatus.services.milvus.collection.loaded ? '#00aa00' : '#ff4444' }}>
+                                  Loaded: {healthStatus.services.milvus.collection.loaded ? 'Yes' : 'No'}
+                                </div>
+                                <div style={{ color: healthStatus.services.milvus.collection.exists ? '#00aa00' : '#ff4444' }}>
+                                  Exists: {healthStatus.services.milvus.collection.exists ? 'Yes' : 'No'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.milvus.embeddings && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Embeddings</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ fontSize: '0.85rem' }}>
+                                Initialized: {healthStatus.services.milvus.embeddings.initialized ? 'Yes' : 'No'}
+                                {healthStatus.services.milvus.embeddings.dimension && (
+                                  <div style={{ marginTop: '0.25rem' }}>
+                                    Dimension: {healthStatus.services.milvus.embeddings.dimension}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.milvus.errors && healthStatus.services.milvus.errors.length > 0 && (
+                          <div style={{ 
+                            padding: '0.75rem', 
+                            background: '#ff444420', 
+                            borderRadius: '4px',
+                            color: '#ff4444',
+                            fontSize: '0.85rem'
+                          }}>
+                            <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>Errors:</div>
+                            {healthStatus.services.milvus.errors.map((err: string, idx: number) => (
+                              <div key={idx}>• {err}</div>
+                            ))}
+                          </div>
+                        )}
+                        {healthStatus.services.milvus.error && (
+                          <div style={{ 
+                            padding: '0.75rem', 
+                            background: '#ff444420', 
+                            borderRadius: '4px',
+                            color: '#ff4444',
+                            fontSize: '0.85rem'
+                          }}>
+                            Error: {healthStatus.services.milvus.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* LLM Services */}
+                  {healthStatus.services?.llm_services && healthStatus.services.llm_services.length > 0 && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600 }}>
+                        LLM Services ({healthStatus.services.llm_services.length})
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        {healthStatus.services.llm_services.map((service: any, idx: number) => (
+                          <div key={idx} style={{
+                            padding: '0.75rem',
+                            background: '#0a0a0a',
+                            borderRadius: '4px',
+                            border: '1px solid #333'
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                              <div style={{ fontWeight: 600 }}>{service.name || 'Unknown Service'}</div>
+                              <span style={{
+                                padding: '0.25rem 0.75rem',
+                                borderRadius: '4px',
+                                background: '#00aa0020',
+                                color: '#00aa00',
+                                fontSize: '0.85rem',
+                                fontWeight: 600
+                              }}>
+                                {service.type || 'ollama'}
+                              </span>
+                            </div>
+                            {service.base_url && (
+                              <div style={{ fontSize: '0.85rem', color: '#999' }}>
+                                URL: {service.base_url}
+                              </div>
+                            )}
+                            {service.models && service.models.length > 0 && (
+                              <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.5rem' }}>
+                                Models: {service.models.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Configuration */}
+                  {healthStatus.configuration && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600 }}>Configuration</h3>
+                      <div style={{ display: 'grid', gap: '0.5rem' }}>
+                        {Object.entries(healthStatus.configuration).map(([key, value]) => (
+                          <div key={key} style={{
+                            padding: '0.5rem',
+                            background: '#0a0a0a',
+                            borderRadius: '4px',
+                            display: 'flex',
+                            justifyContent: 'space-between'
+                          }}>
+                            <span style={{ color: '#999', fontSize: '0.85rem' }}>{key.replace(/_/g, ' ')}</span>
+                            <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>
+                              {typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {renderDebugPanel('health')}
+            </div>
           )}
 
           {/* Test History Tab */}
