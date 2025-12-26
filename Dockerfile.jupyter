@@ -358,7 +358,7 @@ RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && 
     (echo "ERROR: Failed to verify numpy or sentence-transformers" && pip list | grep -E "(numpy|torch|sentence)" && exit 1)
 
 # Copy application code
-COPY app /app/app
+COPY diri-cyrex/app /app/app
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/logs /app/notebooks /app/data /app/.jupyter && \
@@ -518,7 +518,7 @@ RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && 
     (echo "ERROR: Failed to verify numpy or sentence-transformers" && pip list | grep -E "(numpy|torch|sentence)" && exit 1)
 
 # Copy application code
-COPY app /app/app
+COPY diri-cyrex/app /app/app
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/logs /app/notebooks /app/data /app/.jupyter && \
