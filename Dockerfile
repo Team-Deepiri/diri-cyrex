@@ -305,6 +305,8 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         langchain-chroma>=0.1.0 \
         langchain-milvus>=0.1.0 \
         langchain-text-splitters>=0.0.1 \
+        langchain-ollama>=0.1.0 \
+        langchain-huggingface>=0.0.3 \
         ollama>=0.1.0 && \
     echo "✓ LangChain packages installed successfully" || \
     (echo "❌ ERROR: Failed to install critical LangChain packages" && \
@@ -511,6 +513,8 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         langchain-chroma>=0.1.0 \
         langchain-milvus>=0.1.0 \
         langchain-text-splitters>=0.0.1 \
+        langchain-ollama>=0.1.0 \
+        langchain-huggingface>=0.0.3 \
         ollama>=0.1.0 && \
     echo "✓ LangChain packages installed successfully" || \
     (echo "❌ ERROR: Failed to install critical LangChain packages" && \

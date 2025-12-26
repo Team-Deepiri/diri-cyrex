@@ -1,4 +1,4 @@
-# CPU-only version for development (much faster, no CUDA downloads)
+# CPU-only version for development (no CUDA downloads)
 # Use this for local development if you don't need GPU
 FROM pytorch/pytorch:2.0.0-cpu
 
