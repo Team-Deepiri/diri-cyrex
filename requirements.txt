@@ -39,7 +39,8 @@ bitsandbytes>=0.41.0  # For quantization
 gymnasium>=0.29.0  # For RL environment
 stable-baselines3>=2.2.0  # For RL algorithms (optional)
 
-# Vector Database Dependencies
+# Database Dependencies
+asyncpg>=0.29.0  # Async PostgreSQL driver for connection pooling (required for postgres.py)
 pymilvus>=2.3.0  # For Milvus vector database
 pinecone-client>=3.0.0  # For Pinecone (optional)
 weaviate-client>=4.0.0  # For Weaviate (optional)

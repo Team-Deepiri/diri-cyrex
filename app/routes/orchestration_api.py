@@ -2,6 +2,7 @@
 Orchestration API Routes
 Exposes the workflow orchestrator via REST API
 """
+import os
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
@@ -293,9 +294,21 @@ async def get_comprehensive_health(
             orchestrator_status = {"error": "Status check timed out", "status": "timeout"}
             health_status["errors"].append("Orchestrator status check timed out")
         except Exception as e:
-            logger.warning(f"Failed to get orchestrator status: {e}")
-            orchestrator_status = {"error": str(e), "status": "error"}
-            health_status["errors"].append(f"Orchestrator status error: {str(e)}")
+            error_str = str(e)
+            # Handle gRPC channel errors gracefully - these are often non-fatal
+            if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                logger.debug(f"gRPC channel error during status check (non-fatal): {e}")
+                # Try to get partial status without vector store
+                orchestrator_status = {
+                    "error": "gRPC channel error (non-fatal)",
+                    "status": "partial",
+                    "note": "Vector store status unavailable due to connection issue"
+                }
+                health_status["errors"].append("Vector store connection issue (gRPC channel error)")
+            else:
+                logger.warning(f"Failed to get orchestrator status: {e}")
+                orchestrator_status = {"error": str(e), "status": "error"}
+                health_status["errors"].append(f"Orchestrator status error: {str(e)}")
         
         # Get modelkit status
         modelkit_status = {
@@ -385,11 +398,192 @@ async def get_comprehensive_health(
             milvus_status["error"] = str(e)
             milvus_status["status"] = "error"
         
+        # Get Redis status
+        redis_status = {
+            "status": "unknown",
+            "healthy": False,
+            "connection": {},
+            "error": None
+        }
+        try:
+            from ..utils.cache import get_redis_client
+            redis_client = get_redis_client()
+            if redis_client:
+                try:
+                    redis_client.ping()
+                    redis_status = {
+                        "status": "healthy",
+                        "healthy": True,
+                        "connection": {
+                            "host": getattr(settings, 'REDIS_HOST', 'unknown'),
+                            "port": getattr(settings, 'REDIS_PORT', 'unknown'),
+                            "db": getattr(settings, 'REDIS_DB', 0),
+                            "connected": True,
+                        }
+                    }
+                except Exception as e:
+                    redis_status = {
+                        "status": "unhealthy",
+                        "healthy": False,
+                        "connection": {
+                            "host": getattr(settings, 'REDIS_HOST', 'unknown'),
+                            "port": getattr(settings, 'REDIS_PORT', 'unknown'),
+                            "db": getattr(settings, 'REDIS_DB', 0),
+                            "connected": False,
+                        },
+                        "error": str(e)
+                    }
+            else:
+                redis_status = {
+                    "status": "not_configured",
+                    "healthy": False,
+                    "connection": {
+                        "host": getattr(settings, 'REDIS_HOST', 'unknown'),
+                        "port": getattr(settings, 'REDIS_PORT', 'unknown'),
+                        "db": getattr(settings, 'REDIS_DB', 0),
+                        "connected": False,
+                    },
+                    "error": "Redis client not initialized"
+                }
+        except Exception as e:
+            redis_status["error"] = str(e)
+            redis_status["status"] = "error"
+        
+        # Get MLflow status
+        mlflow_status = {
+            "status": "unknown",
+            "healthy": False,
+            "connection": {},
+            "error": None
+        }
+        try:
+            mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+            import httpx
+            try:
+                # Try to connect to MLflow tracking server
+                response = httpx.get(f"{mlflow_tracking_uri}/health", timeout=2.0)
+                if response.status_code == 200:
+                    mlflow_status = {
+                        "status": "healthy",
+                        "healthy": True,
+                        "connection": {
+                            "tracking_uri": mlflow_tracking_uri,
+                            "connected": True,
+                        }
+                    }
+                else:
+                    mlflow_status = {
+                        "status": "unhealthy",
+                        "healthy": False,
+                        "connection": {
+                            "tracking_uri": mlflow_tracking_uri,
+                            "connected": False,
+                        },
+                        "error": f"MLflow returned status code {response.status_code}"
+                    }
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                mlflow_status = {
+                    "status": "unhealthy",
+                    "healthy": False,
+                    "connection": {
+                        "tracking_uri": mlflow_tracking_uri,
+                        "connected": False,
+                    },
+                    "error": f"Connection failed: {str(e)}"
+                }
+            except Exception as e:
+                mlflow_status = {
+                    "status": "error",
+                    "healthy": False,
+                    "connection": {
+                        "tracking_uri": mlflow_tracking_uri,
+                        "connected": False,
+                    },
+                    "error": str(e)
+                }
+        except ImportError:
+            mlflow_status = {
+                "status": "not_available",
+                "healthy": False,
+                "connection": {},
+                "error": "httpx not available for MLflow health check"
+            }
+        except Exception as e:
+            mlflow_status["error"] = str(e)
+            mlflow_status["status"] = "error"
+        
+        # Get Synapse status
+        synapse_status = {
+            "status": "unknown",
+            "healthy": False,
+            "connection": {},
+            "error": None
+        }
+        try:
+            synapse_url = os.getenv("SYNAPSE_URL", "http://localhost:8001")
+            import httpx
+            try:
+                # Try to connect to Synapse health endpoint
+                response = httpx.get(f"{synapse_url}/health", timeout=2.0)
+                if response.status_code == 200:
+                    synapse_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                    synapse_status = {
+                        "status": synapse_data.get("status", "healthy") if synapse_data else "healthy",
+                        "healthy": synapse_data.get("status") == "healthy" if synapse_data else True,
+                        "connection": {
+                            "url": synapse_url,
+                            "connected": True,
+                        }
+                    }
+                else:
+                    synapse_status = {
+                        "status": "unhealthy",
+                        "healthy": False,
+                        "connection": {
+                            "url": synapse_url,
+                            "connected": False,
+                        },
+                        "error": f"Synapse returned status code {response.status_code}"
+                    }
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                synapse_status = {
+                    "status": "unhealthy",
+                    "healthy": False,
+                    "connection": {
+                        "url": synapse_url,
+                        "connected": False,
+                    },
+                    "error": f"Connection failed: {str(e)}"
+                }
+            except Exception as e:
+                synapse_status = {
+                    "status": "error",
+                    "healthy": False,
+                    "connection": {
+                        "url": synapse_url,
+                        "connected": False,
+                    },
+                    "error": str(e)
+                }
+        except ImportError:
+            synapse_status = {
+                "status": "not_available",
+                "healthy": False,
+                "connection": {},
+                "error": "httpx not available for Synapse health check"
+            }
+        except Exception as e:
+            synapse_status["error"] = str(e)
+            synapse_status["status"] = "error"
+        
         # Compile comprehensive health status
         health_status["services"] = {
             "orchestrator": orchestrator_status,
             "modelkit": modelkit_status,
             "milvus": milvus_status,
+            "redis": redis_status,
+            "mlflow": mlflow_status,
+            "synapse": synapse_status,
             "llm_services": llm_services,
         }
         

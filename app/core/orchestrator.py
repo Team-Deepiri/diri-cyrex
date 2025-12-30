@@ -711,8 +711,19 @@ Final Answer: the final answer to the original input question"""),
                             status["vector_store"] = stats
                         except Exception:
                             status["vector_store"] = None
-                    except Exception:
-                        status["vector_store"] = None
+                    except Exception as vs_error:
+                        error_str = str(vs_error)
+                        # Handle gRPC channel errors gracefully - log as debug, not warning
+                        if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                            self.logger.debug(f"gRPC channel error during vector store status check (non-fatal): {vs_error}")
+                            status["vector_store"] = {
+                                "error": "gRPC channel error",
+                                "status": "connection_issue",
+                                "note": "Milvus connection channel issue - service may still be functional"
+                            }
+                        else:
+                            self.logger.debug(f"Vector store status check failed: {vs_error}")
+                            status["vector_store"] = None
                 elif hasattr(self.vector_store, 'stats'):
                     try:
                         loop = asyncio.get_event_loop()
@@ -720,10 +731,24 @@ Final Answer: the final answer to the original input question"""),
                             loop.run_in_executor(None, self.vector_store.stats),
                             timeout=1.0
                         )
-                    except Exception:
-                        status["vector_store"] = None
+                    except Exception as stats_error:
+                        error_str = str(stats_error)
+                        # Handle gRPC channel errors gracefully
+                        if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                            self.logger.debug(f"gRPC channel error during vector store stats (non-fatal): {stats_error}")
+                            status["vector_store"] = {
+                                "error": "gRPC channel error",
+                                "status": "connection_issue"
+                            }
+                        else:
+                            status["vector_store"] = None
         except Exception as e:
-            self.logger.warning(f"Failed to get vector store status: {e}")
+            error_str = str(e)
+            # Handle gRPC channel errors gracefully
+            if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                self.logger.debug(f"gRPC channel error during vector store status (non-fatal): {e}")
+            else:
+                self.logger.warning(f"Failed to get vector store status: {e}")
         
         # Get tool stats (fast, no timeout needed)
         try:

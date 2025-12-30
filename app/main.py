@@ -35,6 +35,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not settings.OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not configured - AI features will be disabled")
     
+    # Initialize core systems
+    try:
+        from .core.system_initializer import get_system_initializer
+        system_init = await get_system_initializer()
+        await system_init.initialize_all()
+        logger.info("Core systems initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize core systems: {e}", exc_info=True)
+        # Continue startup even if some systems fail
+    
     # Initialize auto-model loader
     try:
         from .integrations.model_loader import get_auto_loader
@@ -46,6 +56,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     
     # Shutdown
+    try:
+        from .core.system_initializer import get_system_initializer
+        system_init = await get_system_initializer()
+        await system_init.shutdown_all()
+    except Exception as e:
+        logger.warning(f"Error during system shutdown: {e}")
+    
     try:
         from .integrations.model_loader import _auto_loader
         if _auto_loader:
@@ -170,7 +187,7 @@ async def add_request_id_and_metrics(request: Request, call_next):
 
 
 @app.get("/health")
-def health():
+async def health():
     """Health check endpoint with detailed status information."""
     health_status = {
         "status": "healthy",
@@ -187,6 +204,15 @@ def health():
             "max_concurrent_requests": settings.MAX_CONCURRENT_REQUESTS
         }
     }
+    
+    # Add core systems health check
+    try:
+        from .core.system_initializer import get_system_initializer
+        system_init = await get_system_initializer()
+        system_health = await system_init.health_check()
+        health_status["core_systems"] = system_health.get("systems", {})
+    except Exception as e:
+        health_status["core_systems"] = {"error": str(e)}
     
     logger.info("Health check requested", **health_status)
     return health_status
