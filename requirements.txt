@@ -78,8 +78,8 @@ langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # LangGraph for multi-agent workflows and stateful orchestration
 # Compatible with langchain-core 0.2.x
-#langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows
-#langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
+langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows
+langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
 ollama>=0.1.0  # Ollama API client for local models

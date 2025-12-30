@@ -193,6 +193,16 @@ class WorkflowOrchestrator:
         self.prompt_manager = prompt_manager or get_prompt_manager()
         self.rag_bridge = rag_bridge or get_rag_bridge(knowledge_engine, self.vector_store)
         
+        # Initialize LangGraph workflow (optional)
+        self.langgraph_workflow = None
+        try:
+            from .langgraph_workflow import get_langgraph_workflow
+            # Will be initialized lazily when needed
+            self._langgraph_workflow_getter = get_langgraph_workflow
+        except ImportError:
+            self.logger.debug("LangGraph workflow not available")
+            self._langgraph_workflow_getter = None
+        
         # Initialize chains
         self._setup_chains()
     
@@ -404,6 +414,46 @@ Final Answer: the final answer to the original input question"""),
                     "safety_score": safety_result.score,
                     "request_id": request_id,
                 }
+            
+            # Use LangGraph workflow if requested
+            if use_langgraph and self._langgraph_workflow_getter:
+                try:
+                    # Initialize LangGraph workflow if not already done
+                    if not self.langgraph_workflow:
+                        self.langgraph_workflow = await self._langgraph_workflow_getter(
+                            llm_provider=self.llm_provider,
+                            tool_registry=self.tool_registry,
+                            vector_store=self.vector_store,
+                        )
+                    
+                    if self.langgraph_workflow:
+                        # Execute LangGraph workflow
+                        config = {"configurable": {"thread_id": request_id}}
+                        result = await self.langgraph_workflow.ainvoke(
+                            {
+                                "task_description": user_input,
+                                "workflow_id": request_id,
+                                "context": {"user_id": user_id, **kwargs},
+                            },
+                            config=config,
+                        )
+                        
+                        # Format result for consistency
+                        return {
+                            "success": True,
+                            "result": result.get("code") or result.get("plan") or result.get("metadata", {}).get("task_breakdown", ""),
+                            "metadata": {
+                                "workflow_id": result.get("workflow_id"),
+                                "task_breakdown": result.get("metadata", {}).get("task_breakdown"),
+                                "plan": result.get("plan"),
+                                "code": result.get("code"),
+                                "method": "langgraph",
+                            },
+                            "request_id": request_id,
+                        }
+                except Exception as e:
+                    self.logger.warning(f"LangGraph workflow failed: {e}, falling back to sequential", exc_info=True)
+                    # Fall through to sequential processing
             
             # Retrieve context if RAG enabled and user_input is not empty
             context_docs = []

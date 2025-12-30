@@ -22,6 +22,7 @@ class ProcessRequestInput(BaseModel):
     workflow_id: Optional[str] = Field(None, description="Workflow ID for state tracking")
     use_rag: bool = Field(True, description="Whether to use RAG for context")
     use_tools: bool = Field(True, description="Whether to allow tool usage")
+    use_langgraph: bool = Field(False, description="Whether to use LangGraph multi-agent workflow (task → plan → code)")
     force_local_llm: bool = Field(False, description="Force use of local LLM instead of OpenAI")
     llm_backend: Optional[str] = Field(None, description="Local LLM backend (ollama, llama_cpp, transformers)")
     llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., llama3:8b)")
@@ -101,6 +102,7 @@ async def process_request(
                                 workflow_id=input.workflow_id,
                                 use_rag=input.use_rag,
                                 use_tools=input.use_tools,
+                                use_langgraph=input.use_langgraph,
                                 max_tokens=max_tokens_for_llm,
                             ),
                             timeout=request_timeout
@@ -155,6 +157,7 @@ async def process_request(
             workflow_id=input.workflow_id,
             use_rag=input.use_rag,
             use_tools=input.use_tools,
+            use_langgraph=input.use_langgraph,
         )
         # Check if result indicates failure
         if isinstance(result, dict) and result.get("success") is False:
