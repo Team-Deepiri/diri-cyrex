@@ -54,6 +54,13 @@ class SystemInitializer:
             await get_api_bridge()
             await get_synapse_broker()
             
+            # 4. Initialize LoRA and automation services
+            self.logger.info("Initializing LoRA and automation services...")
+            from ..integrations.lora_adapter_service import get_lora_service
+            from ..integrations.company_data_automation import get_automation_service
+            await get_lora_service()
+            await get_automation_service()
+            
             self.initialized = True
             self.logger.info("System initialization complete!")
             
@@ -102,6 +109,8 @@ class SystemInitializer:
             health["systems"]["guardrails"] = {"healthy": True}
             health["systems"]["api_bridge"] = {"healthy": True}
             health["systems"]["synapse_broker"] = {"healthy": True}
+            health["systems"]["lora_service"] = {"healthy": True}
+            health["systems"]["automation_service"] = {"healthy": True}
             
         except Exception as e:
             health["error"] = str(e)

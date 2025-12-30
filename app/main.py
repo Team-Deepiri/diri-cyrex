@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from .routes.agent import router as agent_router
 from .routes.challenge import router as challenge_router
+from .routes.company_automation_api import router as company_automation_router
 from .settings import settings
 from .logging_config import get_logger, RequestLogger, ErrorLogger
 import time
@@ -353,6 +354,7 @@ app.include_router(monitoring_router, prefix="/agent", tags=["monitoring"])
 app.include_router(intelligence_api_router, prefix="/agent", tags=["intelligence"])
 app.include_router(orchestration_router, tags=["orchestration"])
 app.include_router(testing_router, tags=["testing"])
+app.include_router(company_automation_router, tags=["company-automation"])
 
 
 if __name__ == "__main__":
