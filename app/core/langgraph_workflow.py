@@ -3,7 +3,7 @@ LangGraph Multi-Agent Workflow
 Graph-based agent routing for task → plan → code flow
 Replaces custom MultiAgentCoordinator with LangGraph state machine
 """
-from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any
+from typing import TypedDict, Annotated, Sequence, Optional, Dict, Any, List
 from datetime import datetime
 import operator
 import asyncio
