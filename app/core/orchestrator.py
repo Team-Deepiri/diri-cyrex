@@ -384,6 +384,7 @@ Final Answer: the final answer to the original input question"""),
         workflow_id: Optional[str] = None,
         use_rag: bool = True,
         use_tools: bool = True,
+        use_langgraph: bool = False,
         max_tokens: Optional[int] = None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -396,6 +397,8 @@ Final Answer: the final answer to the original input question"""),
             workflow_id: Optional workflow ID for state tracking
             use_rag: Whether to use RAG for context
             use_tools: Whether to allow tool usage
+            use_langgraph: Whether to use LangGraph multi-agent workflow
+            max_tokens: Maximum tokens to generate
             **kwargs: Additional parameters
         
         Returns:
