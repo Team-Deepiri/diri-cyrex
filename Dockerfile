@@ -292,6 +292,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         python-json-logger==2.0.7 \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
+        asyncpg>=0.29.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
@@ -500,6 +501,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         python-json-logger==2.0.7 \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
+        asyncpg>=0.29.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
