@@ -3620,6 +3620,218 @@ export default function App() {
                     </div>
                   )}
 
+                  {/* Redis Status */}
+                  {healthStatus.services?.redis && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: healthStatus.services.redis.healthy ? '#00aa00' : '#ff4444' }}>●</span>
+                        Redis Cache
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          background: '#0a0a0a', 
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>Status</div>
+                            <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                              {healthStatus.services.redis.status || 'unknown'}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '4px',
+                            background: healthStatus.services.redis.healthy ? '#00aa0020' : '#ff444420',
+                            color: healthStatus.services.redis.healthy ? '#00aa00' : '#ff4444',
+                            fontSize: '0.85rem',
+                            fontWeight: 600
+                          }}>
+                            {healthStatus.services.redis.healthy ? 'healthy' : 'unhealthy'}
+                          </span>
+                        </div>
+                        {healthStatus.services.redis.connection && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Connection</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.85rem' }}>
+                                <div>Host: {healthStatus.services.redis.connection.host || 'unknown'}</div>
+                                <div>Port: {healthStatus.services.redis.connection.port || 'unknown'}</div>
+                                <div>Database: {healthStatus.services.redis.connection.db !== undefined ? healthStatus.services.redis.connection.db : 'unknown'}</div>
+                                <div style={{ color: healthStatus.services.redis.connection.connected ? '#00aa00' : '#ff4444' }}>
+                                  Connected: {healthStatus.services.redis.connection.connected ? 'Yes' : 'No'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.redis.error && (
+                          <div style={{ 
+                            padding: '0.75rem', 
+                            background: '#ff444420', 
+                            borderRadius: '4px',
+                            color: '#ff4444',
+                            fontSize: '0.85rem'
+                          }}>
+                            Error: {healthStatus.services.redis.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* MLflow Status */}
+                  {healthStatus.services?.mlflow && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: healthStatus.services.mlflow.healthy ? '#00aa00' : '#ff4444' }}>●</span>
+                        MLflow Tracking
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          background: '#0a0a0a', 
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>Status</div>
+                            <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                              {healthStatus.services.mlflow.status || 'unknown'}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '4px',
+                            background: healthStatus.services.mlflow.healthy ? '#00aa0020' : '#ff444420',
+                            color: healthStatus.services.mlflow.healthy ? '#00aa00' : '#ff4444',
+                            fontSize: '0.85rem',
+                            fontWeight: 600
+                          }}>
+                            {healthStatus.services.mlflow.healthy ? 'healthy' : 'unhealthy'}
+                          </span>
+                        </div>
+                        {healthStatus.services.mlflow.connection && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Connection</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.85rem' }}>
+                                <div>Tracking URI: {healthStatus.services.mlflow.connection.tracking_uri || 'unknown'}</div>
+                                <div style={{ color: healthStatus.services.mlflow.connection.connected ? '#00aa00' : '#ff4444' }}>
+                                  Connected: {healthStatus.services.mlflow.connection.connected ? 'Yes' : 'No'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.mlflow.error && (
+                          <div style={{ 
+                            padding: '0.75rem', 
+                            background: '#ff444420', 
+                            borderRadius: '4px',
+                            color: '#ff4444',
+                            fontSize: '0.85rem'
+                          }}>
+                            Error: {healthStatus.services.mlflow.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Synapse Status */}
+                  {healthStatus.services?.synapse && (
+                    <div style={{
+                      background: '#1a1a1a',
+                      borderRadius: '8px',
+                      padding: '1.5rem',
+                      border: '1px solid #333'
+                    }}>
+                      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ color: healthStatus.services.synapse.healthy ? '#00aa00' : '#ff4444' }}>●</span>
+                        Synapse Streaming
+                      </h3>
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        <div style={{ 
+                          padding: '0.75rem', 
+                          background: '#0a0a0a', 
+                          borderRadius: '4px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: 600 }}>Status</div>
+                            <div style={{ fontSize: '0.85rem', color: '#999', marginTop: '0.25rem' }}>
+                              {healthStatus.services.synapse.status || 'unknown'}
+                            </div>
+                          </div>
+                          <span style={{
+                            padding: '0.25rem 0.75rem',
+                            borderRadius: '4px',
+                            background: healthStatus.services.synapse.healthy ? '#00aa0020' : '#ff444420',
+                            color: healthStatus.services.synapse.healthy ? '#00aa00' : '#ff4444',
+                            fontSize: '0.85rem',
+                            fontWeight: 600
+                          }}>
+                            {healthStatus.services.synapse.healthy ? 'healthy' : 'unhealthy'}
+                          </span>
+                        </div>
+                        {healthStatus.services.synapse.connection && (
+                          <div>
+                            <div style={{ color: '#999', fontSize: '0.85rem', marginBottom: '0.25rem' }}>Connection</div>
+                            <div style={{ 
+                              padding: '0.75rem', 
+                              background: '#0a0a0a', 
+                              borderRadius: '4px'
+                            }}>
+                              <div style={{ display: 'grid', gap: '0.25rem', fontSize: '0.85rem' }}>
+                                <div>URL: {healthStatus.services.synapse.connection.url || 'unknown'}</div>
+                                <div style={{ color: healthStatus.services.synapse.connection.connected ? '#00aa00' : '#ff4444' }}>
+                                  Connected: {healthStatus.services.synapse.connection.connected ? 'Yes' : 'No'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {healthStatus.services.synapse.error && (
+                          <div style={{ 
+                            padding: '0.75rem', 
+                            background: '#ff444420', 
+                            borderRadius: '4px',
+                            color: '#ff4444',
+                            fontSize: '0.85rem'
+                          }}>
+                            Error: {healthStatus.services.synapse.error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* LLM Services */}
                   {healthStatus.services?.llm_services && healthStatus.services.llm_services.length > 0 && (
                     <div style={{

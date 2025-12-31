@@ -2,7 +2,7 @@
 
 Cyrex is the AI/ML service that provides natural language processing, embeddings, challenge generation, and model inference capabilities.
 
-## 🤖 Deepiri AI System (Three-Tier Architecture)
+##  Deepiri AI System (Three-Tier Architecture)
 
 Cyrex now includes the complete Deepiri AI system with three tiers:
 
@@ -12,7 +12,7 @@ Cyrex now includes the complete Deepiri AI system with three tiers:
 
 See `DEEPIRI_AI_SYSTEM.md` for complete documentation.
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Start Cyrex Service
 
@@ -61,7 +61,7 @@ This provides a **Swagger UI** where you can:
 - View request/response schemas
 - Try out different API calls
 
-## 🔑 API Key Authentication
+##  API Key Authentication
 
 **IMPORTANT**: Most Cyrex endpoints require an API key. The default key is `change-me` (or set via `CYREX_API_KEY` environment variable).
 
@@ -87,7 +87,7 @@ cat .env | grep CYREX_API_KEY
 
 **Default API Key**: `change-me` (if not set in environment)
 
-## 🤖 Deepiri AI Endpoints
+##  Deepiri AI Endpoints
 
 ### Command Routing (Tier 1)
 ```bash
@@ -148,7 +148,7 @@ curl -X POST http://localhost:8000/agent/intelligence/knowledge/query \
   }'
 ```
 
-## 📡 API Endpoints
+##  API Endpoints
 
 ### Health & Info (No API Key Required)
 
@@ -242,7 +242,7 @@ curl -X POST http://localhost:8000/api/agent/task/process \
   }'
 ```
 
-## 🧪 Testing Examples
+##  Testing Examples
 
 ### Example 1: Simple Health Check
 
@@ -306,7 +306,7 @@ curl -X POST http://localhost:8000/api/complete \
   }'
 ```
 
-## 🔧 Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -347,7 +347,7 @@ curl -H "x-api-key: my-secret-api-key-123" http://localhost:8000/api/info
 docker compose -f docker-compose.dev.yml exec cyrex env | grep -E "OPENAI|CYREX|MILVUS"
 ```
 
-## 🐛 Troubleshooting
+##  Troubleshooting
 
 ### Cyrex Won't Start
 
@@ -413,7 +413,7 @@ curl http://localhost:19530/healthz
 docker compose -f docker-compose.dev.yml exec cyrex ping milvus
 ```
 
-## 📚 Using the Interactive API Docs
+##  Using the Interactive API Docs
 
 The easiest way to test Cyrex is through the interactive documentation:
 
@@ -440,7 +440,7 @@ The easiest way to test Cyrex is through the interactive documentation:
 
 **Note:** The Swagger UI has an "Authorize" button at the top where you can enter your API key once, and it will be used for all requests.
 
-## 🔗 Integration Examples
+##  Integration Examples
 
 ### From Frontend (JavaScript)
 
@@ -500,7 +500,7 @@ response = requests.post('http://localhost:8000/api/embeddings',
 print(response.json())
 ```
 
-## 🖥️ Cyrex Interface
+## Cyrex Interface
 
 Prefer a UI over cURL? Launch the Cyrex Interface that lives in `diri-cyrex/cyrex-interface`.
 
@@ -525,7 +525,7 @@ The dashboard exposes:
 - Forms for `/route-command`, `/generate-ability`, `/recommend-action`, `/knowledge/query`
 - Inline reminders for `pytest`, `mypy`, and `npm run lint`
 
-## 🎯 Common Use Cases
+##  Common Use Cases
 
 1. **Challenge Generation**: Generate coding challenges based on task descriptions
 2. **Text Embeddings**: Create vector embeddings for semantic search
@@ -533,14 +533,14 @@ The dashboard exposes:
 4. **RAG (Retrieval Augmented Generation)**: Generate content using retrieved context
 5. **Model Inference**: Run ML model predictions
 
-## 📖 Next Steps
+##  Next Steps
 
 - Explore the full API at `http://localhost:8000/docs`
 - Check `diri-cyrex/app/` for the source code
 - Review `diri-cyrex/RUN_WITHOUT_DOCKER.md` for local development
 - See `docs/SERVICES_OVERVIEW.md` for more service details
 
-## 🔍 Additional Resources
+##  Additional Resources
 
 - **API Documentation**: http://localhost:8000/docs
 - **Health Check**: http://localhost:8000/health

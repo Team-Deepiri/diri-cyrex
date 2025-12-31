@@ -16,6 +16,13 @@ logger = get_logger("cyrex.milvus_store")
 # The async client will be created automatically when async methods are called
 warnings.filterwarnings("ignore", message=".*AsyncMilvusClient.*no running event loop.*", category=Warning)
 
+# Suppress pymilvus gRPC channel error logging - we handle these errors gracefully with reconnection
+# These errors are expected when connections are being reestablished
+import logging
+_pymilvus_logger = logging.getLogger("pymilvus")
+# Set to WARNING level to suppress ERROR logs for channel errors (we handle them)
+_pymilvus_logger.setLevel(logging.WARNING)
+
 # LangChain imports with graceful fallbacks
 HAS_LANGCHAIN_MILVUS = False
 HAS_BASE_RETRIEVER = False
@@ -159,11 +166,21 @@ class MilvusVectorStore:
                         utility.list_collections()
                         connection_exists = True
                         logger.debug(f"Reusing existing Milvus connection: {self.connection_alias}")
-                    except Exception as verify_error:
+                    except (ValueError, Exception) as verify_error:
                         error_msg = str(verify_error).lower()
-                        if "closed channel" in error_msg or "rpc" in error_msg:
+                        error_type = type(verify_error).__name__
+                        # Check for gRPC channel errors
+                        is_channel_error = (
+                            "closed channel" in error_msg or 
+                            "rpc" in error_msg or 
+                            "cannot invoke" in error_msg or
+                            "channel closed" in error_msg or
+                            (error_type == "ValueError" and "channel" in error_msg)
+                        )
+                        
+                        if is_channel_error:
                             # Connection exists but channel is closed, disconnect and reconnect
-                            logger.warning(f"Existing connection has closed channel, reconnecting...")
+                            logger.debug(f"Existing connection has closed channel, reconnecting...")
                             try:
                                 connections.disconnect(self.connection_alias)
                             except Exception:
@@ -457,9 +474,19 @@ class MilvusVectorStore:
                         # Try a simple operation to verify connection is alive
                         utility.list_collections()
                         connection_needs_reconnect = False
-                    except Exception as verify_error:
+                    except (ValueError, Exception) as verify_error:
                         error_msg = str(verify_error).lower()
-                        if "closed channel" in error_msg or "rpc" in error_msg:
+                        error_type = type(verify_error).__name__
+                        # Check for gRPC channel errors
+                        is_channel_error = (
+                            "closed channel" in error_msg or 
+                            "rpc" in error_msg or 
+                            "cannot invoke" in error_msg or
+                            "channel closed" in error_msg or
+                            (error_type == "ValueError" and "channel" in error_msg)
+                        )
+                        
+                        if is_channel_error:
                             # Connection channel is closed, need to reconnect
                             logger.debug(f"Connection channel closed, will reconnect: {verify_error}")
                             try:
@@ -617,11 +644,21 @@ class MilvusVectorStore:
                 collection_exists = False
                 try:
                     collection_exists = utility.has_collection(self.collection_name)
-                except Exception as check_error:
+                except (ValueError, Exception) as check_error:
                     error_msg = str(check_error).lower()
-                    if "closed channel" in error_msg or "rpc" in error_msg:
+                    error_type = type(check_error).__name__
+                    # Check for gRPC channel errors - these can be ValueError or other exceptions
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg)
+                    )
+                    
+                    if is_channel_error:
                         # Connection channel was closed, reconnect and retry
-                        logger.warning(f"RPC channel closed during has_collection check (attempt {attempt + 1}/{max_retries}): {check_error}")
+                        logger.debug(f"gRPC channel error during has_collection check (attempt {attempt + 1}/{max_retries}): {check_error}")
                         if attempt < max_retries - 1:
                             # Reconnect and retry
                             try:
@@ -636,11 +673,11 @@ class MilvusVectorStore:
                                 port=self.port,
                                 timeout=10.0,
                             )
-                            logger.info(f"Reconnected to Milvus, retrying collection check...")
+                            logger.debug(f"Reconnected to Milvus, retrying collection check...")
                             continue  # Retry the has_collection check
                         else:
                             # Last attempt failed, try to get collection anyway (might exist)
-                            logger.warning(f"Failed to check collection existence after {max_retries} attempts, attempting to get collection directly")
+                            logger.debug(f"Failed to check collection existence after {max_retries} attempts, attempting to get collection directly")
                             collection_exists = None  # Unknown state, try to get it
                     else:
                         # Other error, re-raise
@@ -668,12 +705,22 @@ class MilvusVectorStore:
                 # Load collection into memory
                 try:
                     collection.load()
-                except Exception as load_error:
+                except (ValueError, Exception) as load_error:
                     error_msg = str(load_error).lower()
-                    if "closed channel" in error_msg or "rpc" in error_msg:
+                    error_type = type(load_error).__name__
+                    # Check for gRPC channel errors
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg)
+                    )
+                    
+                    if is_channel_error:
                         # Connection closed during load, reconnect and retry
                         if attempt < max_retries - 1:
-                            logger.warning(f"RPC channel closed during collection.load() (attempt {attempt + 1}/{max_retries}), reconnecting...")
+                            logger.debug(f"gRPC channel error during collection.load() (attempt {attempt + 1}/{max_retries}), reconnecting...")
                             try:
                                 if connections.has_connection(self.connection_alias):
                                     connections.disconnect(self.connection_alias)
@@ -696,11 +743,21 @@ class MilvusVectorStore:
                 
                 return collection
             
-            except Exception as e:
+            except (ValueError, Exception) as e:
                 if attempt < max_retries - 1:
                     error_msg = str(e).lower()
-                    if "closed channel" in error_msg or "rpc" in error_msg:
-                        logger.warning(f"RPC channel error during collection operation (attempt {attempt + 1}/{max_retries}): {e}")
+                    error_type = type(e).__name__
+                    # Check for gRPC channel errors
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg)
+                    )
+                    
+                    if is_channel_error:
+                        logger.debug(f"gRPC channel error during collection operation (attempt {attempt + 1}/{max_retries}): {e}")
                         # Reconnect and retry
                         try:
                             if connections.has_connection(self.connection_alias):

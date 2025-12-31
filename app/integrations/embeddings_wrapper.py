@@ -20,20 +20,69 @@ class RobustEmbeddings:
         self._initialize_model()
     
     def _get_target_device(self):
-        """Determine target device with proper fallback: CUDA → MPS → CPU"""
+        """Determine target device with proper fallback: CUDA → MPS → CPU
+        
+        Actually tests GPU functionality, not just availability.
+        Checks CUDA capability and performs a test operation to verify GPU works.
+        """
         import torch
         
+        # Check CUDA first
         if torch.cuda.is_available():
-            device = torch.device('cuda')
-            logger.info(f"CUDA available, using GPU: {torch.cuda.get_device_name(0)}")
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device = torch.device('mps')
-            logger.info("MPS (Apple Silicon) available, using MPS")
-        else:
-            device = torch.device('cpu')
-            logger.info("Using CPU (no GPU/MPS available)")
+            try:
+                # Get GPU info
+                gpu_name = torch.cuda.get_device_name(0)
+                cuda_capability = torch.cuda.get_device_capability(0)
+                
+                logger.info(f"CUDA available, detected GPU: {gpu_name}")
+                logger.info(f"CUDA Capability: {cuda_capability[0]}.{cuda_capability[1]}")
+                
+                # Check if CUDA capability is sufficient (PyTorch typically requires 7.0+)
+                if cuda_capability[0] < 7:
+                    logger.warning(
+                        f"GPU has CUDA capability {cuda_capability[0]}.{cuda_capability[1]}, "
+                        f"which may be insufficient. PyTorch typically requires 7.0+. "
+                        f"Attempting to use GPU anyway, will fallback to CPU if it fails."
+                    )
+                
+                # Actually test GPU with a simple tensor operation
+                try:
+                    test_tensor = torch.tensor([1.0], device='cuda')
+                    result = test_tensor * 2
+                    _ = result.cpu()  # Move result back to CPU to ensure operation completed
+                    del test_tensor, result
+                    torch.cuda.empty_cache()
+                    
+                    logger.info(f"GPU test successful, using CUDA device: {gpu_name}")
+                    return torch.device('cuda')
+                except Exception as gpu_test_error:
+                    logger.warning(
+                        f"GPU detected but test operation failed: {gpu_test_error}. "
+                        f"Falling back to CPU."
+                    )
+                    # Fall through to CPU
+            except Exception as cuda_error:
+                logger.warning(f"Error checking CUDA device: {cuda_error}. Falling back to CPU.")
+                # Fall through to CPU
         
-        return device
+        # Check MPS (Apple Silicon)
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            try:
+                # Test MPS with a simple operation
+                test_tensor = torch.tensor([1.0], device='mps')
+                result = test_tensor * 2
+                _ = result.cpu()
+                del test_tensor, result
+                
+                logger.info("MPS (Apple Silicon) available and tested, using MPS")
+                return torch.device('mps')
+            except Exception as mps_error:
+                logger.warning(f"MPS detected but test failed: {mps_error}. Falling back to CPU.")
+                # Fall through to CPU
+        
+        # Fallback to CPU
+        logger.info("Using CPU (no GPU/MPS available or GPU test failed)")
+        return torch.device('cpu')
     
     def _initialize_model(self):
         """Initialize sentence-transformers model using proper PyTorch device handling."""
@@ -172,16 +221,76 @@ class RobustEmbeddings:
                     else:
                         logger.debug(f"Method 2 failed: {e}")
             
-            # Method 3: Use SentenceTransformer with explicit CPU device (avoids meta device)
+            # Method 3: Load model using config + state_dict with explicit CPU map_location to avoid meta device
             if not initialization_success:
                 try:
-                    # Force CPU explicitly to avoid any meta device issues
-                    self.model = SentenceTransformer(
-                        self.model_name,
-                        device='cpu'  # Explicitly use CPU string
-                    )
+                    from transformers import AutoConfig, AutoModel, AutoTokenizer
+                    from transformers.utils import cached_file
+                    import gc
                     
-                    logger.info(f"Successfully initialized {self.model_name} on {target_device} (method 3: SentenceTransformer with explicit CPU)")
+                    # Set environment variables to prevent meta device
+                    os.environ['ACCELERATE_USE_CPU'] = '1'
+                    os.environ['ACCELERATE_USE_DEVICE_MAP'] = '0'
+                    
+                    # Load tokenizer
+                    tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+                    
+                    # Load config
+                    config = AutoConfig.from_pretrained(self.model_name)
+                    
+                    # Create model from config (this creates model on CPU, not meta)
+                    model = AutoModel.from_config(config)
+                    
+                    # Load state dict with explicit map_location='cpu' to ensure weights go to CPU
+                    try:
+                        # Try to find and load the model file
+                        model_file = cached_file(
+                            self.model_name,
+                            "pytorch_model.bin",
+                            cache_dir=None
+                        )
+                        state_dict = torch.load(model_file, map_location='cpu', weights_only=False)
+                        model.load_state_dict(state_dict, strict=False)
+                    except Exception:
+                        # Try safetensors
+                        try:
+                            model_file = cached_file(
+                                self.model_name,
+                                "model.safetensors",
+                                cache_dir=None
+                            )
+                            from safetensors.torch import load_file
+                            state_dict = load_file(model_file, device='cpu')
+                            model.load_state_dict(state_dict, strict=False)
+                        except Exception as safetensors_err:
+                            # If both fail, use from_pretrained but with explicit CPU device
+                            logger.debug(f"Direct state dict loading failed, using from_pretrained with explicit settings: {safetensors_err}")
+                            del model
+                            gc.collect()
+                            model = AutoModel.from_pretrained(
+                                self.model_name,
+                                torch_dtype=torch.float32,
+                                device_map=None,
+                                low_cpu_mem_usage=False,
+                            )
+                            # Force move to CPU
+                            model = model.to('cpu')
+                    
+                    # Verify model is actually on CPU (not meta)
+                    first_param = next(model.parameters(), None)
+                    if first_param is not None:
+                        # This will raise if on meta device
+                        _ = first_param.data
+                        if first_param.device.type != 'cpu':
+                            raise RuntimeError(f"Model parameter is on {first_param.device}, expected cpu")
+                    
+                    # Create SentenceTransformer with pre-loaded components
+                    self.model = SentenceTransformer(modules=[model, tokenizer])
+                    
+                    # Ensure SentenceTransformer is on CPU
+                    self.model = self.model.to('cpu')
+                    
+                    logger.info(f"Successfully initialized {self.model_name} on cpu (method 3: config + state_dict with explicit CPU map_location)")
                     initialization_success = True
                 except Exception as e:
                     last_error = e
@@ -202,15 +311,29 @@ class RobustEmbeddings:
                     
                     try:
                         logger.warning(f"Trying fallback model: {fallback_model}")
-                        # Use SentenceTransformer directly for fallback models (most reliable)
-                        self.model = SentenceTransformer(
-                            fallback_model,
-                            device=str(target_device)
-                        )
+                        # Try with explicit CPU first to avoid meta device issues
+                        try:
+                            # Set environment to prevent meta device
+                            os.environ['ACCELERATE_USE_CPU'] = '1'
+                            os.environ['ACCELERATE_USE_DEVICE_MAP'] = '0'
+                            
+                            self.model = SentenceTransformer(
+                                fallback_model,
+                                device='cpu'  # Always use CPU for fallback to avoid meta device
+                            )
+                        except Exception as cpu_error:
+                            # If CPU fails, try with target device
+                            error_msg = str(cpu_error).lower()
+                            if "meta" in error_msg or "to_empty" in error_msg:
+                                logger.debug(f"Fallback model {fallback_model} failed on CPU with meta error, skipping")
+                                last_error = cpu_error
+                                continue
+                            # Re-raise if it's a different error
+                            raise
                         
                         # Update model name to reflect what we're actually using
                         self.model_name = fallback_model
-                        logger.info(f"Successfully initialized fallback model {fallback_model}")
+                        logger.info(f"Successfully initialized fallback model {fallback_model} on cpu")
                         initialization_success = True
                         break
                     except Exception as fallback_error:

@@ -193,6 +193,16 @@ class WorkflowOrchestrator:
         self.prompt_manager = prompt_manager or get_prompt_manager()
         self.rag_bridge = rag_bridge or get_rag_bridge(knowledge_engine, self.vector_store)
         
+        # Initialize LangGraph workflow (optional)
+        self.langgraph_workflow = None
+        try:
+            from .langgraph_workflow import get_langgraph_workflow
+            # Will be initialized lazily when needed
+            self._langgraph_workflow_getter = get_langgraph_workflow
+        except ImportError:
+            self.logger.debug("LangGraph workflow not available")
+            self._langgraph_workflow_getter = None
+        
         # Initialize chains
         self._setup_chains()
     
@@ -404,6 +414,46 @@ Final Answer: the final answer to the original input question"""),
                     "safety_score": safety_result.score,
                     "request_id": request_id,
                 }
+            
+            # Use LangGraph workflow if requested
+            if use_langgraph and self._langgraph_workflow_getter:
+                try:
+                    # Initialize LangGraph workflow if not already done
+                    if not self.langgraph_workflow:
+                        self.langgraph_workflow = await self._langgraph_workflow_getter(
+                            llm_provider=self.llm_provider,
+                            tool_registry=self.tool_registry,
+                            vector_store=self.vector_store,
+                        )
+                    
+                    if self.langgraph_workflow:
+                        # Execute LangGraph workflow
+                        config = {"configurable": {"thread_id": request_id}}
+                        result = await self.langgraph_workflow.ainvoke(
+                            {
+                                "task_description": user_input,
+                                "workflow_id": request_id,
+                                "context": {"user_id": user_id, **kwargs},
+                            },
+                            config=config,
+                        )
+                        
+                        # Format result for consistency
+                        return {
+                            "success": True,
+                            "result": result.get("code") or result.get("plan") or result.get("metadata", {}).get("task_breakdown", ""),
+                            "metadata": {
+                                "workflow_id": result.get("workflow_id"),
+                                "task_breakdown": result.get("metadata", {}).get("task_breakdown"),
+                                "plan": result.get("plan"),
+                                "code": result.get("code"),
+                                "method": "langgraph",
+                            },
+                            "request_id": request_id,
+                        }
+                except Exception as e:
+                    self.logger.warning(f"LangGraph workflow failed: {e}, falling back to sequential", exc_info=True)
+                    # Fall through to sequential processing
             
             # Retrieve context if RAG enabled and user_input is not empty
             context_docs = []
@@ -711,8 +761,19 @@ Final Answer: the final answer to the original input question"""),
                             status["vector_store"] = stats
                         except Exception:
                             status["vector_store"] = None
-                    except Exception:
-                        status["vector_store"] = None
+                    except Exception as vs_error:
+                        error_str = str(vs_error)
+                        # Handle gRPC channel errors gracefully - log as debug, not warning
+                        if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                            self.logger.debug(f"gRPC channel error during vector store status check (non-fatal): {vs_error}")
+                            status["vector_store"] = {
+                                "error": "gRPC channel error",
+                                "status": "connection_issue",
+                                "note": "Milvus connection channel issue - service may still be functional"
+                            }
+                        else:
+                            self.logger.debug(f"Vector store status check failed: {vs_error}")
+                            status["vector_store"] = None
                 elif hasattr(self.vector_store, 'stats'):
                     try:
                         loop = asyncio.get_event_loop()
@@ -720,10 +781,24 @@ Final Answer: the final answer to the original input question"""),
                             loop.run_in_executor(None, self.vector_store.stats),
                             timeout=1.0
                         )
-                    except Exception:
-                        status["vector_store"] = None
+                    except Exception as stats_error:
+                        error_str = str(stats_error)
+                        # Handle gRPC channel errors gracefully
+                        if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                            self.logger.debug(f"gRPC channel error during vector store stats (non-fatal): {stats_error}")
+                            status["vector_store"] = {
+                                "error": "gRPC channel error",
+                                "status": "connection_issue"
+                            }
+                        else:
+                            status["vector_store"] = None
         except Exception as e:
-            self.logger.warning(f"Failed to get vector store status: {e}")
+            error_str = str(e)
+            # Handle gRPC channel errors gracefully
+            if "channel" in error_str.lower() or "grpc" in error_str.lower() or "rpc" in error_str.lower():
+                self.logger.debug(f"gRPC channel error during vector store status (non-fatal): {e}")
+            else:
+                self.logger.warning(f"Failed to get vector store status: {e}")
         
         # Get tool stats (fast, no timeout needed)
         try:

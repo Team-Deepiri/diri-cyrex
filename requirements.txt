@@ -39,7 +39,8 @@ bitsandbytes>=0.41.0  # For quantization
 gymnasium>=0.29.0  # For RL environment
 stable-baselines3>=2.2.0  # For RL algorithms (optional)
 
-# Vector Database Dependencies
+# Database Dependencies
+asyncpg>=0.29.0  # Async PostgreSQL driver for connection pooling (required for postgres.py)
 pymilvus>=2.3.0  # For Milvus vector database
 pinecone-client>=3.0.0  # For Pinecone (optional)
 weaviate-client>=4.0.0  # For Weaviate (optional)
@@ -77,8 +78,8 @@ langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # LangGraph for multi-agent workflows and stateful orchestration
 # Compatible with langchain-core 0.2.x
-#langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows
-#langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
+langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows
+langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
 ollama>=0.1.0  # Ollama API client for local models
