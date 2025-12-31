@@ -55,14 +55,14 @@
 
 ### All Systems Aligned
 
-1. **Agents** → Process company data with LoRA adapters
-2. **Tools** → Automate company APIs and workflows
-3. **Memory** → Store company-specific context
-4. **Sessions** → Track company sessions
-5. **API Bridge** → Connect to company APIs
-6. **Synapse** → Coordinate adapter training
-7. **ModelKit** → Manage adapter lifecycle
-8. **Database** → Persist company data and jobs
+1. **Agents** -> Process company data with LoRA adapters
+2. **Tools** -> Automate company APIs and workflows
+3. **Memory** -> Store company-specific context
+4. **Sessions** -> Track company sessions
+5. **API Bridge** -> Connect to company APIs
+6. **Synapse** -> Coordinate adapter training
+7. **ModelKit** -> Manage adapter lifecycle
+8. **Database** -> Persist company data and jobs
 
 ## Usage Flow
 

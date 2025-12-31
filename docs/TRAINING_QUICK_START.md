@@ -1,6 +1,6 @@
 # Training Quick Start - Run This Now
 
-## 🚀 Immediate Steps (Copy & Paste)
+##  Immediate Steps (Copy & Paste)
 
 ### Option 1: All-in-One (Easiest)
 
@@ -33,21 +33,21 @@ python app/train/scripts/train_intent_classifier.py --epochs 3 --batch-size 16
 
 ---
 
-## 📋 What You Need
+##  What You Need
 
 ### Minimum Requirements
-- ✅ Python 3.8+
-- ✅ PyTorch installed (`pip install torch transformers datasets scikit-learn`)
-- ✅ At least 100 training examples (or generate synthetic data)
+-  Python 3.8+
+-  PyTorch installed (`pip install torch transformers datasets scikit-learn`)
+-  At least 100 training examples (or generate synthetic data)
 
 ### Recommended
-- ✅ GPU (CUDA) for faster training
-- ✅ 5,000+ training examples for good accuracy
-- ✅ 8GB+ RAM
+-  GPU (CUDA) for faster training
+-  5,000+ training examples for good accuracy
+-  8GB+ RAM
 
 ---
 
-## 🎯 What Gets Trained
+##  What Gets Trained
 
 **Tier 1: Intent Classifier**
 - Input: User command (text)
@@ -57,7 +57,7 @@ python app/train/scripts/train_intent_classifier.py --epochs 3 --batch-size 16
 
 ---
 
-## 📊 Training Output
+##  Training Output
 
 After training, you'll have:
 ```
@@ -71,7 +71,7 @@ app/train/models/intent_classifier/
 
 ---
 
-## 🔧 Use Your Trained Model
+##  Use Your Trained Model
 
 ```python
 from app.services.command_router import get_command_router
@@ -91,7 +91,7 @@ print(result)  # Should return ability_id with high confidence
 
 ---
 
-## ⚡ Quick Troubleshooting
+##  Quick Troubleshooting
 
 ### "No data found"
 ```bash
@@ -112,7 +112,7 @@ python app/train/scripts/train_intent_classifier.py --batch-size 8
 
 ---
 
-## 📚 Full Documentation
+##  Full Documentation
 
 - **Complete Guide**: `HOW_TO_START_TRAINING.md`
 - **Data Collection**: `HOW_TO_COLLECT_TRAINING_DATA.md`
@@ -120,7 +120,7 @@ python app/train/scripts/train_intent_classifier.py --batch-size 8
 
 ---
 
-## ✅ Success Checklist
+##  Success Checklist
 
 - [ ] Data exported and prepared
 - [ ] Training completed without errors

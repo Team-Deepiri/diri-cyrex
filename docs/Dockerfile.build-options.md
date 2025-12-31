@@ -29,14 +29,14 @@ docker build \
 ### 1. Prebuilt (Default)
 
 **Pros:**
-- ✅ Fastest build time
-- ✅ PyTorch + CUDA already included
-- ✅ No large downloads during build
-- ✅ Most reliable
+-  Fastest build time
+-  PyTorch + CUDA already included
+-  No large downloads during build
+-  Most reliable
 
 **Cons:**
-- ❌ Larger base image
-- ❌ Less customizable
+-  Larger base image
+-  Less customizable
 
 **Usage:**
 ```bash
@@ -46,15 +46,15 @@ docker build --build-arg BUILD_TYPE=prebuilt -t cyrex:latest .
 ### 2. From-Scratch
 
 **Pros:**
-- ✅ Smaller final image (if optimized)
-- ✅ Full control over versions
-- ✅ Staged downloads (can resume)
-- ✅ Better for custom PyTorch versions
+-  Smaller final image (if optimized)
+-  Full control over versions
+-  Staged downloads (can resume)
+-  Better for custom PyTorch versions
 
 **Cons:**
-- ❌ Slower build (downloads everything)
-- ❌ Network-dependent
-- ❌ More complex
+-  Slower build (downloads everything)
+-  Network-dependent
+-  More complex
 
 **Usage:**
 ```bash

@@ -89,10 +89,10 @@ pytest
 
 ## Breaking Changes Handled
 
-- HuggingFaceEmbeddings moved to `langchain-huggingface` ✅
-- Ollama moved to `langchain-ollama` ✅
-- Agent imports may have changed (fallbacks added) ✅
-- Retriever paths may have changed (fallbacks added) ✅
+- HuggingFaceEmbeddings moved to `langchain-huggingface` 
+- Ollama moved to `langchain-ollama` 
+- Agent imports may have changed (fallbacks added) 
+- Retriever paths may have changed (fallbacks added) 
 
 ## Notes
 

@@ -7,15 +7,15 @@ Complete LoRA/QLoRA adapter integration system for company data automation. Inte
 ## Architecture
 
 ```
-Company Data → Automation Service → Agent (with LoRA) → Tools → Results
-                    ↓
+Company Data -> Automation Service -> Agent (with LoRA) -> Tools -> Results
+                    v
             LoRA Adapter Service
-                    ↓
+                    v
         ┌───────────┴───────────┐
-        ↓                       ↓
+        v                       v
     Synapse Broker          ModelKit
     (Redis Streams)         (Registry)
-        ↓                       ↓
+        v                       v
     Helox Training      Model Storage
 ```
 
@@ -64,7 +64,7 @@ Company Data → Automation Service → Agent (with LoRA) → Tools → Results
 
 ## Integration Flow
 
-### Training Flow (Cyrex → Helox)
+### Training Flow (Cyrex -> Helox)
 
 1. **Request Training**
    ```python
@@ -92,7 +92,7 @@ Company Data → Automation Service → Agent (with LoRA) → Tools → Results
    - Downloads and caches adapter
    - Loads for immediate use
 
-### Inference Flow (Company Data → Automation)
+### Inference Flow (Company Data -> Automation)
 
 1. **Receive Company Data**
    ```python

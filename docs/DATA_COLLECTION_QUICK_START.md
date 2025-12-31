@@ -4,7 +4,7 @@
 
 ---
 
-## 🚀 5-Minute Setup
+##  5-Minute Setup
 
 ### Step 1: Run the Quick Start Script
 
@@ -14,9 +14,9 @@ python app/train/scripts/quick_start_data_collection.py
 ```
 
 This will:
-- ✓ Check if data collection is set up
-- ✓ Generate initial synthetic data
-- ✓ Show you next steps
+-  Check if data collection is set up
+-  Generate initial synthetic data
+-  Show you next steps
 
 ### Step 2: Verify It's Working
 
@@ -36,15 +36,15 @@ You should see counts > 0 if it worked!
 
 ---
 
-## 📋 What Data You Need
+##  What Data You Need
 
 ### For Tier 1 (Intent Classifier)
-- **What**: User commands → Ability IDs
+- **What**: User commands -> Ability IDs
 - **How Much**: 100+ examples per ability (50 abilities = 5,000+ examples)
 - **Format**: `{"text": "Create a task", "label": "create_objective"}`
 
 ### For Tier 2 (Ability Generator)
-- **What**: User commands → Generated abilities
+- **What**: User commands -> Generated abilities
 - **How Much**: 1,000+ input-output pairs
 - **Format**: `{"input": "migrate to TypeScript", "output": "TypeScript Migration Assistant"}`
 
@@ -55,7 +55,7 @@ You should see counts > 0 if it worked!
 
 ---
 
-## 🎯 Three Ways to Get Data
+##  Three Ways to Get Data
 
 ### Method 1: Synthetic Data (Start Today)
 
@@ -114,7 +114,7 @@ python app/train/scripts/label_data.py
 
 ---
 
-## 🔧 Integration Guide
+##  Integration Guide
 
 ### Add to Your API Endpoint
 
@@ -148,7 +148,7 @@ async def your_endpoint(request: YourRequest):
 
 ---
 
-## 📊 Export Data for Training
+##  Export Data for Training
 
 ### Export All Collected Data
 
@@ -177,7 +177,7 @@ with open('app/train/data/exported/classification_training.jsonl') as f:
 
 ---
 
-## ✅ Checklist
+##  Checklist
 
 ### Week 1: Get Started
 - [ ] Run quick start script
@@ -205,7 +205,7 @@ with open('app/train/data/exported/classification_training.jsonl') as f:
 
 ---
 
-## 🎓 Next Steps
+##  Next Steps
 
 1. **Read the full guide**: `HOW_TO_COLLECT_TRAINING_DATA.md`
 2. **See integration examples**: `app/train/examples/integration_example.py`
@@ -214,7 +214,7 @@ with open('app/train/data/exported/classification_training.jsonl') as f:
 
 ---
 
-## 💡 Pro Tips
+##  Pro Tips
 
 1. **Start with synthetic data** - Get training running immediately
 2. **Collect everything** - Better to have too much data than too little
@@ -242,7 +242,7 @@ with open('app/train/data/exported/classification_training.jsonl') as f:
 
 ---
 
-## 📚 Full Documentation
+##  Full Documentation
 
 - **Complete Guide**: `HOW_TO_COLLECT_TRAINING_DATA.md`
 - **Integration Examples**: `app/train/examples/integration_example.py`
@@ -250,5 +250,5 @@ with open('app/train/data/exported/classification_training.jsonl') as f:
 
 ---
 
-**Remember**: The best time to start collecting data was yesterday. The second best time is now! 🚀
+**Remember**: The best time to start collecting data was yesterday. The second best time is now! 
 

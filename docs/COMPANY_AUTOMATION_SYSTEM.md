@@ -20,13 +20,13 @@
 
 ```
 Company Data
-    ↓
+    v
 Company Data Automation Service
-    ↓
+    v
 Company Agent (with LoRA Adapter)
-    ↓
-Process Data → Call Tools → Return Results
-    ↓
+    v
+Process Data -> Call Tools -> Return Results
+    v
 Store in Memory & Database
 ```
 
@@ -34,17 +34,17 @@ Store in Memory & Database
 
 ```
 Cyrex: Request Training
-    ↓
+    v
 Synapse: lora_training_requests channel
-    ↓
+    v
 ModelKit: Streaming to Helox
-    ↓
+    v
 Helox: Train LoRA/QLoRA Adapter
-    ↓
+    v
 Helox: Publish lora_adapter_ready
-    ↓
+    v
 Cyrex: Download & Load Adapter
-    ↓
+    v
 Ready for Company Automation
 ```
 

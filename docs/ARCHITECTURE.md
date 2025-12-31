@@ -219,7 +219,7 @@ Query knowledge bases.
 
 ---
 
-## 🔧 Services
+##  Services
 
 ### DeepiriIntentClassifier
 
@@ -317,7 +317,7 @@ docs = engine.retrieve(query, ["user_patterns", "ability_templates"], top_k=5)
 
 ---
 
-## 🚀 Integration with Gamification
+##  Integration with Gamification
 
 ### Automatic Ability Execution
 
@@ -335,7 +335,7 @@ When a user completes a task:
 
 ---
 
-## 📊 Model Training
+##  Model Training
 
 ### Intent Classifier Training
 
@@ -365,7 +365,7 @@ python train/scripts/train_productivity_agent.py \
 
 ---
 
-## 🔒 Configuration
+##  Configuration
 
 ### Environment Variables
 
@@ -389,7 +389,7 @@ LANGCHAIN_API_KEY=ls-...
 
 ---
 
-## 📈 Performance Metrics
+##  Performance Metrics
 
 ### Intent Classifier
 - **Accuracy**: >90% on test set
@@ -408,56 +408,56 @@ LANGCHAIN_API_KEY=ls-...
 
 ---
 
-## 🎯 Use Cases
+##  Use Cases
 
 ### Use Case 1: User says "Create a task to refactor auth.ts"
-1. **Intent Classifier** → `create_objective` (confidence: 0.92)
+1. **Intent Classifier** -> `create_objective` (confidence: 0.92)
 2. **Parameters extracted**: title="refactor auth.ts", momentum_reward=10
 3. **Execute**: Create objective via gamification API
 
 ### Use Case 2: User says "I want to migrate this codebase to TypeScript"
-1. **Intent Classifier** → No high-confidence match
-2. **Ability Generator** → Creates "TypeScript Migration Assistant"
-3. **RAG** → Retrieves similar migration patterns
+1. **Intent Classifier** -> No high-confidence match
+2. **Ability Generator** -> Creates "TypeScript Migration Assistant"
+3. **RAG** -> Retrieves similar migration patterns
 4. **Execute**: Custom ability with 50 momentum cost
 
 ### Use Case 3: User has high momentum, good efficiency
-1. **Productivity Agent** → Recommends "activate_focus_boost"
+1. **Productivity Agent** -> Recommends "activate_focus_boost"
 2. **Reasoning**: "You're in high-efficiency mode. A focus boost now could maximize productivity."
 3. **Expected Benefit**: +25 momentum, 30 min saved
-4. **User accepts** → Reward recorded for agent learning
+4. **User accepts** -> Reward recorded for agent learning
 
 ---
 
-## 🔄 Workflow Integration
+##  Workflow Integration
 
 ```
 User Command
-    ↓
+    v
 Intent Classifier (Tier 1)
-    ↓
+    v
 [High Confidence?]
-    ├─ Yes → Execute Predefined Ability
-    └─ No → Ability Generator (Tier 2)
-                ↓
+    ├─ Yes -> Execute Predefined Ability
+    └─ No -> Ability Generator (Tier 2)
+                v
             RAG Retrieval
-                ↓
+                v
             LLM Generation
-                ↓
+                v
             Execute Custom Ability
-    ↓
+    v
 Productivity Agent (Tier 3)
-    ↓
+    v
 Recommend Next Action
-    ↓
-User Feedback → Reward → Agent Learning
+    v
+User Feedback -> Reward -> Agent Learning
 ```
 
 ---
 
-## 📝 Next Steps
+##  Next Steps
 
-1. **Collect Training Data**: User commands → abilities mapping
+1. **Collect Training Data**: User commands -> abilities mapping
 2. **Fine-tune Classifier**: Train on collected data
 3. **Populate Knowledge Bases**: Index historical abilities, patterns
 4. **Train RL Agent**: Collect user interaction data, train offline

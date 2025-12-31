@@ -1,6 +1,6 @@
 # Deepiri AI System - Complete Implementation Guide
 
-## 🎯 Overview
+##  Overview
 
 The Deepiri AI System is a three-tier architecture fully integrated with LangChain, providing:
 - **Maximum Reliability** (Tier 1): Predefined ability classification
@@ -9,7 +9,7 @@ The Deepiri AI System is a three-tier architecture fully integrated with LangCha
 
 ---
 
-## 📁 File Structure
+##  File Structure
 
 ```
 diri-cyrex/app/
@@ -31,7 +31,7 @@ diri-cyrex/app/
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Install Dependencies
 
@@ -88,7 +88,7 @@ The interface exposes chat + all intelligence endpoints and is also available in
 
 ---
 
-## 🔧 Service Details
+##  Service Details
 
 ### DeepiriIntentClassifier
 
@@ -177,27 +177,27 @@ recommendation = optimizer.recommend_action(user_data)
 
 ---
 
-## 📊 Integration Flow
+##  Integration Flow
 
 ```
 User Command
-    ↓
-[Intent Classifier] → High Confidence? → Execute Predefined Ability
-    ↓ Low Confidence
-[Ability Generator] → RAG Retrieval → LLM Generation → Execute Custom Ability
-    ↓
-[Productivity Agent] → Recommend Next Action
-    ↓
-User Feedback → Reward → Agent Learning
+    v
+[Intent Classifier] -> High Confidence? -> Execute Predefined Ability
+    v Low Confidence
+[Ability Generator] -> RAG Retrieval -> LLM Generation -> Execute Custom Ability
+    v
+[Productivity Agent] -> Recommend Next Action
+    v
+User Feedback -> Reward -> Agent Learning
 ```
 
 ---
 
-## 🎓 Training
+##  Training
 
 ### Intent Classifier
 
-1. Collect training data (user commands → abilities)
+1. Collect training data (user commands -> abilities)
 2. Fine-tune BERT/DeBERTa
 3. Deploy model
 
@@ -211,7 +211,7 @@ See `DEEPIRI_AI_SYSTEM.md` for detailed training instructions.
 
 ---
 
-## 📝 API Documentation
+##  API Documentation
 
 Full API documentation available at:
 - Swagger UI: http://localhost:8000/docs
@@ -221,13 +221,13 @@ All endpoints are under `/agent/ai/*`
 
 ---
 
-## 🔗 Integration with Gamification
+##  Integration with Gamification
 
 The AI system integrates seamlessly with the gamification system:
 
-- **Intent Classification** → Execute predefined abilities → Award momentum
-- **Ability Generation** → Create custom abilities → Charge momentum
-- **Productivity Agent** → Recommend actions → Optimize momentum growth
+- **Intent Classification** -> Execute predefined abilities -> Award momentum
+- **Ability Generation** -> Create custom abilities -> Charge momentum
+- **Productivity Agent** -> Recommend actions -> Optimize momentum growth
 
 ---
 

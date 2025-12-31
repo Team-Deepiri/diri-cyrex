@@ -10,10 +10,10 @@ python app/train/scripts/run_training_pipeline.py
 ```
 
 **That's it.** Sit back and watch it:
-1. Generate 5000 training examples ⚡
-2. Prepare the data 📊
-3. Train DeBERTa model 🧠
-4. Evaluate performance 📈
+1. Generate 5000 training examples 
+2. Prepare the data 
+3. Train DeBERTa model 
+4. Evaluate performance 
 
 **Time**: 15-30 minutes (GPU) or 1-2 hours (CPU)
 
@@ -50,16 +50,16 @@ python app/train/scripts/test_model_inference.py
 
 ##  WHAT YOU'LL GET
 
-### ✅ Trained Model
+###  Trained Model
 - Location: `app/train/models/intent_classifier`
 - Size: ~500MB
 - Accuracy: 85-95%
 
-### ✅ Performance Report
+###  Performance Report
 - Location: `app/train/models/intent_classifier/evaluation_report.json`
 - Includes: Accuracy, F1, Precision, Recall, Confusion Matrix
 
-### ✅ 8 Task Categories
+###  8 Task Categories
 1. **Coding** - Programming tasks
 2. **Writing** - Documents, emails, blogs
 3. **Fitness** - Exercise, workouts
@@ -130,7 +130,7 @@ print(result)  # {"category": "coding", "confidence": 0.95}
 
 ---
 
-## 📚 DOCUMENTATION
+##  DOCUMENTATION
 
 - **Main Guide**: `app/train/LIFTOFF.md`
 - **Quick Start**: `app/train/TRAINING_QUICK_START.md`
@@ -138,7 +138,7 @@ print(result)  # {"category": "coding", "confidence": 0.95}
 
 ---
 
-## 🐛 TROUBLESHOOTING
+##  TROUBLESHOOTING
 
 ### "Module not found"
 ```bash
@@ -155,7 +155,7 @@ Check `app/train/LIFTOFF.md` for detailed troubleshooting
 
 ---
 
-## 🚀 READY?
+##  READY?
 
 ### RUN THIS NOW:
 
@@ -164,7 +164,7 @@ cd deepiri/diri-cyrex
 python app/train/scripts/run_training_pipeline.py
 ```
 
-## LIFTOFF IN 3... 2... 1... 🔥🚀
+## LIFTOFF IN 3... 2... 1... 
 
 ---
 
@@ -173,5 +173,5 @@ python app/train/scripts/run_training_pipeline.py
 python app/train/scripts/test_model_inference.py
 ```
 
-**YOU'VE GOT THIS!** 💪
+**YOU'VE GOT THIS!** 
 

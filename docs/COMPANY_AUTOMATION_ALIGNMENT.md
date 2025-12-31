@@ -69,19 +69,19 @@
 
 ```
 Company Data Input
-    ↓
+    v
 Company Data Automation Service
-    ↓
+    v
 Get/Create Company Agent (with LoRA adapter)
-    ↓
+    v
 Agent Processes Data
-    ↓
+    v
 Agent Calls Tools (via API Bridge)
-    ↓
+    v
 Tools Execute (company APIs)
-    ↓
+    v
 Results Stored (Memory + Database)
-    ↓
+    v
 Return Automation Results
 ```
 
@@ -89,17 +89,17 @@ Return Automation Results
 
 ```
 Company Data + Training Request
-    ↓
+    v
 LoRA Adapter Service
-    ↓
+    v
 Publish to Synapse (lora_training_requests)
-    ↓
+    v
 Helox Receives & Trains
-    ↓
+    v
 Helox Publishes (lora_adapter_ready)
-    ↓
+    v
 Cyrex Downloads & Loads Adapter
-    ↓
+    v
 Adapter Ready for Company Automation
 ```
 

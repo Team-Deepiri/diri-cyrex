@@ -7,7 +7,7 @@ The data collection system has been **completely updated** to support Deepiri's 
 ### New Data Types Collected
 
 1. **Prompt-to-Tasks Engine** (Main Differentiator)
-   - Every prompt → tasks conversion
+   - Every prompt -> tasks conversion
    - Execution plans, estimates, subtasks
    - User acceptance and completion tracking
 
@@ -152,7 +152,7 @@ python app/train/scripts/export_training_data.py
 
 ### Priority 1: Prompt-to-Tasks Engine
 **This is your main differentiator!**
-- Collect every prompt → tasks conversion
+- Collect every prompt -> tasks conversion
 - Track user acceptance
 - Track task completion rates
 - This data is critical for training
@@ -184,5 +184,5 @@ python app/train/scripts/export_training_data.py
 
 ---
 
-**The data collection system is now fully aligned with Deepiri's platform vision!** 🚀
+**The data collection system is now fully aligned with Deepiri's platform vision!** 
 
