@@ -7,13 +7,29 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from enum import Enum
 
 try:
     from deepiri_modelkit.rag import DocumentType, IndustryNiche, RAGQuery
 except ImportError:
     # Fallback definitions
     DocumentType = str
-    IndustryNiche = str
+    
+    # Create fallback enum for IndustryNiche
+    class IndustryNiche(Enum):
+        """Fallback IndustryNiche enum when deepiri-modelkit is not available"""
+        INSURANCE = "insurance"
+        MANUFACTURING = "manufacturing"
+        PROPERTY_MANAGEMENT = "property_management"
+        HEALTHCARE = "healthcare"
+        CONSTRUCTION = "construction"
+        AUTOMOTIVE = "automotive"
+        ENERGY = "energy"
+        LOGISTICS = "logistics"
+        RETAIL = "retail"
+        HOSPITALITY = "hospitality"
+        GENERIC = "generic"
+    
     RAGQuery = dict
 
 from ..integrations.universal_rag_engine import create_universal_rag_engine

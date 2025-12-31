@@ -6,6 +6,7 @@ Concrete implementation using Milvus vector store
 from typing import List, Dict, Any, Optional
 import os
 from datetime import datetime
+from enum import Enum
 
 # Import from deepiri-modelkit (shared library)
 try:
@@ -22,13 +23,26 @@ try:
     )
 except ImportError:
     # Fallback if modelkit not installed
-    from ...integrations.company_data_automation import logger
-    logger.warning("deepiri-modelkit not available, using local definitions")
     # Use local definitions as fallback
     BaseRAGEngine = object
     Document = dict
     DocumentType = str
-    IndustryNiche = str
+    
+    # Create fallback enum for IndustryNiche
+    class IndustryNiche(Enum):
+        """Fallback IndustryNiche enum when deepiri-modelkit is not available"""
+        INSURANCE = "insurance"
+        MANUFACTURING = "manufacturing"
+        PROPERTY_MANAGEMENT = "property_management"
+        HEALTHCARE = "healthcare"
+        CONSTRUCTION = "construction"
+        AUTOMOTIVE = "automotive"
+        ENERGY = "energy"
+        LOGISTICS = "logistics"
+        RETAIL = "retail"
+        HOSPITALITY = "hospitality"
+        GENERIC = "generic"
+    
     RAGConfig = dict
     RAGQuery = dict
     RetrievalResult = dict
@@ -37,6 +51,10 @@ from ..integrations.milvus_store import get_milvus_store, MilvusVectorStore
 from ..logging_config import get_logger
 
 logger = get_logger("cyrex.universal_rag")
+
+# Log warning about fallback after logger is initialized
+if BaseRAGEngine == object:
+    logger.warning("deepiri-modelkit not available, using local definitions")
 
 
 class UniversalRAGEngine(BaseRAGEngine):
@@ -202,12 +220,15 @@ class UniversalRAGEngine(BaseRAGEngine):
                 retrieval_results = self._rerank(query.query, retrieval_results)
             
             # Filter by similarity threshold
-            retrieval_results = [
-                r for r in retrieval_results
-                if r.rerank_score >= self.config.similarity_threshold
-                if self.config.use_reranking
-                else r.score >= self.config.similarity_threshold
-            ]
+            filtered_results = []
+            for r in retrieval_results:
+                if self.config.use_reranking and r.rerank_score is not None:
+                    if r.rerank_score >= self.config.similarity_threshold:
+                        filtered_results.append(r)
+                else:
+                    if r.score >= self.config.similarity_threshold:
+                        filtered_results.append(r)
+            retrieval_results = filtered_results
             
             logger.info(
                 "Documents retrieved",
