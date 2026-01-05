@@ -10,6 +10,10 @@ from ..core.types import AgentConfig, AgentRole, AgentStatus, MemoryType
 from ..core.memory_manager import get_memory_manager
 from ..core.session_manager import get_session_manager
 from ..core.enhanced_guardrails import get_enhanced_guardrails
+from ..core.agent_state_processor import AgentStateProcessor, AgentState
+from ..core.prompt_templates import get_prompt_template_manager
+from ..core.event_registry import get_event_registry
+from ..core.event_handler import get_event_handler
 from ..integrations.local_llm import LocalLLMProvider, get_local_llm
 from ..integrations.api_bridge import get_api_bridge
 from ..logging_config import get_logger
@@ -80,6 +84,10 @@ class BaseAgent(ABC):
         self._session_manager = None
         self._guardrails = None
         self._api_bridge = None
+        self._state_processor = None
+        self._prompt_manager = None
+        self._event_registry = None
+        self._event_handler = None
         
         # Prompt template (can be overridden by subclasses)
         self.prompt_template = agent_config.system_prompt or self._default_prompt_template()
@@ -98,6 +106,18 @@ class BaseAgent(ABC):
             self._guardrails = await get_enhanced_guardrails()
         if not self._api_bridge:
             self._api_bridge = await get_api_bridge()
+        if not self._state_processor:
+            self._state_processor = AgentStateProcessor(
+                agent_config=self.config,
+                llm_provider=self.llm,
+                session_id=self.session_id,
+            )
+        if not self._prompt_manager:
+            self._prompt_manager = get_prompt_template_manager()
+        if not self._event_registry:
+            self._event_registry = get_event_registry()
+        if not self._event_handler:
+            self._event_handler = await get_event_handler()
     
     def _default_prompt_template(self) -> str:
         """Default prompt template"""
@@ -126,14 +146,17 @@ Context: {{context}}
         input_text: str,
         context: Optional[Dict[str, Any]] = None,
         use_tools: bool = True,
+        use_state_processor: bool = True,
     ) -> AgentResponse:
         """
         Main invoke method - processes input and returns response
+        Uses LangChain-style state processing when use_state_processor=True
         
         Args:
             input_text: User input or task description
             context: Additional context dictionary
             use_tools: Whether to allow tool usage
+            use_state_processor: Whether to use state-based processing (LangChain-style)
         
         Returns:
             AgentResponse with content, metadata, and tool calls
@@ -143,17 +166,52 @@ Context: {{context}}
         self.status = AgentStatus.PROCESSING
         
         try:
-            # Build context from memory
-            full_context = await self._build_context(context or {}, query=input_text)
-            
             # Safety check
-            guardrail_result = await self._guardrails.check(input_text, full_context)
-            if not guardrail_result["safe"]:
+            guardrail_result = await self._guardrails.check(input_text, context or {})
+            if not guardrail_result.get("safe", True):
                 return AgentResponse(
                     content="I cannot process this request due to safety guidelines.",
-                    metadata={"guardrail_action": guardrail_result["action"]},
+                    metadata={"guardrail_action": guardrail_result.get("action", "block")},
                     confidence=0.0,
                 )
+            
+            # Use state processor for LangChain-style processing
+            if use_state_processor and self._state_processor:
+                # Initialize state with context
+                initial_state = AgentState(
+                    input=input_text,
+                    agent_id=self.agent_id,
+                    session_id=self.session_id,
+                    context=context or {},
+                    status=AgentStatus.PROCESSING,
+                )
+                
+                # Process through state machine
+                final_state = await self._state_processor.process(
+                    input_text=input_text,
+                    initial_state=initial_state,
+                    max_iterations=10,
+                    tools=self._tools if use_tools else {},
+                )
+                
+                # Convert state to response
+                response = AgentResponse(
+                    content=final_state.output,
+                    metadata={
+                        "method": "state_processor",
+                        "iteration": final_state.iteration,
+                        "state": final_state.to_dict(),
+                    },
+                    tool_calls=final_state.tool_calls,
+                    confidence=0.9 if final_state.status == AgentStatus.COMPLETED else 0.5,
+                )
+                
+                self.status = final_state.status
+                return response
+            
+            # Fallback to original method
+            # Build context from memory
+            full_context = await self._build_context(context or {}, query=input_text)
             
             # Build prompt
             prompt = self._build_prompt(input_text, full_context)
@@ -179,7 +237,8 @@ Context: {{context}}
                 confidence=0.0,
             )
         finally:
-            self.status = AgentStatus.IDLE
+            if self.status == AgentStatus.PROCESSING:
+                self.status = AgentStatus.IDLE
     
     async def _invoke_simple(self, prompt: str) -> AgentResponse:
         """Simple invoke without tools"""

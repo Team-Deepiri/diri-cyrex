@@ -3,7 +3,7 @@ Agent Factory
 Factory for creating and initializing agents with Ollama integration
 """
 from typing import Optional, Dict, Any
-from ..core.types import AgentConfig, AgentRole
+from ..core.types import AgentConfig, AgentRole, IndustryNiche
 from ..core.agent_initializer import get_agent_initializer
 from ..integrations.local_llm import get_local_llm, LocalLLMProvider
 from ..logging_config import get_logger
@@ -14,6 +14,7 @@ from .implementations import (
     CreativeSparkerAgent,
     QualityAssuranceAgent,
     EngagementSpecialistAgent,
+    VendorFraudAgent,
 )
 
 logger = get_logger("cyrex.agent.factory")
@@ -112,6 +113,13 @@ class AgentFactory:
             AgentRole.CREATIVE_SPARKER: CreativeSparkerAgent,
             AgentRole.QUALITY_ASSURANCE: QualityAssuranceAgent,
             AgentRole.ENGAGEMENT_SPECIALIST: EngagementSpecialistAgent,
+            # Vendor Fraud Detection Agents
+            AgentRole.INVOICE_ANALYZER: VendorFraudAgent,
+            AgentRole.VENDOR_INTELLIGENCE: VendorFraudAgent,
+            AgentRole.PRICING_BENCHMARK: VendorFraudAgent,
+            AgentRole.FRAUD_DETECTOR: VendorFraudAgent,
+            AgentRole.DOCUMENT_PROCESSOR: VendorFraudAgent,
+            AgentRole.RISK_ASSESSOR: VendorFraudAgent,
         }
         
         agent_class = role_map.get(role)
