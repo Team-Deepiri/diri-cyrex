@@ -32,11 +32,12 @@ class PostgreSQLManager:
         min_size: int = 5,
         max_size: int = 20,
     ):
-        self.host = host or os.getenv("POSTGRES_HOST", "postgres")
-        self.port = port
-        self.database = database or os.getenv("POSTGRES_DB", "deepiri")
-        self.user = user or os.getenv("POSTGRES_USER", "deepiri")
-        self.password = password or os.getenv("POSTGRES_PASSWORD", "deepiripassword")
+        from ..settings import settings
+        self.host = host or os.getenv("POSTGRES_HOST", getattr(settings, 'POSTGRES_HOST', 'postgres'))
+        self.port = port or int(os.getenv("POSTGRES_PORT", getattr(settings, 'POSTGRES_PORT', 5432)))
+        self.database = database or os.getenv("POSTGRES_DB", getattr(settings, 'POSTGRES_DB', 'deepiri'))
+        self.user = user or os.getenv("POSTGRES_USER", getattr(settings, 'POSTGRES_USER', 'deepiri'))
+        self.password = password or os.getenv("POSTGRES_PASSWORD", getattr(settings, 'POSTGRES_PASSWORD', 'deepiripassword'))
         self.min_size = min_size
         self.max_size = max_size
         self._pool: Optional[asyncpg.Pool] = None
