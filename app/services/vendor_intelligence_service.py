@@ -748,3 +748,4 @@ async def get_vendor_intelligence_service() -> VendorIntelligenceService:
     
     return _vendor_intelligence_service
 
+

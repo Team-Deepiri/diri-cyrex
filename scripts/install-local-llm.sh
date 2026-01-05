@@ -606,3 +606,4 @@ echo "   - Stop Ollama: docker stop $CONTAINER_NAME"
 echo "   - Start Ollama: docker start $CONTAINER_NAME"
 echo ""
 
+

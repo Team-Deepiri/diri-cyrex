@@ -422,3 +422,4 @@ async def register_vendor_fraud_tools(agent):
     
     logger.info("Vendor fraud tools registered", agent_id=agent.agent_id)
 
+
