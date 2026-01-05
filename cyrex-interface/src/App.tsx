@@ -2,6 +2,8 @@ import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import './App.css';
 import { Sidebar } from './components/layout/Sidebar';
 import { useUI } from './context/UIContext';
+import { VendorFraudPanel } from './components/VendorFraud';
+import { AgentPlayground } from './components/AgentPlayground';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -1363,6 +1365,11 @@ export default function App() {
           flex: 1
         }}>
         <React.Fragment>
+          {/* Agent Playground Tab */}
+          {activeTab === 'agent-playground' && (
+            <AgentPlayground />
+          )}
+
           {/* Testing Tab */}
           {activeTab === 'testing' && (
             <div>
@@ -3239,6 +3246,15 @@ export default function App() {
             {/* Debug Panel for Chat */}
             {renderDebugPanel('chat')}
           </div>
+          )}
+
+          {/* Vendor Fraud Detection Tab */}
+          {activeTab === 'vendor-fraud' && (
+            <div>
+              <VendorFraudPanel baseUrl={baseUrl} apiKey={apiKey} />
+              {/* Debug Panel for Vendor Fraud */}
+              {renderDebugPanel('vendor-fraud')}
+            </div>
           )}
 
           {/* Health Tab */}

@@ -17,7 +17,9 @@ import {
   FaHistory,
   FaHeartbeat,
   FaChevronLeft,
-  FaChevronRight
+  FaChevronRight,
+  FaSearchDollar,
+  FaRobot
 } from 'react-icons/fa';
 import { useUI, type TabId } from '../../context/UIContext';
 import styles from './Sidebar.module.css';
@@ -29,6 +31,7 @@ interface NavigationItem {
 }
 
 const navigationItems: NavigationItem[] = [
+  { id: 'agent-playground', label: 'Agent Playground', icon: <FaRobot /> },
   { id: 'testing', label: 'Testing Suite', icon: <FaFlask /> },
   { id: 'orchestration', label: 'Orchestration', icon: <FaRandom /> },
   { id: 'workflow', label: 'Workflows', icon: <FaProjectDiagram /> },
@@ -39,6 +42,7 @@ const navigationItems: NavigationItem[] = [
   { id: 'monitoring', label: 'Monitoring', icon: <FaChartLine /> },
   { id: 'safety', label: 'Safety / Guardrails', icon: <FaShieldAlt /> },
   { id: 'chat', label: 'Chat', icon: <FaComments /> },
+  { id: 'vendor-fraud', label: 'Vendor Fraud Detection', icon: <FaSearchDollar /> },
   { id: 'health', label: 'Health', icon: <FaHeartbeat /> },
   { id: 'history', label: 'History', icon: <FaHistory /> }
 ];
