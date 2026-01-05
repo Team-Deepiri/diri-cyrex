@@ -5,6 +5,7 @@ from .routes.agent import router as agent_router
 from .routes.challenge import router as challenge_router
 from .routes.company_automation_api import router as company_automation_router
 from .routes.universal_rag_api import router as universal_rag_router
+from .routes.document_indexing_api import router as document_indexing_router
 from .settings import settings
 from .logging_config import get_logger, RequestLogger, ErrorLogger
 import time
@@ -197,8 +198,8 @@ async def health():
         "timestamp": time.time(),
         "services": {
             "ai": "ready" if settings.OPENAI_API_KEY else "disabled",
-            "redis": "not_configured",  # TODO: Add Redis health check
-            "node_backend": "not_checked"  # TODO: Add Node backend health check
+            "redis": "not_configured",
+            "node_backend": "not_checked"
         },
         "configuration": {
             "log_level": settings.LOG_LEVEL,
@@ -206,6 +207,45 @@ async def health():
             "max_concurrent_requests": settings.MAX_CONCURRENT_REQUESTS
         }
     }
+    
+    # Redis health check
+    try:
+        import redis.asyncio as redis
+        redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        if settings.REDIS_PASSWORD:
+            redis_url = f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        
+        redis_client = redis.from_url(
+            redis_url,
+            db=settings.REDIS_DB,
+            decode_responses=True,
+            socket_connect_timeout=2.0
+        )
+        await redis_client.ping()
+        await redis_client.close()
+        health_status["services"]["redis"] = "healthy"
+    except ImportError:
+        health_status["services"]["redis"] = "not_available"
+    except Exception as e:
+        health_status["services"]["redis"] = f"unhealthy: {str(e)}"
+        logger.warning(f"Redis health check failed: {e}")
+    
+    # Node backend health check
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{settings.NODE_BACKEND_URL}/health")
+            if response.status_code == 200:
+                health_status["services"]["node_backend"] = "healthy"
+            else:
+                health_status["services"]["node_backend"] = f"unhealthy: HTTP {response.status_code}"
+    except ImportError:
+        health_status["services"]["node_backend"] = "httpx_not_available"
+    except httpx.TimeoutException:
+        health_status["services"]["node_backend"] = "timeout"
+    except Exception as e:
+        health_status["services"]["node_backend"] = f"unhealthy: {str(e)}"
+        logger.warning(f"Node backend health check failed: {e}")
     
     # Add core systems health check
     try:
@@ -215,6 +255,23 @@ async def health():
         health_status["core_systems"] = system_health.get("systems", {})
     except Exception as e:
         health_status["core_systems"] = {"error": str(e)}
+    
+    # Ollama health check
+    try:
+        from .integrations.ollama_container import get_ollama_client
+        ollama_client = await get_ollama_client()
+        ollama_health = await ollama_client.health_check()
+        health_status["ollama"] = ollama_health
+    except Exception as e:
+        health_status["ollama"] = {"status": "error", "error": str(e)}
+    
+    # Determine overall status
+    unhealthy_services = [
+        service for service, status in health_status["services"].items()
+        if isinstance(status, str) and "unhealthy" in status.lower()
+    ]
+    if unhealthy_services:
+        health_status["status"] = "degraded"
     
     logger.info("Health check requested", **health_status)
     return health_status
@@ -337,6 +394,8 @@ from .routes.monitoring import router as monitoring_router
 from .routes.intelligence_api import router as intelligence_api_router
 from .routes.orchestration_api import router as orchestration_router
 from .routes.testing_api import router as testing_router
+from .routes.vendor_fraud_api import router as vendor_fraud_router
+from .routes.agent_playground_api import router as agent_playground_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
 
@@ -357,6 +416,9 @@ app.include_router(orchestration_router, tags=["orchestration"])
 app.include_router(testing_router, tags=["testing"])
 app.include_router(company_automation_router, tags=["company-automation"])
 app.include_router(universal_rag_router, tags=["universal-rag"])
+app.include_router(vendor_fraud_router, tags=["vendor-fraud"])
+app.include_router(document_indexing_router, tags=["document-indexing"])
+app.include_router(agent_playground_router, tags=["agent-playground"])
 
 
 if __name__ == "__main__":

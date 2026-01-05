@@ -52,6 +52,13 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
     
+    # PostgreSQL Configuration
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "deepiri"
+    POSTGRES_USER: str = "deepiri"
+    POSTGRES_PASSWORD: str = "deepiripassword"
+    
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 
