@@ -7,6 +7,7 @@ from datetime import datetime
 import asyncio
 from collections import defaultdict
 from ..core.types import Event
+from ..core.event_registry import get_event_registry
 from ..database.postgres import get_postgres_manager
 from ..logging_config import get_logger
 import json
@@ -28,9 +29,13 @@ class EventHandler:
         self._lock = asyncio.Lock()
         self.logger = logger
         self._processing_task: Optional[asyncio.Task] = None
+        self._event_registry = None
     
     async def initialize(self):
         """Initialize event handler and create database tables"""
+        # Get event registry
+        self._event_registry = get_event_registry()
+        
         # Create events table
         postgres = await get_postgres_manager()
         await postgres.execute("""
@@ -82,6 +87,12 @@ class EventHandler:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Emit an event"""
+        # Validate payload if schema exists
+        if self._event_registry:
+            is_valid, errors = self._event_registry.validate_event_payload(event_type, payload)
+            if not is_valid:
+                self.logger.warning(f"Event payload validation failed: {errors}", event_type=event_type)
+        
         event = Event(
             event_type=event_type,
             source=source,
@@ -124,7 +135,32 @@ class EventHandler:
                     except Exception as e:
                         self.logger.warning(f"Middleware error: {e}")
                 
-                # Route to handlers
+                # Route to handlers from registry
+                if self._event_registry:
+                    registered_handlers = self._event_registry.get_handlers(event.event_type)
+                    for registered_handler in registered_handlers:
+                        # Check filter if present
+                        if registered_handler.filter_func:
+                            try:
+                                if asyncio.iscoroutinefunction(registered_handler.filter_func):
+                                    should_run = await registered_handler.filter_func(event)
+                                else:
+                                    should_run = registered_handler.filter_func(event)
+                                if not should_run:
+                                    continue
+                            except Exception as e:
+                                self.logger.warning(f"Filter function error: {e}")
+                                continue
+                        
+                        try:
+                            if asyncio.iscoroutinefunction(registered_handler.handler):
+                                await registered_handler.handler(event)
+                            else:
+                                registered_handler.handler(event)
+                        except Exception as e:
+                            self.logger.error(f"Registered handler error for {event.event_type}: {e}")
+                
+                # Also route to legacy handlers
                 handlers = self._handlers.get(event.event_type, [])
                 handlers.extend(self._handlers.get("*", []))  # Wildcard handlers
                 
