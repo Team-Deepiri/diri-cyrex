@@ -32,6 +32,7 @@ Detailed documentation for specific features and capabilities.
 #### Vendor Fraud Detection
 - **[Vendor Fraud System](./features/CYREX_VENDOR_FRAUD_SYSTEM.md)** - Vendor fraud detection system
 - **[Vendor Fraud Implementation Complete](./features/VENDOR_FRAUD_IMPLEMENTATION_COMPLETE.md)** - Implementation status and details
+- **[Cyrex Guard Platform](./features/CYREX_GUARD_PLATFORM.md)** - Universal vendor fraud detection platform for 6 industries
 
 #### Automation
 - **[Company Automation System](./features/COMPANY_AUTOMATION_SYSTEM.md)** - Automation system overview
