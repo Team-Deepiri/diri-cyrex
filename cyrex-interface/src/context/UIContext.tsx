@@ -8,6 +8,7 @@ export type TabId =
   | 'testing'
   | 'orchestration'
   | 'workflow'
+  | 'workflow-playground'
   | 'llm'
   | 'rag'
   | 'tools'
@@ -16,7 +17,9 @@ export type TabId =
   | 'safety'
   | 'chat'
   | 'health'
-  | 'history';
+  | 'history'
+  | 'vendor-fraud'
+  | 'agent-playground';
 
 interface UIState {
   activeTab: TabId;
