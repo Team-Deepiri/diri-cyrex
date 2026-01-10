@@ -38,6 +38,9 @@ Detailed documentation for specific features and capabilities.
 - **[Company Automation System](./features/COMPANY_AUTOMATION_SYSTEM.md)** - Automation system overview
 - **[Company Automation Alignment](./features/COMPANY_AUTOMATION_ALIGNMENT.md)** - Automation alignment guide
 
+#### Workflows & Interfaces
+- **[LangGraph Workflow Playground](./features/LANGGRAPH_WORKFLOW_PLAYGROUND.md)** - Testing interface for LangGraph multi-agent workflows
+
 ### 💻 [Development](./development/)
 Development guides, training documentation, and technical deep-dives.
 
@@ -82,11 +85,20 @@ Build, deployment, optimization, and operational documentation.
 2. Use [Getting Started](./getting-started/) guides for quick setup
 3. Refer to [Architecture](./architecture/) for system understanding
 
+### For Testing & Development
+1. Use [LangGraph Workflow Playground](./features/LANGGRAPH_WORKFLOW_PLAYGROUND.md) for workflow testing
+2. Check [Development](./development/) guides for setup
+3. Review [Operations](./operations/) for build and deployment
+
 ## 📝 Additional Resources
 
 - **Root README**: See the main project README for project overview
 - **API Documentation**: API endpoints are documented in the codebase
 - **Code Comments**: Inline documentation in source files
+- **Component READMEs**: 
+  - [Agents README](../app/agents/README.md) - Agent system details
+  - [Tests README](../tests/README.md) - Test suite documentation
+  - [Cyrex Interface README](../cyrex-interface/README.md) - Frontend interface guide
 
 ## 🔄 Documentation Updates
 

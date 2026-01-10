@@ -14,7 +14,6 @@ import uuid
 import mimetypes
 from ..integrations.milvus_store import get_milvus_store, MilvusVectorStore
 import asyncio
-from typing import Optional, callable
 from ..integrations.universal_rag_engine import create_universal_rag_engine
 from ..integrations.enhanced_universal_rag_engine import create_enhanced_rag_engine
 from ..logging_config import get_logger

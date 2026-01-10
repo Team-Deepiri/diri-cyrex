@@ -19,7 +19,8 @@ import {
   FaChevronLeft,
   FaChevronRight,
   FaSearchDollar,
-  FaRobot
+  FaRobot,
+  FaSitemap
 } from 'react-icons/fa';
 import { useUI, type TabId } from '../../context/UIContext';
 import styles from './Sidebar.module.css';
@@ -35,6 +36,7 @@ const navigationItems: NavigationItem[] = [
   { id: 'testing', label: 'Testing Suite', icon: <FaFlask /> },
   { id: 'orchestration', label: 'Orchestration', icon: <FaRandom /> },
   { id: 'workflow', label: 'Workflows', icon: <FaProjectDiagram /> },
+  { id: 'workflow-playground', label: 'LangGraph Workflow', icon: <FaSitemap /> },
   { id: 'llm', label: 'Local LLM', icon: <FaServer /> },
   { id: 'rag', label: 'RAG / Vector Store', icon: <FaDatabase /> },
   { id: 'tools', label: 'Tools', icon: <FaTools /> },

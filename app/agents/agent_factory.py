@@ -141,3 +141,41 @@ class AgentFactory:
         await register_api_tools(agent)
         await register_utility_tools(agent)
 
+
+# Convenience function wrapper for easier imports
+async def create_agent(
+    role: AgentRole,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    model_name: str = "llama3:8b",
+    temperature: float = 0.7,
+    max_tokens: int = 2000,
+    **kwargs
+) -> BaseAgent:
+    """
+    Create an agent with Ollama integration (convenience wrapper)
+    
+    This is a convenience function that wraps AgentFactory.create_agent()
+    for easier imports and usage.
+    
+    Args:
+        role: Agent role
+        agent_id: Optional agent ID (will be generated if not provided)
+        session_id: Optional session ID
+        model_name: Ollama model name
+        temperature: LLM temperature
+        max_tokens: Max tokens for responses
+        **kwargs: Additional agent configuration
+    
+    Returns:
+        Initialized agent instance
+    """
+    return await AgentFactory.create_agent(
+        role=role,
+        agent_id=agent_id,
+        session_id=session_id,
+        model_name=model_name,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        **kwargs
+    )

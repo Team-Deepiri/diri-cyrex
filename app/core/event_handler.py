@@ -60,13 +60,13 @@ class EventHandler:
         self._processing_task = asyncio.create_task(self._process_events())
         self.logger.info("Event handler initialized")
     
-    def subscribe(self, event_type: str, handler: Callable):
+    async def subscribe(self, event_type: str, handler: Callable):
         """Subscribe to an event type"""
         async with self._lock:
             self._handlers[event_type].append(handler)
             self.logger.debug(f"Handler subscribed to event type: {event_type}")
     
-    def unsubscribe(self, event_type: str, handler: Callable):
+    async def unsubscribe(self, event_type: str, handler: Callable):
         """Unsubscribe from an event type"""
         async with self._lock:
             if event_type in self._handlers:

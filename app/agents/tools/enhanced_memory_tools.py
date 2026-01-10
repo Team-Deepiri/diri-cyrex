@@ -399,13 +399,13 @@ class EnhancedMemoryTools:
         query = f"SELECT * FROM memories WHERE {' AND '.join(conditions)} ORDER BY importance DESC LIMIT 50"
         rows = await postgres.fetch(query, *params)
         
-        return [
-            {
-                "memory_id": row["memory_id"],
-                **json.loads(row["metadata"]) if row["metadata"] else {}
-            }
-            for row in rows
-        ]
+        result = []
+        for row in rows:
+            memory_dict = {"memory_id": row["memory_id"]}
+            if row["metadata"]:
+                memory_dict.update(json.loads(row["metadata"]))
+            result.append(memory_dict)
+        return result
     
     # ========================================================================
     # Context Building

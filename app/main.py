@@ -6,6 +6,8 @@ from .routes.challenge import router as challenge_router
 from .routes.company_automation_api import router as company_automation_router
 from .routes.universal_rag_api import router as universal_rag_router
 from .routes.document_indexing_api import router as document_indexing_router
+from .routes.language_intelligence_api import router as language_intelligence_router
+from .routes.document_extraction_api import router as document_extraction_router
 from .settings import settings
 from .logging_config import get_logger, RequestLogger, ErrorLogger
 import time
@@ -396,6 +398,7 @@ from .routes.orchestration_api import router as orchestration_router
 from .routes.testing_api import router as testing_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.agent_playground_api import router as agent_playground_router
+from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
@@ -420,7 +423,10 @@ app.include_router(universal_rag_router, tags=["universal-rag"])
 app.include_router(vendor_fraud_router, tags=["vendor-fraud"])
 app.include_router(document_indexing_router, tags=["document-indexing"])
 app.include_router(agent_playground_router, tags=["agent-playground"])
+app.include_router(workflow_router, tags=["workflow"])
 app.include_router(cyrex_guard_router, tags=["cyrex-guard"])
+app.include_router(language_intelligence_router, tags=["language-intelligence"])
+app.include_router(document_extraction_router, tags=["document-extraction"])
 
 
 if __name__ == "__main__":

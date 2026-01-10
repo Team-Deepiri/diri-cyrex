@@ -8,6 +8,7 @@ export type TabId =
   | 'testing'
   | 'orchestration'
   | 'workflow'
+  | 'workflow-playground'
   | 'llm'
   | 'rag'
   | 'tools'

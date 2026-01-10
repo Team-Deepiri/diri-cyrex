@@ -4,6 +4,7 @@ import { Sidebar } from './components/layout/Sidebar';
 import { useUI } from './context/UIContext';
 import { VendorFraudPanel } from './components/VendorFraud';
 import { AgentPlayground } from './components/AgentPlayground';
+import { WorkflowPlayground } from './components/WorkflowPlayground';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -1368,6 +1369,11 @@ export default function App() {
           {/* Agent Playground Tab */}
           {activeTab === 'agent-playground' && (
             <AgentPlayground />
+          )}
+
+          {/* LangGraph Workflow Playground Tab */}
+          {activeTab === 'workflow-playground' && (
+            <WorkflowPlayground />
           )}
 
           {/* Testing Tab */}

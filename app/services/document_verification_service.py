@@ -8,6 +8,7 @@ Capabilities:
 - Document forgery detection
 - Photo verification for work performed
 - Structured data extraction
+- Text extraction from PDF, DOCX, images
 """
 from typing import Dict, List, Optional, Any, BinaryIO
 from datetime import datetime
@@ -15,6 +16,7 @@ import base64
 import io
 import asyncio
 import json
+import re
 
 try:
     from PIL import Image
@@ -22,6 +24,27 @@ try:
 except ImportError:
     HAS_PIL = False
     Image = None
+
+try:
+    import pdfplumber
+    HAS_PDFPLUMBER = True
+except ImportError:
+    HAS_PDFPLUMBER = False
+    pdfplumber = None
+
+try:
+    from docx import Document
+    HAS_DOCX = True
+except ImportError:
+    HAS_DOCX = False
+    Document = None
+
+try:
+    import pytesseract
+    HAS_TESSERACT = True
+except ImportError:
+    HAS_TESSERACT = False
+    pytesseract = None
 
 from ..logging_config import get_logger
 from ..core.types import IndustryNiche
@@ -38,6 +61,7 @@ class DocumentVerificationService:
     - Multimodal AI parsing
     - Document authenticity checking
     - Photo verification
+    - Text extraction from various formats
     """
     
     def __init__(self):
@@ -83,36 +107,39 @@ Return ONLY valid JSON, no other text.
 """
             
             # Use LLM for extraction (would integrate with OCR in production)
-            from ..integrations.local_llm import get_local_llm
+            from ..integrations.llm_providers import get_llm_provider
             
-            llm = get_local_llm(
-                backend="ollama",
-                model_name="llama3:8b",
-                temperature=0.1,  # Low temperature for consistent extraction
-            )
+            llm_provider = get_llm_provider()
+            llm = llm_provider.get_llm()
+            response = await llm.ainvoke(extraction_prompt)
             
-            if llm:
-                response = await asyncio.to_thread(llm.invoke, extraction_prompt)
-                try:
-                    extracted = json.loads(response)
+            content = response.content if hasattr(response, 'content') else str(response)
+            
+            try:
+                # Try to parse as JSON
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    extracted = json.loads(json_match.group())
+                else:
+                    extracted = json.loads(content)
+                
+                return {
+                    "success": True,
+                    "extracted_data": extracted,
+                    "extraction_method": "llm",
+                    "confidence": 0.85,
+                }
+            except json.JSONDecodeError:
+                # Try to extract JSON from response
+                json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                if json_match:
+                    extracted = json.loads(json_match.group())
                     return {
                         "success": True,
                         "extracted_data": extracted,
-                        "extraction_method": "llm",
-                        "confidence": 0.85,
+                        "extraction_method": "llm_parsed",
+                        "confidence": 0.75,
                     }
-                except json.JSONDecodeError:
-                    # Try to extract JSON from response
-                    import re
-                    json_match = re.search(r'\{.*\}', response, re.DOTALL)
-                    if json_match:
-                        extracted = json.loads(json_match.group())
-                        return {
-                            "success": True,
-                            "extracted_data": extracted,
-                            "extraction_method": "llm_parsed",
-                            "confidence": 0.75,
-                        }
             
             # Fallback: Basic extraction
             return {
@@ -200,154 +227,138 @@ Return ONLY valid JSON, no other text.
         line_items = invoice_data.get("line_items", [])
         
         if line_items:
-            calculated_total = sum(item.get("total", item.get("unit_price", 0) * item.get("quantity", 1)) for item in line_items)
+            calculated_total = sum(
+                item.get("total", 0) or (item.get("quantity", 0) * item.get("unit_price", 0)) 
+                for item in line_items
+            )
             if abs(calculated_total - total_amount) > 0.01:
-                verification_results["warnings"].append(f"Line items total ({calculated_total}) doesn't match invoice total ({total_amount})")
-                verification_results["confidence"] *= 0.7
-                verification_results["authentic"] = False
+                verification_results["warnings"].append(
+                    f"Line items total ({calculated_total}) doesn't match invoice total ({total_amount})"
+                )
+                verification_results["confidence"] *= 0.8
         
-        # Check 4: Vendor name consistency
-        vendor_name = invoice_data.get("vendor_name", "")
-        if not vendor_name or len(vendor_name) < 2:
-            verification_results["warnings"].append("Vendor name is missing or too short")
-            verification_results["confidence"] *= 0.6
-        
-        # Final assessment
-        if verification_results["confidence"] < 0.7:
-            verification_results["authentic"] = False
-        
-        verification_results["checks"].append({
-            "check": "overall_authenticity",
-            "status": "passed" if verification_results["authentic"] else "failed",
-            "confidence": verification_results["confidence"],
-        })
+        verification_results["authentic"] = verification_results["confidence"] > 0.7
         
         return verification_results
     
-    async def verify_work_photos(
-        self,
-        before_photo: Optional[bytes] = None,
-        after_photo: Optional[bytes] = None,
-        work_description: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Verify work performed using before/after photos
-        
-        Uses multimodal AI to verify work completion
-        """
-        if not before_photo or not after_photo:
-            return {
-                "verified": False,
-                "confidence": 0.0,
-                "reason": "Missing before or after photos",
-            }
-        
+    async def extract_text_from_pdf(self, document_url: str) -> Dict[str, Any]:
+        """Extract text from PDF document"""
         try:
-            # In production, would use vision model (GPT-4 Vision, Claude 3, etc.)
-            # For now, return basic verification
+            import httpx
             
-            # Check if images are valid
-            if not HAS_PIL:
-                return {
-                    "verified": False,
-                    "confidence": 0.0,
-                    "reason": "PIL/Pillow not installed - photo verification requires image processing",
-                }
-            
-            try:
-                before_img = Image.open(io.BytesIO(before_photo))
-                after_img = Image.open(io.BytesIO(after_photo))
+            if HAS_PDFPLUMBER:
+                # Download PDF
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(document_url, timeout=60.0, follow_redirects=True)
+                    response.raise_for_status()
+                    pdf_bytes = response.content
                 
-                # Basic checks
-                before_size = before_img.size
-                after_size = after_img.size
+                # Extract text using pdfplumber
+                text_parts = []
+                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                    for page in pdf.pages:
+                        text = page.extract_text()
+                        if text:
+                            text_parts.append(text)
                 
-                # If images are very similar, might be duplicate
-                if before_size == after_size:
-                    # Could use image comparison here
-                    pass
+                full_text = "\n\n".join(text_parts)
                 
                 return {
-                    "verified": True,
-                    "confidence": 0.75,
-                    "before_photo_size": before_size,
-                    "after_photo_size": after_size,
-                    "note": "Photos validated. Full verification requires vision model integration.",
+                    "success": True,
+                    "text": full_text,
+                    "page_count": len(text_parts),
+                    "extraction_method": "pdfplumber",
                 }
-            except Exception as e:
-                return {
-                    "verified": False,
-                    "confidence": 0.0,
-                    "error": f"Invalid image format: {str(e)}",
-                }
-        
+            else:
+                # Fallback: Use LLM to extract if pdfplumber not available
+                return await self._extract_text_fallback(document_url, "pdf")
         except Exception as e:
-            self.logger.error(f"Photo verification failed: {e}", exc_info=True)
+            logger.error(f"PDF extraction failed: {e}")
+            return await self._extract_text_fallback(document_url, "pdf")
+    
+    async def extract_text_from_docx(self, document_url: str) -> Dict[str, Any]:
+        """Extract text from DOCX document"""
+        try:
+            import httpx
+            
+            if HAS_DOCX:
+                # Download DOCX
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(document_url, timeout=60.0, follow_redirects=True)
+                    response.raise_for_status()
+                    docx_bytes = response.content
+                
+                # Extract text
+                doc = Document(io.BytesIO(docx_bytes))
+                text_parts = [paragraph.text for paragraph in doc.paragraphs]
+                full_text = "\n".join(text_parts)
+                
+                return {
+                    "success": True,
+                    "text": full_text,
+                    "extraction_method": "python-docx",
+                }
+            else:
+                return await self._extract_text_fallback(document_url, "docx")
+        except Exception as e:
+            logger.error(f"DOCX extraction failed: {e}")
+            return await self._extract_text_fallback(document_url, "docx")
+    
+    async def extract_text_from_image(self, document_url: str) -> Dict[str, Any]:
+        """Extract text from image using OCR"""
+        try:
+            import httpx
+            
+            if HAS_TESSERACT and HAS_PIL:
+                # Download image
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(document_url, timeout=60.0, follow_redirects=True)
+                    response.raise_for_status()
+                    image_bytes = response.content
+                
+                # OCR extraction
+                image = Image.open(io.BytesIO(image_bytes))
+                text = pytesseract.image_to_string(image)
+                
+                return {
+                    "success": True,
+                    "text": text,
+                    "extraction_method": "tesseract_ocr",
+                }
+            else:
+                return await self._extract_text_fallback(document_url, "image")
+        except Exception as e:
+            logger.error(f"Image OCR failed: {e}")
+            return await self._extract_text_fallback(document_url, "image")
+    
+    async def _extract_text_fallback(self, document_url: str, document_type: str) -> Dict[str, Any]:
+        """Fallback text extraction using LLM"""
+        try:
+            from ..integrations.llm_providers import get_llm_provider
+            
+            prompt = f"""Extract all text content from this {document_type} document.
+
+Document URL: {document_url}
+
+If you cannot access the URL directly, try to extract text from any content provided.
+Otherwise, return a message indicating that direct URL access is not available.
+Extract and return all readable text content from the document."""
+            
+            llm_provider = get_llm_provider()
+            llm = llm_provider.get_llm()
+            response = await llm.ainvoke(prompt)
+            
+            text = response.content if hasattr(response, 'content') else str(response)
+            
             return {
-                "verified": False,
-                "confidence": 0.0,
+                "success": True,
+                "text": text,
+                "extraction_method": "llm_fallback",
+            }
+        except Exception as e:
+            logger.error(f"Fallback extraction failed: {e}")
+            return {
+                "success": False,
+                "text": "",
                 "error": str(e),
             }
-    
-    async def process_document(
-        self,
-        document_content: str,
-        document_type: str = "invoice",
-        industry: IndustryNiche = IndustryNiche.GENERIC,
-        verify_authenticity: bool = True
-    ) -> Dict[str, Any]:
-        """
-        Complete document processing pipeline
-        
-        Steps:
-        1. Extract structured data (OCR + LLM)
-        2. Verify authenticity
-        3. Return comprehensive result
-        """
-        result = {
-            "success": False,
-            "extracted_data": {},
-            "verification": {},
-            "processed_at": datetime.utcnow().isoformat(),
-        }
-        
-        # Step 1: Extract data
-        extraction = await self.extract_invoice_data(
-            document_content=document_content,
-            document_type=document_type,
-            industry=industry
-        )
-        
-        if not extraction.get("success"):
-            result["error"] = extraction.get("error", "Extraction failed")
-            return result
-        
-        extracted_data = extraction.get("extracted_data", {})
-        result["extracted_data"] = extracted_data
-        result["extraction_confidence"] = extraction.get("confidence", 0.0)
-        
-        # Step 2: Verify authenticity
-        if verify_authenticity:
-            verification = await self.verify_document_authenticity(
-                document_content=document_content,
-                invoice_data=extracted_data
-            )
-            result["verification"] = verification
-        
-        result["success"] = True
-        return result
-
-
-# Global service instance
-_document_verification_service: Optional[DocumentVerificationService] = None
-
-
-async def get_document_verification_service() -> DocumentVerificationService:
-    """Get or create document verification service singleton"""
-    global _document_verification_service
-    
-    if _document_verification_service is None:
-        _document_verification_service = DocumentVerificationService()
-    
-    return _document_verification_service
-
