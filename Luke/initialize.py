@@ -1,15 +1,4 @@
-"""
-Initialize a minimal LangChain chain for learning purposes.
 
-This file wires together:
-- Prompt template (from prompts.py)
-- Ollama LLM (via Cyrex's LocalLLMProvider)
-- Fake tool (from tools.py)
-- Guardrails (from guardrails.py)
-- Output parser
-
-The chain can be invoked with user input and returns a response.
-"""
 import sys
 import os
 from typing import Dict, Any, Optional

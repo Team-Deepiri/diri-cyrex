@@ -1,6 +1,4 @@
-"""
-Simple prompt template for learning LangChain chains in Cyrex.
-"""
+
 from langchain_core.prompts import PromptTemplate
 
 

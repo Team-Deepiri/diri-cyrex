@@ -1,6 +1,4 @@
-"""
-Basic input/output validation guardrails for learning LangChain chains in Cyrex.
-"""
+
 from typing import Dict, Any
 
 
