@@ -10,6 +10,7 @@ from pymilvus import connections, Collection, FieldSchema, CollectionSchema, Dat
 import json
 from pathlib import Path
 from ..logging_config import get_logger
+from ..utils.device_detection import get_device
 
 logger = get_logger("rag.pipeline")
 
@@ -24,7 +25,10 @@ class RAGPipeline:
         milvus_host: Optional[str] = None,
         milvus_port: Optional[int] = None
     ):
-        self.embedding_model = SentenceTransformer(embedding_model)
+        # Detect and use GPU if available
+        device = get_device()
+        logger.info(f"Initializing RAG pipeline with embedding model on device: {device}")
+        self.embedding_model = SentenceTransformer(embedding_model, device=device)
         self.collection_name = collection_name
         # Use environment variables with fallback defaults
         self.milvus_host = milvus_host or os.getenv("MILVUS_HOST", "localhost")
@@ -103,8 +107,9 @@ class RAGPipeline:
         """Load cross-encoder reranker for top-K refinement."""
         try:
             from sentence_transformers import CrossEncoder
-            self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-            logger.info("Reranker loaded")
+            device = get_device()
+            self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device=device)
+            logger.info(f"Reranker loaded on device: {device}")
         except Exception as e:
             logger.warning("Reranker not available", error=str(e))
     

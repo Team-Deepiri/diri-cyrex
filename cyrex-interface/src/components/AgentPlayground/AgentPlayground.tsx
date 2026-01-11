@@ -87,14 +87,7 @@ const AGENT_TYPES = [
   { id: 'automation', name: 'Automation Agent', icon: '⚙️' },
 ];
 
-// Available models
-const AVAILABLE_MODELS = [
-  { id: 'llama3:8b', name: 'Llama 3 (8B)', size: '4.7GB' },
-  { id: 'llama3:70b', name: 'Llama 3 (70B)', size: '40GB' },
-  { id: 'mistral:7b', name: 'Mistral (7B)', size: '4.1GB' },
-  { id: 'codellama:7b', name: 'Code Llama (7B)', size: '3.8GB' },
-  { id: 'phi3', name: 'Phi-3', size: '2.3GB' },
-];
+// Models will be auto-detected from Ollama container
 
 // Available tools
 const AVAILABLE_TOOLS = [
@@ -132,6 +125,15 @@ export function AgentPlayground() {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [liveToolCalls, setLiveToolCalls] = useState<ToolCall[]>([]);
   
+  // Model info interface
+  interface ModelInfo {
+    id: string;
+    name: string;
+    size?: string;
+  }
+  
+  const [modelInfo, setModelInfo] = useState<ModelInfo[]>([]);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
@@ -145,27 +147,219 @@ export function AgentPlayground() {
   }, [conversation]);
 
   // Check Ollama status
-  useEffect(() => {
-    checkOllamaStatus();
-    const interval = setInterval(checkOllamaStatus, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  const checkOllamaStatus = useCallback(async () => {
+    // Create timeout manually (AbortSignal.timeout may not be available in all browsers)
+    const createTimeout = (ms: number) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), ms);
+      return { signal: controller.signal, cleanup: () => clearTimeout(timeout) };
+    };
 
-  const checkOllamaStatus = async () => {
+    // First, try the models endpoint as it's more reliable
+    // If models endpoint works, Ollama is definitely connected
+    let modelsTimeout: { cleanup: () => void } | null = null;
     try {
-      const response = await fetch(`${API_BASE}/health`);
+      const timeout = createTimeout(5000);
+      modelsTimeout = timeout;
+      
+      const modelsResponse = await fetch(`${API_BASE}/api/agent/models`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: timeout.signal
+      });
+      
+      if (modelsResponse.ok) {
+        const modelsData = await modelsResponse.json();
+        console.debug('Models endpoint response:', modelsData);
+        
+        // If status is connected OR if we have models, Ollama is working
+        const hasModels = (modelsData.model_names && modelsData.model_names.length > 0) ||
+                         (modelsData.models && modelsData.models.length > 0);
+        const isConnected = modelsData.status === 'connected' || 
+                           modelsData.is_connected === true ||
+                           hasModels;
+        
+        if (isConnected) {
+          console.debug('Ollama connected via models endpoint');
+          setOllamaStatus('connected');
+          // If we have models, also update the model list
+          if (hasModels) {
+            return; // Success - models will be fetched by fetchAvailableModels
+          }
+          return; // Connected but no models yet
+        }
+      } else {
+        // Response not OK, but might still be working
+        console.debug('Models endpoint returned non-OK status:', modelsResponse.status);
+      }
+    } catch (modelsError: any) {
+      // Models check failed, but don't mark as disconnected yet
+      // Could be network issue or timeout
+      console.debug('Models check failed:', modelsError.name, modelsError.message);
+      
+      // If it's just a timeout or network error, and we have cached models, stay connected
+      if (availableModels.length > 0 && 
+          (modelsError.name === 'AbortError' || modelsError.message?.includes('fetch') || modelsError.message?.includes('aborted'))) {
+        console.debug('Models check timeout but have cached models, staying connected');
+        setOllamaStatus('connected');
+        return;
+      }
+    } finally {
+      if (modelsTimeout) {
+        modelsTimeout.cleanup();
+      }
+    }
+    
+    // Fallback to health endpoint
+    let healthTimeout: { cleanup: () => void } | null = null;
+    try {
+      const timeout = createTimeout(5000);
+      healthTimeout = timeout;
+      
+      const response = await fetch(`${API_BASE}/health`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: timeout.signal
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.debug('Health endpoint response - ollama:', data.ollama);
+        
+        // Check if Ollama is healthy - be lenient
+        // Health endpoint returns: { status: "healthy", is_connected: true, models: ["llama3:8b"], ... }
+        const ollamaHealthy = data.ollama?.status === 'healthy';
+        const ollamaConnected = data.ollama?.is_connected === true;
+        const hasOllamaModels = data.ollama?.models && Array.isArray(data.ollama.models) && data.ollama.models.length > 0;
+        
+        if (ollamaHealthy || ollamaConnected || hasOllamaModels) {
+          console.debug('Ollama connected via health endpoint');
+          setOllamaStatus('connected');
+          return;
+        } else {
+          console.debug('Health endpoint shows Ollama not connected:', data.ollama);
+        }
+      } else {
+        console.debug('Health endpoint returned non-OK status:', response.status);
+      }
+    } catch (error: any) {
+      console.debug('Health check failed:', error.name, error.message);
+    } finally {
+      if (healthTimeout) {
+        healthTimeout.cleanup();
+      }
+    }
+    
+    // If we have cached models, assume still connected (might be transient issue)
+    if (availableModels.length > 0) {
+      console.debug('Have cached models, staying connected despite check failures');
+      setOllamaStatus('connected');
+    } else {
+      // Only mark as disconnected if we have no cached models and all checks failed
+      console.debug('No cached models and all checks failed, marking as disconnected');
+      setOllamaStatus('disconnected');
+      setAvailableModels([]);
+      setModelInfo([]);
+    }
+  }, [availableModels]);
+
+  // Fetch available models from Ollama
+  const fetchAvailableModels = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/models`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000) // 10 second timeout for model listing
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Models endpoint returned ${response.status}`);
+      }
+      
       const data = await response.json();
       
-      if (data.ollama?.status === 'healthy') {
+      // If models endpoint says we're connected OR has models, we're connected
+      const hasModels = (data.model_names && data.model_names.length > 0) ||
+                       (data.models && data.models.length > 0);
+      const isConnected = data.status === 'connected' || 
+                          data.is_connected === true ||
+                          hasModels;
+      
+      if (isConnected && hasModels) {
+        const models = data.model_names.map((name: string) => {
+          // Find full model info if available
+          const fullInfo = data.models?.find((m: any) => m.name === name);
+          const sizeGB = fullInfo?.size ? (fullInfo.size / (1024 * 1024 * 1024)).toFixed(1) + 'GB' : '';
+          
+          return {
+            id: name,
+            name: name,
+            size: sizeGB,
+          };
+        });
+        
+        setAvailableModels(data.model_names);
+        setModelInfo(models);
+        setOllamaStatus('connected'); // Update status based on models endpoint
+        
+        // If current model is not in the list, switch to first available model
+        setAgentConfig(prev => {
+          if (models.length > 0 && !data.model_names.includes(prev.model)) {
+            return { ...prev, model: models[0].id };
+          }
+          return prev;
+        });
+      } else if (isConnected) {
+        // Connected but no models yet (might be loading)
         setOllamaStatus('connected');
-        setAvailableModels(data.ollama?.models || []);
+        // Keep existing models if we have them
       } else {
-        setOllamaStatus('disconnected');
+        // Not connected - but don't clear if we have cached models (might be transient)
+        if (availableModels.length === 0) {
+          setOllamaStatus('disconnected');
+          setAvailableModels([]);
+          setModelInfo([]);
+        }
       }
-    } catch (error) {
-      setOllamaStatus('disconnected');
+    } catch (error: any) {
+      console.error('Failed to fetch models:', error);
+      
+      // Don't immediately mark as disconnected - might be transient
+      // Only mark disconnected if we don't have cached models
+      if (availableModels.length === 0) {
+        // Check if it's a timeout/network error vs actual failure
+        if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+          // Timeout - keep current status if we have models
+          if (availableModels.length === 0) {
+            setOllamaStatus('disconnected');
+          }
+        } else {
+          setOllamaStatus('disconnected');
+          setAvailableModels([]);
+          setModelInfo([]);
+        }
+      }
     }
-  };
+  }, [availableModels]);
+
+  // Check Ollama status and fetch models on mount and periodically
+  useEffect(() => {
+    // Initial check - run both in parallel
+    const initialCheck = async () => {
+      await Promise.all([
+        checkOllamaStatus(),
+        fetchAvailableModels()
+      ]);
+    };
+    initialCheck();
+    
+    // Set up periodic checks
+    const interval = setInterval(() => {
+      checkOllamaStatus();
+      fetchAvailableModels();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [checkOllamaStatus, fetchAvailableModels]);
 
   // Add event
   const addEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
@@ -432,17 +626,50 @@ export function AgentPlayground() {
         <label>
           Model 
           <span className={`status-dot ${ollamaStatus}`} />
+          {ollamaStatus === 'connected' && availableModels.length > 0 && (
+            <span className="model-count">({availableModels.length} available)</span>
+          )}
+          <button 
+            className="btn-icon btn-small" 
+            onClick={() => {
+              checkOllamaStatus();
+              fetchAvailableModels();
+            }}
+            title="Refresh models from Ollama"
+          >
+            <FaSyncAlt />
+          </button>
         </label>
-        <select
-          value={agentConfig.model}
-          onChange={e => setAgentConfig(prev => ({ ...prev, model: e.target.value }))}
-        >
-          {AVAILABLE_MODELS.map(model => (
-            <option key={model.id} value={model.id}>
-              {model.name} ({model.size})
-            </option>
-          ))}
-        </select>
+        {ollamaStatus === 'disconnected' ? (
+          <div className="error-message">
+            <FaExclamationCircle /> Ollama is disconnected. Please check the Ollama container.
+            <button 
+              className="btn-secondary btn-small" 
+              onClick={() => {
+                checkOllamaStatus();
+                fetchAvailableModels();
+              }}
+              style={{ marginLeft: '10px' }}
+            >
+              <FaSyncAlt /> Retry Connection
+            </button>
+          </div>
+        ) : modelInfo.length === 0 ? (
+          <div className="loading-models">
+            <FaSpinner className="spin" /> Detecting models from Ollama...
+          </div>
+        ) : (
+          <select
+            value={agentConfig.model}
+            onChange={e => setAgentConfig(prev => ({ ...prev, model: e.target.value }))}
+          >
+            {modelInfo.map(model => (
+              <option key={model.id} value={model.id}>
+                {model.name} {model.size && `(${model.size})`}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="config-row">

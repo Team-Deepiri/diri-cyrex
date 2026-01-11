@@ -514,6 +514,23 @@ class MilvusVectorStore:
                     port=self.port,
                     timeout=10.0,
                 )
+                # Verify the connection is actually working after reconnect
+                try:
+                    utility.list_collections()
+                    logger.debug("Milvus connection verified after reconnect")
+                except Exception as verify_err:
+                    error_msg = str(verify_err).lower()
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg
+                    )
+                    if is_channel_error:
+                        logger.warning(f"Connection verification failed after reconnect: {verify_err}. Connection may be unstable.")
+                    else:
+                        # Non-channel error might be acceptable (e.g., no collections yet)
+                        logger.debug(f"Connection verification returned non-critical error: {verify_err}")
             
             # Check LangChain connection if it exists
             if hasattr(self, 'langchain_connection_alias') and self.langchain_connection_alias != self.connection_alias:
@@ -634,12 +651,13 @@ class MilvusVectorStore:
     
     def _get_or_create_collection(self) -> Collection:
         """Get existing collection or create new one"""
-        # Ensure connection is alive before checking collection
-        self._ensure_connection()
-        
         max_retries = 2
         for attempt in range(max_retries):
             try:
+                # Ensure connection is alive right before checking collection
+                # This prevents closed channel errors that can occur between operations
+                self._ensure_connection()
+                
                 # Check if collection exists - this can fail if RPC channel is closed
                 collection_exists = False
                 try:

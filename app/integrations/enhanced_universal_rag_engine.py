@@ -70,6 +70,7 @@ except ImportError:
 from ..integrations.milvus_store import get_milvus_store, MilvusVectorStore
 from ..utils.cache import get_redis_client
 from ..logging_config import get_logger
+from ..utils.device_detection import get_device
 
 logger = get_logger("cyrex.enhanced_rag")
 
@@ -193,8 +194,9 @@ class EnhancedUniversalRAGEngine(BaseRAGEngine):
         """Load cross-encoder reranker"""
         try:
             from sentence_transformers import CrossEncoder
-            self.reranker = CrossEncoder(self.config.reranker_model)
-            logger.info("Reranker loaded", model=self.config.reranker_model)
+            device = get_device()
+            self.reranker = CrossEncoder(self.config.reranker_model, device=device)
+            logger.info(f"Reranker loaded on device: {device}", model=self.config.reranker_model)
         except Exception as e:
             logger.warning(f"Reranker not available: {e}")
             self.config.use_reranking = False

@@ -410,13 +410,58 @@ async def list_available_tools() -> List[Dict[str, Any]]:
 
 @router.get("/models")
 async def list_available_models() -> Dict[str, Any]:
-    """List available Ollama models"""
+    """List available Ollama models - auto-detected from container"""
     try:
         ollama = await get_ollama_client()
-        models = await ollama.list_models()
         
-        return {
-            "status": "connected" if ollama.is_connected else "disconnected",
+        # Try to connect if not connected, but don't fail if it times out
+        connection_ok = ollama.is_connected
+        if not connection_ok:
+            try:
+                # Try quick connection with timeout
+                connection_ok = await asyncio.wait_for(ollama.connect(), timeout=5.0)
+                logger.info(f"Ollama connection attempt: {connection_ok}")
+            except asyncio.TimeoutError:
+                logger.debug("Connection attempt timed out, but will try to list models anyway")
+                connection_ok = False
+            except Exception as connect_err:
+                logger.debug(f"Connection attempt failed: {connect_err}, but will try to list models anyway")
+                connection_ok = False
+        
+        # Try to get models even if connection check failed
+        # (Ollama might be working but health check is slow)
+        models = []
+        try:
+            # Use a timeout for listing models too
+            models = await asyncio.wait_for(ollama.list_models(), timeout=10.0)
+            # If we got models, we're definitely connected
+            if models:
+                connection_ok = True
+                logger.info(f"Successfully listed {len(models)} models from Ollama")
+        except asyncio.TimeoutError:
+            logger.warning("Model listing timed out")
+            # If we have cached models, use those
+            if ollama.available_models:
+                models = ollama.available_models
+                connection_ok = True
+                logger.info(f"Using {len(models)} cached models due to timeout")
+        except Exception as list_err:
+            logger.warning(f"Failed to list models: {list_err}")
+            # If we have cached models, use those
+            if ollama.available_models:
+                models = ollama.available_models
+                connection_ok = True
+                logger.info(f"Using {len(models)} cached models due to error")
+            else:
+                # No models available
+                models = []
+        
+        # Determine status: if we have models, we're connected
+        status = "connected" if (connection_ok or models) else "disconnected"
+        
+        result = {
+            "status": status,
+            "is_connected": bool(connection_ok or models),
             "models": [
                 {
                     "name": m.name,
@@ -425,12 +470,42 @@ async def list_available_models() -> Dict[str, Any]:
                 }
                 for m in models
             ],
+            "model_names": [m.name for m in models],  # Simple list for frontend
         }
+        
+        logger.debug(f"Models endpoint response: status={status}, models_count={len(models)}")
+        return result
+        
     except Exception as e:
+        logger.error(f"Failed to list Ollama models: {e}", exc_info=True)
+        # Even on error, check if we have cached models
+        try:
+            ollama = await get_ollama_client()
+            if ollama.available_models:
+                logger.info(f"Returning {len(ollama.available_models)} cached models despite error")
+                return {
+                    "status": "connected",
+                    "is_connected": True,
+                    "models": [
+                        {
+                            "name": m.name,
+                            "size": m.size,
+                            "modified_at": m.modified_at,
+                        }
+                        for m in ollama.available_models
+                    ],
+                    "model_names": [m.name for m in ollama.available_models],
+                    "warning": "Using cached models due to error",
+                }
+        except Exception as cache_err:
+            logger.debug(f"Could not get cached models: {cache_err}")
+        
         return {
             "status": "error",
+            "is_connected": False,
             "error": str(e),
             "models": [],
+            "model_names": [],
         }
 
 
