@@ -53,7 +53,8 @@ class Settings(BaseSettings):
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
     
     # PostgreSQL Configuration
-    POSTGRES_HOST: str = "localhost"
+    # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
+    POSTGRES_HOST: str = "postgres"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "deepiri"
     POSTGRES_USER: str = "deepiri"
