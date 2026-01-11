@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     CORS_ORIGIN: str = "http://localhost:5173"
-    NODE_BACKEND_URL: str = "http://localhost:5000"
+    # Default to api-gateway service name for Docker, fallback to localhost for local dev
+    NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
     
     # Logging Configuration

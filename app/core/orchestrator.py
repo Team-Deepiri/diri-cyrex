@@ -215,7 +215,7 @@ class WorkflowOrchestrator:
         try:
             # Register knowledge_retrieval tool if RAG bridge is available
             if self.rag_bridge:
-                from langchain.tools import Tool
+                from langchain_core.tools import Tool
                 
                 async def knowledge_retrieval_func_async(input_data: Dict[str, Any]) -> str:
                     """Retrieve knowledge from vector store using RAG"""
