@@ -1549,21 +1549,50 @@ _cache_lock = None  # Will be initialized as threading.Lock() when needed
 def get_milvus_store(
     collection_name: str,
     embedding_model: Optional[Embeddings] = None,
+    force_new: bool = False,
     **kwargs
 ) -> MilvusVectorStore:
     """
-    Factory function to get Milvus vector store
+    Factory function to get Milvus vector store with caching
     
     Args:
         collection_name: Name of the collection
         embedding_model: Optional custom embedding model
+        force_new: If True, create new instance instead of using cache
         **kwargs: Additional configuration
     
     Returns:
-        Configured MilvusVectorStore instance
+        Configured MilvusVectorStore instance (cached if possible)
     """
-    return MilvusVectorStore(
-        collection_name=collection_name,
-        embedding_model=embedding_model,
-        **kwargs
-    )
+    global _cache_lock
+
+    # Initialize lock on first use
+    if _cache_lock is None:
+        import threading
+        _cache_lock = threading.Lock()
+
+    # Create cache key from collection name and kwargs
+    cache_key = f"{collection_name}_{hash(frozenset(kwargs.items()))}"
+
+    # Return cached instance if available (unless force_new=True)
+    if not force_new and cache_key in _store_cache:
+        cached_store = _store_cache[cache_key]
+        logger.debug(f"Returning cached MilvusVectorStore for collection '{collection_name}'")
+        return cached_store
+
+    # Create new instance with lock to prevent concurrent initialization
+    with _cache_lock:
+        # Double-check after acquiring lock
+        if not force_new and cache_key in _store_cache:
+            return _store_cache[cache_key]
+
+        logger.info(f"Creating new MilvusVectorStore for collection '{collection_name}'")
+        store = MilvusVectorStore(
+            collection_name=collection_name,
+            embedding_model=embedding_model,
+            **kwargs
+        )
+
+        # Cache the instance
+        _store_cache[cache_key] = store
+        return store
