@@ -258,6 +258,76 @@ async def list_documents(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/api/documents/collections", response_model=DocumentResponse)
+async def list_collections(request: Request = None):
+    """
+    List all available collections in Milvus
+
+    **Example:**
+    ```
+    GET /api/documents/collections
+    ```
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
+
+    try:
+        from ..integrations.milvus_store import MilvusVectorStore
+
+        # List all collections
+        collections = await MilvusVectorStore.alist_all_collections()
+
+        logger.info(f"Listed {len(collections)} collections")
+
+        return {
+            "success": True,
+            "data": {
+                "collections": collections,
+                "count": len(collections)
+            },
+            "request_id": request_id
+        }
+
+    except Exception as e:
+        error_logger.log_api_error(e, request_id, "/api/documents/collections")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/documents/collections/{collection_name}/info", response_model=DocumentResponse)
+async def get_collection_info(collection_name: str, request: Request = None):
+    """
+    Get detailed information about a specific collection
+
+    **Example:**
+    ```
+    GET /api/documents/collections/deepiri_knowledge/info
+    ```
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
+
+    try:
+        from ..integrations.milvus_store import MilvusVectorStore
+
+        # Get collection info
+        info = await MilvusVectorStore.aget_collection_info(collection_name)
+
+        if "error" in info:
+            raise HTTPException(status_code=404, detail=info["error"])
+
+        logger.info(f"Retrieved info for collection '{collection_name}'")
+
+        return {
+            "success": True,
+            "data": info,
+            "request_id": request_id
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_logger.log_api_error(e, request_id, f"/api/documents/collections/{collection_name}/info")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/api/documents/{doc_id}", response_model=DocumentResponse)
 async def get_document(
     doc_id: str,
