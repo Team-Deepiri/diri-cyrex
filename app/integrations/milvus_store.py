@@ -77,10 +77,12 @@ class MilvusVectorStore:
         host: Optional[str] = None,
         port: Optional[int] = None,
         dimension: Optional[int] = None,
+        skip_langchain_wrapper: bool = True,  # Skip slow LangChain wrapper if needed during testing
     ):
         self.collection_name = collection_name
         self.host = host or settings.MILVUS_HOST
         self.port = port or settings.MILVUS_PORT
+        self.skip_langchain_wrapper = skip_langchain_wrapper
         
         # Always initialize in-memory fallback first to ensure it exists
         self._memory_docs = []
@@ -249,6 +251,12 @@ class MilvusVectorStore:
             except Exception as default_conn_err:
                 logger.debug(f"Could not set up default connection alias: {default_conn_err}")
             
+            # Skip LangChain wrapper initialization if needed
+            if self.skip_langchain_wrapper:
+                logger.info(f"Skipping LangChain wrapper initialization for '{self.collection_name}' (skip_langchain_wrapper=True)")
+                self.langchain_store = None
+                return 
+
             # Create a separate connection for LangChain to avoid channel conflicts
             try:
                 # Disconnect any existing connection with this alias first
@@ -602,15 +610,61 @@ class MilvusVectorStore:
             self._memory_docs = []
         
         if not self.milvus_available:
-            # In-memory fallback
+            # In-memory fallback for when Milvus is not unavailable
+            logger.warning(f"Using in-memory fallback for add_documents (milvus_available={self.milvus_available})")
             self._memory_docs.extend(documents)
             return [f"memory_doc_{i}" for i in range(len(self._memory_docs) - len(documents), len(self._memory_docs))]
-        
-        try:
-            return self.langchain_store.add_documents(documents, **kwargs)
-        except Exception as e:
-            logger.error(f"Failed to add documents: {e}", exc_info=True)
-            raise
+
+        # If langchain_store is available, use it
+        if self.langchain_store is not None:
+            try:
+                return self.langchain_store.add_documents(documents, **kwargs)
+            except Exception as e:
+                logger.error(f"Failed to add documents via LangChain: {e}", exc_info=True)
+                raise
+
+        # Direct PyMilvus insertion when langchain_store is None but Milvus is available
+        if self.collection is not None:
+            try:
+                self._ensure_connection()
+
+                doc_ids = []
+                texts = []
+                metadatas = []
+                embeddings = []
+
+                for doc in documents:
+                    texts.append(doc.page_content)
+                    metadatas.append(doc.metadata if doc.metadata else {})
+                    embedding = self.embeddings.embed_query(doc.page_content)
+                    embeddings.append(embedding)
+
+                # Insert data into collection
+                insert_data = [
+                    texts,
+                    metadatas,
+                    embeddings
+                ]
+
+                result = self.collection.insert(insert_data)
+                self.collection.flush()
+
+                # Extract inserted IDs
+                if hasattr(result, 'primary_keys'):
+                    doc_ids = [str(pk) for pk in result.primary_keys]
+                else:
+                    doc_ids = [f"doc_{i}" for i in range(len(documents))]
+
+                logger.info(f"Added {len(documents)} documents to collection '{self.collection_name}' via PyMilvus")
+                return doc_ids
+            except Exception as e:
+                logger.error(f"Failed to add documents via PyMilvus: {e}", exc_info=True)
+                raise
+
+        # Final fallback to in-memory if collection is also None
+        logger.warning(f"Using in-memory fallback for add_documents (collection not initialized)")
+        self._memory_docs.extend(documents)
+        return [f"memory_doc_{i}" for i in range(len(self._memory_docs) - len(documents), len(self._memory_docs))]
     
     async def aadd_documents(self, documents: List[Document], **kwargs):
         """Async add documents"""
@@ -619,12 +673,13 @@ class MilvusVectorStore:
             self._memory_docs = []
         
         if not self.milvus_available:
-            # In-memory fallback
+            # In-memory fallback for when Milvus is not unavailable
             self._memory_docs.extend(documents)
             return [f"memory_doc_{i}" for i in range(len(self._memory_docs) - len(documents), len(self._memory_docs))]
         
         try:
-            if hasattr(self.langchain_store, 'aadd_documents'):
+            # Use LangChain async if available
+            if self.langchain_store is not None and hasattr(self.langchain_store, 'aadd_documents'):
                 return await self.langchain_store.aadd_documents(documents, **kwargs)
             else:
                 # Fallback to sync
@@ -662,9 +717,39 @@ class MilvusVectorStore:
                     filter=filter,
                     **kwargs
                 )
+            elif self.collection is not None:
+                # Direct PyMilvus search when langchain_store is None but Milvus is available
+                query_embedding = self.embeddings.embed_query(query)
+
+                search_params = {
+                    "metric_type": "L2",
+                    "params": {"ef": 64}
+                }
+
+                search_results = self.collection.search(
+                    data=[query_embedding],
+                    anns_field="embedding",
+                    param=search_params,
+                    limit=k,
+                    output_fields=["text", "metadata"]
+                )
+
+                for hits in search_results:
+                    for hit in hits:
+                        text = hit.entity.get("text", "")
+                        metadata = hit.entity.get("metadata", {})
+                        if isinstance(metadata, str):
+                            import json
+                            try:
+                                metadata = json.loads(metadata)
+                            except Exception:
+                                metadata = {}
+                        metadata["id"] = str(hit.id)
+                        metadata["score"] = hit.distance
+                        results.append(Document(page_content=text, metadata=metadata))
             else:
-                # Fallback to in-memory if LangChain wrapper not available
-                logger.warning("LangChain wrapper not available, using in-memory fallback")
+                # Fallback to in-memory if LangChain or PyMilvus collection unavailable
+                logger.warning("Both LangChain wrapper and PyMilvus collection unavailable, using in-memory fallback")
                 results = self._memory_docs[:k]
             
             # Handle empty collection gracefully (no documents indexed yet)
@@ -728,14 +813,15 @@ class MilvusVectorStore:
         
         try:
             results = []
-            if self.langchain_store and hasattr(self.langchain_store, 'asimilarity_search'):
+            if self.langchain_store is not None and hasattr(self.langchain_store, 'asimilarity_search'):
                 results = await self.langchain_store.asimilarity_search(
                     query=query,
                     k=k,
                     filter=filter,
                     **kwargs
                 )
-            elif self.langchain_store:
+            else:
+                # Fallback to sync similarity_search (which now supports direct PyMilvus)
                 import asyncio
                 results = await asyncio.to_thread(
                     self.similarity_search,
@@ -744,10 +830,6 @@ class MilvusVectorStore:
                     filter=filter,
                     **kwargs
                 )
-            else:
-                # Fallback to in-memory if LangChain wrapper not available
-                logger.warning("LangChain wrapper not available, using in-memory fallback")
-                results = self._memory_docs[:k]
             
             # Handle empty collection gracefully (no documents indexed yet)
             if not results:
@@ -766,17 +848,18 @@ class MilvusVectorStore:
             # Try to reconnect and retry once
             try:
                 self._ensure_connection()
-                if self.langchain_store and hasattr(self.langchain_store, 'asimilarity_search'):
-                    results = await self.langchain_store.asimilarity_search(
-                        query=query,
-                        k=k,
-                        filter=filter,
-                        **kwargs
-                    )
-                    if not results:
-                        logger.debug(f"No documents found in collection '{self.collection_name}' after retry")
-                        return []
-                    return results
+                import asyncio
+                results = await asyncio.to_thread(
+                    self.similarity_search,
+                    query=query,
+                    k=k,
+                    filter=filter,
+                    **kwargs
+                )
+                if not results:
+                    logger.debug(f"No documents found in collection '{self.collection_name}' after retry")
+                    return []
+                return results
             except Exception as retry_error:
                 retry_error_msg = str(retry_error).lower()
                 if "empty" in retry_error_msg or "no entities" in retry_error_msg:
@@ -803,38 +886,122 @@ class MilvusVectorStore:
         
         if not self.milvus_available:
             # In-memory fallback with dummy scores
+            logger.warning(f"Using in-memory fallback for similarity_search_with_score")
             return [(doc, 0.5) for doc in self._memory_docs[:k]]
-        
-        try:
-            return self.langchain_store.similarity_search_with_score(
-                query=query,
-                k=k,
-                filter=filter,
-                **kwargs
-            )
-        except Exception as e:
-            logger.error(f"Similarity search with score failed: {e}", exc_info=True)
-            raise
-    
+
+        # If langchain_store is available, use it
+        if self.langchain_store is not None:
+            try:
+                return self.langchain_store.similarity_search_with_score(
+                    query=query,
+                    k=k,
+                    filter=filter,
+                    **kwargs
+                )
+            except Exception as e:
+                logger.error(f"Similarity search with score failed via LangChain: {e}", exc_info=True)
+                raise
+
+        # Direct PyMilvus search with scores when langchain_store is None
+        if self.collection is not None:
+            try:
+                self._ensure_connection()
+                query_embedding = self.embeddings.embed_query(query)
+
+                search_params = {
+                    "metric_type": "L2",
+                    "params": {"ef": 64}
+                }
+
+                search_results = self.collection.search(
+                    data=[query_embedding],
+                    anns_field="embedding",
+                    param=search_params,
+                    limit=k,
+                    output_fields=["text", "metadata"]
+                )
+
+                results = []
+                for hits in search_results:
+                    for hit in hits:
+                        text = hit.entity.get("text", "")
+                        metadata = hit.entity.get("metadata", {})
+                        if isinstance(metadata, str):
+                            import json
+                            try:
+                                metadata = json.loads(metadata)
+                            except Exception:
+                                metadata = {}
+                        metadata["id"] = str(hit.id)
+                        doc = Document(page_content=text, metadata=metadata)
+                        results.append((doc, hit.distance))
+                return results
+            except Exception as e:
+                logger.error(f"Similarity search with score failed via PyMilvus: {e}", exc_info=True)
+                raise
+
+        # Final fallback to in-memory
+        logger.warning(f"Using in-memory fallback for similarity_search_with_score (collection not initialized)")
+        return [(doc, 0.5) for doc in self._memory_docs[:k]]
+
     def delete(self, ids: Optional[List[str]] = None, **kwargs):
         """Delete documents by IDs"""
         # Ensure _memory_docs exists (safety check)
         if not hasattr(self, '_memory_docs'):
             self._memory_docs = []
         
-        if not self.milvus_available:
-            # In-memory fallback - remove by index if ids provided
+        # Handle In-Memory Fallback (If Milvus is down)
+        if not self.milvus_available or not self.collection:
+            logger.warning(f"Using in-memory fallback for delete (milvus_available={self.milvus_available})")
             if ids:
-                # Simple implementation - remove by position
-                for doc_id in ids:
-                    if doc_id.startswith("memory_doc_"):
-                        idx = int(doc_id.split("_")[-1])
-                        if 0 <= idx < len(self._memory_docs):
-                            self._memory_docs.pop(idx)
+                # Remove by matching string ID or index
+                original_len = len(self._memory_docs)
+                self._memory_docs = [d for d in self._memory_docs if d.metadata.get("id") not in ids]
+                # try index-based removal for 'memory_doc_X' format
+                if len(self._memory_docs) == original_len:
+                     for doc_id in ids:
+                        if isinstance(doc_id, str) and doc_id.startswith("memory_doc_"):
+                            try:
+                                idx = int(doc_id.split("_")[-1])
+                                if 0 <= idx < len(self._memory_docs):
+                                    self._memory_docs.pop(idx)
+                            except: pass
             return {"deleted": len(ids) if ids else 0}
-        
+
+        if not ids:
+            return {"deleted": 0}
+
         try:
-            return self.langchain_store.delete(ids=ids, **kwargs)
+            # INT64 Conversion for Milvus IDs
+            valid_int_ids = []
+            
+            for doc_id in ids:
+                # Skip in-memory placeholder IDs
+                if isinstance(doc_id, str) and "memory_doc_" in doc_id:
+                    continue
+                    
+                try:
+                    # Convert string ID to Integer
+                    int_id = int(doc_id)
+                    valid_int_ids.append(int_id)
+                except ValueError:
+                    logger.warning(f"Could not convert ID '{doc_id}' to integer. Skipping.")
+            
+            if not valid_int_ids:
+                logger.warning("No valid integer IDs found to delete.")
+                return {"deleted": 0}
+
+            # Deletion using 'id in [list]' syntax
+            expr = f"id in {valid_int_ids}"
+            logger.info(f"Executing delete expression: {expr}")
+            
+            res = self.collection.delete(expr=expr)
+            
+            self.collection.flush()
+            
+            logger.info(f"Successfully deleted {len(valid_int_ids)} documents")
+            return {"deleted": len(valid_int_ids)}
+
         except Exception as e:
             logger.error(f"Failed to delete documents: {e}", exc_info=True)
             raise
@@ -845,13 +1012,7 @@ class MilvusVectorStore:
             self._memory_docs = []
         
         if not self.milvus_available:
-            if ids:
-                for doc_id in ids:
-                    if doc_id.startswith("memory_doc_"):
-                        idx = int(doc_id.split("_")[-1])
-                        if 0 <= idx < len(self._memory_docs):
-                            self._memory_docs.pop(idx)
-            return {"deleted": len(ids) if ids else 0}
+            return self.delete(ids, **kwargs)
         
         try:
             import asyncio
@@ -1048,24 +1209,47 @@ class MilvusVectorStore:
                     if expr_parts:
                         expr = " && ".join(expr_parts)
                 
+                # Auto-detect schema
+                schema_fields = [field.name for field in self.collection.schema.fields if field.name != "embedding"]
+
+                output_fields = schema_fields.copy()
+
                 query_result = self.collection.query(
-                    expr=expr or "",
-                    output_fields=["id", "text", "metadata"],
+                    expr=expr if expr else "id >= 0", 
+                    output_fields=output_fields,
                     limit=limit,
                     offset=offset
                 )
                 
                 result = []
                 for entity in query_result:
-                    content = entity.get("text", "")
+                    # Handle different schema types
+                    content = (
+                        entity.get("text", "") or
+                        entity.get("challenge_text", "") or
+                        entity.get("content", "") or
+                        ""
+                    )
+
+                    # use the primary key ID
+                    # This is required for deletion to work correctly
+                    doc_id = str(entity.get("id", ""))
+
+                    # Store challenge_id separately if it exists and is meaningful
+                    challenge_id = entity.get("challenge_id", "")
+                    challenge_id_display = challenge_id if (challenge_id and challenge_id != "0") else None
+
                     result.append({
-                        "id": str(entity.get("id", "")),
+                        "id": doc_id,
+                        "challenge_id": challenge_id_display,
+                        "content": content,
                         "content_preview": content[:200] + "..." if len(content) > 200 else content,
                         "content_length": len(content),
-                        "metadata": entity.get("metadata", {})
+                        "metadata": entity.get("metadata", {}),
+                        "task_type": entity.get("task_type", None),
+                        "_raw": entity
                     })
-                
-                logger.info(f"Listed {len(result)} documents from Milvus")
+                logger.info(f"Listed {len(result)} documents from Milvus (collection: {self.collection_name})")
                 return result
             else:
                 logger.warning("PyMilvus not available for listing")
@@ -1115,18 +1299,56 @@ class MilvusVectorStore:
         
         try:
             if HAS_PYMILVUS and self.collection:
-                result = self.collection.query(
-                    expr=f"id == {doc_id}",
-                    output_fields=["id", "text", "metadata"],
-                    limit=1
-                )
-                
+                # Auto-detect schema
+                schema_fields = [field.name for field in self.collection.schema.fields if field.name != "embedding"]
+                output_fields = schema_fields.copy()
+
+                # different query expressions based on schema
+                result = None
+                try:
+                    # numeric ID first
+                    result = self.collection.query(
+                        expr=f"id == {doc_id}",
+                        output_fields=output_fields,
+                        limit=1
+                    )
+                except:
+                    pass
+
+                # try string challenge_id
+                if not result:
+                    try:
+                        result = self.collection.query(
+                            expr=f'challenge_id == "{doc_id}"',
+                            output_fields=output_fields,
+                            limit=1
+                        )
+                    except:
+                        pass
+
                 if result:
                     entity = result[0]
+                    content = (
+                        entity.get("text", "") or
+                        entity.get("challenge_text", "") or
+                        entity.get("content", "") or
+                        ""
+                    )
+
+                    # use the primary key ID for consistency with list_documents
+                    doc_id_value = str(entity.get("id", ""))
+
+                    # Store challenge_id separately if meaningful
+                    challenge_id = entity.get("challenge_id", "")
+                    challenge_id_display = challenge_id if (challenge_id and challenge_id != "0") else None
+
                     return {
-                        "id": str(entity.get("id", "")),
-                        "content": entity.get("text", ""),
-                        "metadata": entity.get("metadata", {})
+                        "id": doc_id_value,
+                        "challenge_id": challenge_id_display,
+                        "content": content,
+                        "metadata": entity.get("metadata", {}),
+                        "task_type": entity.get("task_type", None),
+                        "_raw": entity
                     }
             
             return None
