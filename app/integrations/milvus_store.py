@@ -16,13 +16,6 @@ logger = get_logger("cyrex.milvus_store")
 # The async client will be created automatically when async methods are called
 warnings.filterwarnings("ignore", message=".*AsyncMilvusClient.*no running event loop.*", category=Warning)
 
-# Suppress pymilvus gRPC channel error logging - we handle these errors gracefully with reconnection
-# These errors are expected when connections are being reestablished
-import logging
-_pymilvus_logger = logging.getLogger("pymilvus")
-# Set to WARNING level to suppress ERROR logs for channel errors (we handle them)
-_pymilvus_logger.setLevel(logging.WARNING)
-
 # LangChain imports with graceful fallbacks
 HAS_LANGCHAIN_MILVUS = False
 HAS_BASE_RETRIEVER = False
@@ -106,18 +99,45 @@ class MilvusVectorStore:
             last_error = None
             errors = []
             
-            try:
-                logger.info(f"Initializing {model_name} with cached RobustEmbeddings wrapper...")
-                from .embeddings_wrapper import get_robust_embeddings
-                self.embeddings = get_robust_embeddings(model_name)
-                # Don't test embedding here to avoid reloading - trust the cache
-                logger.info(f"Successfully initialized embedding model: {model_name} (cached RobustEmbeddings)")
-                embedding_initialized = True
-            except Exception as e2:
-                error_msg = str(e2)
-                errors.append(f"RobustEmbeddings: {error_msg}")
-                last_error = e2
-                logger.error(f"RobustEmbeddings initialization failed: {e2}", exc_info=True)
+            # Method 1: Try HuggingFaceEmbeddings if available
+            if HuggingFaceEmbeddings:
+                try:
+                    logger.info(f"Attempting to initialize {model_name} with HuggingFaceEmbeddings...")
+                    self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+                    # Test the embedding to ensure it works
+                    test_embedding = self.embeddings.embed_query("test")
+                    if test_embedding and len(test_embedding) > 0:
+                        logger.info(f"Successfully initialized embedding model: {model_name} (HuggingFaceEmbeddings, dim={len(test_embedding)})")
+                        embedding_initialized = True
+                    else:
+                        raise RuntimeError("Embedding test returned empty result")
+                except Exception as e:
+                    error_msg = str(e)
+                    errors.append(f"HuggingFaceEmbeddings: {error_msg}")
+                    last_error = e
+                    if "meta tensor" in error_msg.lower() or "to_empty" in error_msg.lower():
+                        logger.warning(f"HuggingFaceEmbeddings failed with meta tensor error: {e}, trying robust wrapper")
+                    else:
+                        logger.warning(f"HuggingFaceEmbeddings failed: {e}, trying robust wrapper")
+            
+            # Method 2: Use robust embeddings wrapper (bypasses HuggingFaceEmbeddings issues)
+            if not embedding_initialized:
+                try:
+                    logger.info(f"Attempting to initialize {model_name} with RobustEmbeddings wrapper...")
+                    from .embeddings_wrapper import get_robust_embeddings
+                    self.embeddings = get_robust_embeddings(model_name)
+                    # Test the embedding to ensure it works
+                    test_embedding = self.embeddings.embed_query("test")
+                    if test_embedding and len(test_embedding) > 0:
+                        logger.info(f"Successfully initialized embedding model: {model_name} (RobustEmbeddings wrapper, dim={len(test_embedding)})")
+                        embedding_initialized = True
+                    else:
+                        raise RuntimeError("Embedding test returned empty result")
+                except Exception as e2:
+                    error_msg = str(e2)
+                    errors.append(f"RobustEmbeddings: {error_msg}")
+                    last_error = e2
+                    logger.error(f"RobustEmbeddings initialization failed: {e2}", exc_info=True)
             
             if not embedding_initialized:
                 error_summary = "; ".join(errors) if errors else str(last_error)
@@ -156,56 +176,13 @@ class MilvusVectorStore:
         
         try:
             # Connect with default alias for PyMilvus operations
-            # Check if connection already exists and is valid before creating new one
-            connection_exists = False
-            try:
-                if connections.has_connection(self.connection_alias):
-                    # Connection exists, verify it's still valid by trying a simple operation
-                    try:
-                        # Try to list collections to verify connection is alive
-                        utility.list_collections()
-                        connection_exists = True
-                        logger.debug(f"Reusing existing Milvus connection: {self.connection_alias}")
-                    except (ValueError, Exception) as verify_error:
-                        error_msg = str(verify_error).lower()
-                        error_type = type(verify_error).__name__
-                        # Check for gRPC channel errors
-                        is_channel_error = (
-                            "closed channel" in error_msg or 
-                            "rpc" in error_msg or 
-                            "cannot invoke" in error_msg or
-                            "channel closed" in error_msg or
-                            (error_type == "ValueError" and "channel" in error_msg)
-                        )
-                        
-                        if is_channel_error:
-                            # Connection exists but channel is closed, disconnect and reconnect
-                            logger.debug(f"Existing connection has closed channel, reconnecting...")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_exists = False
-                        else:
-                            # Other error, might still be valid, but reconnect to be safe
-                            logger.debug(f"Connection verification failed: {verify_error}, reconnecting...")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_exists = False
-            except Exception:
-                # has_connection check failed, assume no connection
-                connection_exists = False
-            
-            if not connection_exists:
-                logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
-                connections.connect(
-                    alias=self.connection_alias,
-                    host=self.host,
-                    port=self.port,
-                    timeout=10.0,  # Increased timeout for better reliability
-                )
+            logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
+            connections.connect(
+                alias=self.connection_alias,
+                host=self.host,
+                port=self.port,
+                timeout=10.0,  # Increased timeout for better reliability
+            )
             
             # Verify connection by checking server version
             try:
@@ -415,13 +392,10 @@ class MilvusVectorStore:
                 if not wrapper_initialized:
                     if last_error:
                         error_msg = str(last_error).lower()
-                        # Suppress common compatibility errors - fallback works fine
-                        if "unexpected keyword argument" in error_msg or "using" in error_msg:
-                            logger.debug(f"LangChain Milvus wrapper not compatible with this version (common): {last_error}")
-                        elif "localhost" in error_msg or "closed channel" in error_msg or "connection" in error_msg:
-                            logger.debug(f"LangChain Milvus wrapper failed to connect (may be using wrong host or channel closed): {last_error}")
+                        if "localhost" in error_msg or "closed channel" in error_msg or "connection" in error_msg:
+                            logger.warning(f"LangChain Milvus wrapper failed to connect (may be using wrong host or channel closed). Error: {last_error}")
                         else:
-                            logger.debug(f"LangChain Milvus wrapper initialization failed: {last_error}")
+                            logger.warning(f"LangChain Milvus wrapper initialization failed: {last_error}")
                         raise last_error  # Re-raise to be caught by outer except block
                     else:
                         # Should not happen, but handle gracefully
@@ -443,12 +417,7 @@ class MilvusVectorStore:
                     collection_name=self.collection_name,
                 )
         except Exception as e:
-            # Suppress verbose errors for known compatibility issues
-            error_msg = str(e).lower()
-            if "unexpected keyword argument" in error_msg or "using" in error_msg:
-                logger.debug(f"LangChain Milvus wrapper not compatible, using fallback: {e}")
-            else:
-                logger.debug(f"Failed to create LangChain Milvus wrapper, using fallback: {e}")
+            logger.warning(f"Failed to create LangChain Milvus wrapper, using in-memory fallback: {e}", exc_info=True)
             # Don't mark as unavailable - PyMilvus connection still works
             # Just disable LangChain wrapper features
             self.langchain_store = None
@@ -465,48 +434,8 @@ class MilvusVectorStore:
             return
         
         try:
-            # Check default connection - verify it's actually alive, not just registered
-            connection_needs_reconnect = True
-            try:
-                if connections.has_connection(self.connection_alias):
-                    # Connection exists, verify it's still valid
-                    try:
-                        # Try a simple operation to verify connection is alive
-                        utility.list_collections()
-                        connection_needs_reconnect = False
-                    except (ValueError, Exception) as verify_error:
-                        error_msg = str(verify_error).lower()
-                        error_type = type(verify_error).__name__
-                        # Check for gRPC channel errors
-                        is_channel_error = (
-                            "closed channel" in error_msg or 
-                            "rpc" in error_msg or 
-                            "cannot invoke" in error_msg or
-                            "channel closed" in error_msg or
-                            (error_type == "ValueError" and "channel" in error_msg)
-                        )
-                        
-                        if is_channel_error:
-                            # Connection channel is closed, need to reconnect
-                            logger.debug(f"Connection channel closed, will reconnect: {verify_error}")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_needs_reconnect = True
-                        else:
-                            # Other error, might be transient, but reconnect to be safe
-                            logger.debug(f"Connection verification failed, will reconnect: {verify_error}")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_needs_reconnect = True
-            except Exception:
-                # has_connection check failed, assume no connection
-                connection_needs_reconnect = True
-            
-            if connection_needs_reconnect:
+            # Check default connection
+            if not connections.has_connection(self.connection_alias):
                 logger.info(f"Reconnecting to Milvus at {self.host}:{self.port}")
                 connections.connect(
                     alias=self.connection_alias,
@@ -517,24 +446,7 @@ class MilvusVectorStore:
             
             # Check LangChain connection if it exists
             if hasattr(self, 'langchain_connection_alias') and self.langchain_connection_alias != self.connection_alias:
-                langchain_needs_reconnect = True
-                try:
-                    if connections.has_connection(self.langchain_connection_alias):
-                        # Verify it's alive
-                        try:
-                            utility.list_collections()
-                            langchain_needs_reconnect = False
-                        except Exception:
-                            # Channel might be closed, reconnect
-                            try:
-                                connections.disconnect(self.langchain_connection_alias)
-                            except Exception:
-                                pass
-                            langchain_needs_reconnect = True
-                except Exception:
-                    langchain_needs_reconnect = True
-                
-                if langchain_needs_reconnect:
+                if not connections.has_connection(self.langchain_connection_alias):
                     logger.info(f"Reconnecting LangChain connection to Milvus at {self.host}:{self.port}")
                     connections.connect(
                         alias=self.langchain_connection_alias,
@@ -609,21 +521,18 @@ class MilvusVectorStore:
                 health_status["errors"].append(f"Collection check failed: {e}")
                 health_status["healthy"] = False
         
-        # Check embeddings - just verify it's initialized, don't actually generate embeddings
-        # (generating embeddings in health check causes model to reload repeatedly)
+        # Check embeddings
         if self.embeddings:
             try:
-                # Just check if the embeddings object has the required methods
-                if hasattr(self.embeddings, 'embed_query') and hasattr(self.embeddings, 'embed_documents'):
-                    # If we have a cached dimension, use it
-                    if hasattr(self, 'dimension') and self.dimension:
-                        health_status["embeddings"]["dimension"] = self.dimension
-                    health_status["embeddings"]["status"] = "initialized"
+                # Test embedding generation
+                test_embedding = self.embeddings.embed_query("health check")
+                if test_embedding and len(test_embedding) > 0:
+                    health_status["embeddings"]["dimension"] = len(test_embedding)
                 else:
-                    health_status["errors"].append("Embeddings object missing required methods")
+                    health_status["errors"].append("Embedding test returned empty result")
                     health_status["healthy"] = False
             except Exception as e:
-                health_status["errors"].append(f"Embedding check failed: {e}")
+                health_status["errors"].append(f"Embedding test failed: {e}")
                 health_status["healthy"] = False
         
         # Overall health is True only if all components are healthy
@@ -634,149 +543,21 @@ class MilvusVectorStore:
     
     def _get_or_create_collection(self) -> Collection:
         """Get existing collection or create new one"""
-        # Ensure connection is alive before checking collection
-        self._ensure_connection()
-        
-        max_retries = 2
-        for attempt in range(max_retries):
-            try:
-                # Check if collection exists - this can fail if RPC channel is closed
-                collection_exists = False
-                try:
-                    collection_exists = utility.has_collection(self.collection_name)
-                except (ValueError, Exception) as check_error:
-                    error_msg = str(check_error).lower()
-                    error_type = type(check_error).__name__
-                    # Check for gRPC channel errors - these can be ValueError or other exceptions
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg or
-                        (error_type == "ValueError" and "channel" in error_msg)
-                    )
-                    
-                    if is_channel_error:
-                        # Connection channel was closed, reconnect and retry
-                        logger.debug(f"gRPC channel error during has_collection check (attempt {attempt + 1}/{max_retries}): {check_error}")
-                        if attempt < max_retries - 1:
-                            # Reconnect and retry
-                            try:
-                                if connections.has_connection(self.connection_alias):
-                                    connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            
-                            connections.connect(
-                                alias=self.connection_alias,
-                                host=self.host,
-                                port=self.port,
-                                timeout=10.0,
-                            )
-                            logger.debug(f"Reconnected to Milvus, retrying collection check...")
-                            continue  # Retry the has_collection check
-                        else:
-                            # Last attempt failed, try to get collection anyway (might exist)
-                            logger.debug(f"Failed to check collection existence after {max_retries} attempts, attempting to get collection directly")
-                            collection_exists = None  # Unknown state, try to get it
-                    else:
-                        # Other error, re-raise
-                        raise
-                
-                # If we know the collection exists, use it
-                if collection_exists is True:
-                    collection = Collection(self.collection_name)
-                    logger.info(f"Using existing collection: {self.collection_name}")
-                elif collection_exists is False:
-                    # Collection doesn't exist, create it
-                    collection = self._create_collection()
-                    logger.info(f"Created new collection: {self.collection_name}")
-                else:
-                    # Unknown state (collection_exists is None), try to get it
-                    try:
-                        collection = Collection(self.collection_name)
-                        logger.info(f"Using existing collection: {self.collection_name} (existence check failed, but collection accessible)")
-                    except Exception as get_error:
-                        # Collection doesn't exist, create it
-                        logger.info(f"Collection not accessible, creating new one: {get_error}")
-                        collection = self._create_collection()
-                        logger.info(f"Created new collection: {self.collection_name}")
-                
-                # Load collection into memory
-                try:
-                    collection.load()
-                except (ValueError, Exception) as load_error:
-                    error_msg = str(load_error).lower()
-                    error_type = type(load_error).__name__
-                    # Check for gRPC channel errors
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg or
-                        (error_type == "ValueError" and "channel" in error_msg)
-                    )
-                    
-                    if is_channel_error:
-                        # Connection closed during load, reconnect and retry
-                        if attempt < max_retries - 1:
-                            logger.debug(f"gRPC channel error during collection.load() (attempt {attempt + 1}/{max_retries}), reconnecting...")
-                            try:
-                                if connections.has_connection(self.connection_alias):
-                                    connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            
-                            connections.connect(
-                                alias=self.connection_alias,
-                                host=self.host,
-                                port=self.port,
-                                timeout=10.0,
-                            )
-                            # Re-get the collection after reconnection
-                            collection = Collection(self.collection_name)
-                            collection.load()
-                        else:
-                            raise
-                    else:
-                        raise
-                
-                return collection
+        try:
+            if utility.has_collection(self.collection_name):
+                collection = Collection(self.collection_name)
+                logger.info(f"Using existing collection: {self.collection_name}")
+            else:
+                collection = self._create_collection()
+                logger.info(f"Created new collection: {self.collection_name}")
             
-            except (ValueError, Exception) as e:
-                if attempt < max_retries - 1:
-                    error_msg = str(e).lower()
-                    error_type = type(e).__name__
-                    # Check for gRPC channel errors
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg or
-                        (error_type == "ValueError" and "channel" in error_msg)
-                    )
-                    
-                    if is_channel_error:
-                        logger.debug(f"gRPC channel error during collection operation (attempt {attempt + 1}/{max_retries}): {e}")
-                        # Reconnect and retry
-                        try:
-                            if connections.has_connection(self.connection_alias):
-                                connections.disconnect(self.connection_alias)
-                        except Exception:
-                            pass
-                        
-                        connections.connect(
-                            alias=self.connection_alias,
-                            host=self.host,
-                            port=self.port,
-                            timeout=10.0,
-                        )
-                        logger.info(f"Reconnected to Milvus, retrying collection operation...")
-                        continue
-                
-                # Last attempt or non-recoverable error
-                logger.error(f"Failed to get/create collection after {attempt + 1} attempts: {e}", exc_info=True)
-                raise
+            # Load collection into memory
+            collection.load()
+            return collection
+        
+        except Exception as e:
+            logger.error(f"Failed to get/create collection: {e}", exc_info=True)
+            raise
     
     def _create_collection(self) -> Collection:
         """Create new Milvus collection with schema"""
@@ -1058,6 +839,440 @@ class MilvusVectorStore:
             logger.error(f"Failed to delete documents: {e}", exc_info=True)
             raise
     
+    async def adelete(self, ids: Optional[List[str]] = None, **kwargs):
+        """Async delete documents by IDs"""
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        if not self.milvus_available:
+            if ids:
+                for doc_id in ids:
+                    if doc_id.startswith("memory_doc_"):
+                        idx = int(doc_id.split("_")[-1])
+                        if 0 <= idx < len(self._memory_docs):
+                            self._memory_docs.pop(idx)
+            return {"deleted": len(ids) if ids else 0}
+        
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.delete, ids, **kwargs)
+        except Exception as e:
+            logger.error(f"Failed to async delete documents: {e}", exc_info=True)
+            raise
+    
+    def delete_by_filter(self, filters: Dict[str, Any]) -> Dict[str, int]:
+        """
+        Delete documents matching metadata filters
+        
+        Args:
+            filters: Dictionary of metadata filters (e.g., {"user_id": "123", "type": "pattern"})
+        
+        Returns:
+            Dictionary with count of deleted documents
+        """
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        if not self.milvus_available:
+            original_count = len(self._memory_docs)
+            self._memory_docs = [
+                doc for doc in self._memory_docs 
+                if not all(doc.metadata.get(k) == v for k, v in filters.items())
+            ]
+            deleted_count = original_count - len(self._memory_docs)
+            logger.info(f"Deleted {deleted_count} documents by filter (in-memory)")
+            return {"deleted": deleted_count}
+        
+        try:
+            if HAS_PYMILVUS and self.collection:
+                expr_parts = []
+                for key, value in filters.items():
+                    if isinstance(value, str):
+                        expr_parts.append(f'metadata["{key}"] == "{value}"')
+                    elif isinstance(value, (int, float)):
+                        expr_parts.append(f'metadata["{key}"] == {value}')
+                    elif isinstance(value, bool):
+                        expr_parts.append(f'metadata["{key}"] == {str(value).lower()}')
+                
+                if not expr_parts:
+                    logger.warning("No valid filter expressions, aborting deletion")
+                    return {"deleted": 0}
+                
+                expr = " && ".join(expr_parts)
+                result = self.collection.delete(expr)
+                deleted_count = result.delete_count if hasattr(result, 'delete_count') else 0
+                logger.info(f"Deleted {deleted_count} documents by filter from Milvus")
+                return {"deleted": deleted_count}
+            else:
+                logger.warning("PyMilvus not available for filter-based deletion")
+                return {"deleted": 0}
+        except Exception as e:
+            logger.error(f"Failed to delete by filter: {e}", exc_info=True)
+            raise
+    
+    async def adelete_by_filter(self, filters: Dict[str, Any]) -> Dict[str, int]:
+        """Async delete documents by filter"""
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.delete_by_filter, filters)
+        except Exception as e:
+            logger.error(f"Failed to async delete by filter: {e}", exc_info=True)
+            raise
+    
+    def update_document(
+        self, 
+        doc_id: str, 
+        content: Optional[str] = None, 
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Update existing document content and/or metadata
+        Note: Milvus doesn't support true updates, so this deletes and re-adds the document
+        
+        Args:
+            doc_id: Document ID to update
+            content: New content (if None, keeps existing)
+            metadata: New metadata (if None, keeps existing; otherwise merges with existing)
+        
+        Returns:
+            Dictionary with update status
+        """
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        if not self.milvus_available:
+            if doc_id.startswith("memory_doc_"):
+                idx = int(doc_id.split("_")[-1])
+                if 0 <= idx < len(self._memory_docs):
+                    doc = self._memory_docs[idx]
+                    if content:
+                        doc.page_content = content
+                    if metadata:
+                        doc.metadata.update(metadata)
+                    logger.info(f"Updated document {doc_id} (in-memory)")
+                    return {"updated": True, "doc_id": doc_id}
+            return {"updated": False, "error": "Document not found"}
+        
+        try:
+            if content is None and metadata is None:
+                logger.warning("No content or metadata provided for update")
+                return {"updated": False, "error": "Nothing to update"}
+            
+            logger.warning("Milvus update implemented as delete + re-add. Document ID will change.")
+            self.delete(ids=[doc_id])
+            new_doc = Document(
+                page_content=content if content else "",
+                metadata=metadata if metadata else {}
+            )
+            new_ids = self.add_documents([new_doc])
+            
+            logger.info(f"Updated document {doc_id} (new ID: {new_ids[0] if new_ids else 'unknown'})")
+            return {
+                "updated": True, 
+                "old_doc_id": doc_id,
+                "new_doc_id": new_ids[0] if new_ids else None,
+                "note": "Document was deleted and re-added with new ID"
+            }
+        except Exception as e:
+            logger.error(f"Failed to update document: {e}", exc_info=True)
+            raise
+    
+    async def aupdate_document(
+        self,
+        doc_id: str,
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Async update document"""
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.update_document, doc_id, content, metadata)
+        except Exception as e:
+            logger.error(f"Failed to async update document: {e}", exc_info=True)
+            raise
+    
+    def list_documents(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        List documents with optional filtering and pagination
+        
+        Args:
+            filters: Optional metadata filters
+            limit: Maximum number of documents to return
+            offset: Number of documents to skip
+        
+        Returns:
+            List of document dictionaries with id, content preview, and metadata
+        """
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        if not self.milvus_available:
+            docs = self._memory_docs
+            
+            if filters:
+                docs = [
+                    doc for doc in docs
+                    if all(doc.metadata.get(k) == v for k, v in filters.items())
+                ]
+            
+            paginated = docs[offset:offset + limit]
+            
+            result = []
+            for i, doc in enumerate(paginated):
+                result.append({
+                    "id": f"memory_doc_{offset + i}",
+                    "content_preview": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                    "content_length": len(doc.page_content),
+                    "metadata": doc.metadata
+                })
+            
+            logger.info(f"Listed {len(result)} documents (in-memory)")
+            return result
+        
+        try:
+            if HAS_PYMILVUS and self.collection:
+                expr = None
+                if filters:
+                    expr_parts = []
+                    for key, value in filters.items():
+                        if isinstance(value, str):
+                            expr_parts.append(f'metadata["{key}"] == "{value}"')
+                        elif isinstance(value, (int, float)):
+                            expr_parts.append(f'metadata["{key}"] == {value}')
+                    
+                    if expr_parts:
+                        expr = " && ".join(expr_parts)
+                
+                query_result = self.collection.query(
+                    expr=expr or "",
+                    output_fields=["id", "text", "metadata"],
+                    limit=limit,
+                    offset=offset
+                )
+                
+                result = []
+                for entity in query_result:
+                    content = entity.get("text", "")
+                    result.append({
+                        "id": str(entity.get("id", "")),
+                        "content_preview": content[:200] + "..." if len(content) > 200 else content,
+                        "content_length": len(content),
+                        "metadata": entity.get("metadata", {})
+                    })
+                
+                logger.info(f"Listed {len(result)} documents from Milvus")
+                return result
+            else:
+                logger.warning("PyMilvus not available for listing")
+                return []
+        except Exception as e:
+            logger.error(f"Failed to list documents: {e}", exc_info=True)
+            return []
+    
+    async def alist_documents(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """Async list documents"""
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.list_documents, filters, limit, offset)
+        except Exception as e:
+            logger.error(f"Failed to async list documents: {e}", exc_info=True)
+            raise
+    
+    def get_document_by_id(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve specific document by ID with full content
+        
+        Args:
+            doc_id: Document ID
+        
+        Returns:
+            Document dictionary or None if not found
+        """
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        if not self.milvus_available:
+            if doc_id.startswith("memory_doc_"):
+                idx = int(doc_id.split("_")[-1])
+                if 0 <= idx < len(self._memory_docs):
+                    doc = self._memory_docs[idx]
+                    return {
+                        "id": doc_id,
+                        "content": doc.page_content,
+                        "metadata": doc.metadata
+                    }
+            return None
+        
+        try:
+            if HAS_PYMILVUS and self.collection:
+                result = self.collection.query(
+                    expr=f"id == {doc_id}",
+                    output_fields=["id", "text", "metadata"],
+                    limit=1
+                )
+                
+                if result:
+                    entity = result[0]
+                    return {
+                        "id": str(entity.get("id", "")),
+                        "content": entity.get("text", ""),
+                        "metadata": entity.get("metadata", {})
+                    }
+            
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get document by ID: {e}", exc_info=True)
+            return None
+    
+    async def aget_document_by_id(self, doc_id: str) -> Optional[Dict[str, Any]]:
+        """Async get document by ID"""
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.get_document_by_id, doc_id)
+        except Exception as e:
+            logger.error(f"Failed to async get document by ID: {e}", exc_info=True)
+            raise
+    
+    def batch_add_documents(
+        self,
+        documents: List[Dict[str, Any]],
+        batch_size: int = 100
+    ) -> Dict[str, Any]:
+        """
+        Optimized batch addition of documents
+        
+        Args:
+            documents: List of dicts with 'content' and 'metadata' keys
+            batch_size: Number of documents to process per batch
+        
+        Returns:
+            Dictionary with count of added documents and their IDs
+        """
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        try:
+            all_ids = []
+            
+            doc_objects = [
+                Document(
+                    page_content=doc.get("content", ""),
+                    metadata=doc.get("metadata", {})
+                )
+                for doc in documents
+            ]
+            
+            for i in range(0, len(doc_objects), batch_size):
+                batch = doc_objects[i:i + batch_size]
+                ids = self.add_documents(batch)
+                all_ids.extend(ids)
+            
+            logger.info(f"Batch added {len(all_ids)} documents")
+            return {
+                "added": len(all_ids),
+                "ids": all_ids
+            }
+        except Exception as e:
+            logger.error(f"Failed to batch add documents: {e}", exc_info=True)
+            raise
+    
+    async def abatch_add_documents(
+        self,
+        documents: List[Dict[str, Any]],
+        batch_size: int = 100
+    ) -> Dict[str, Any]:
+        """Async batch add documents"""
+        try:
+            all_ids = []
+            
+            doc_objects = [
+                Document(
+                    page_content=doc.get("content", ""),
+                    metadata=doc.get("metadata", {})
+                )
+                for doc in documents
+            ]
+            
+            for i in range(0, len(doc_objects), batch_size):
+                batch = doc_objects[i:i + batch_size]
+                ids = await self.aadd_documents(batch)
+                all_ids.extend(ids)
+            
+            logger.info(f"Async batch added {len(all_ids)} documents")
+            return {
+                "added": len(all_ids),
+                "ids": all_ids
+            }
+        except Exception as e:
+            logger.error(f"Failed to async batch add documents: {e}", exc_info=True)
+            raise
+    
+    def count_documents(self, filters: Optional[Dict[str, Any]] = None) -> int:
+        """
+        Count total documents with optional filtering
+        
+        Args:
+            filters: Optional metadata filters
+        
+        Returns:
+            Count of documents
+        """
+        if not hasattr(self, '_memory_docs'):
+            self._memory_docs = []
+        
+        if not self.milvus_available:
+            if not filters:
+                return len(self._memory_docs)
+            
+            count = sum(
+                1 for doc in self._memory_docs
+                if all(doc.metadata.get(k) == v for k, v in filters.items())
+            )
+            return count
+        
+        try:
+            if HAS_PYMILVUS and self.collection:
+                if not filters:
+                    return self.collection.num_entities
+                
+                expr_parts = []
+                for key, value in filters.items():
+                    if isinstance(value, str):
+                        expr_parts.append(f'metadata["{key}"] == "{value}"')
+                    elif isinstance(value, (int, float)):
+                        expr_parts.append(f'metadata["{key}"] == {value}')
+                
+                if not expr_parts:
+                    return 0
+                
+                expr = " && ".join(expr_parts)
+                result = self.collection.query(expr=expr, output_fields=["id"])
+                return len(result)
+            
+            return 0
+        except Exception as e:
+            logger.error(f"Failed to count documents: {e}", exc_info=True)
+            return 0
+    
+    async def acount_documents(self, filters: Optional[Dict[str, Any]] = None) -> int:
+        """Async count documents"""
+        try:
+            import asyncio
+            return await asyncio.to_thread(self.count_documents, filters)
+        except Exception as e:
+            logger.error(f"Failed to async count documents: {e}", exc_info=True)
+            raise
+    
     def get_retriever(self, **kwargs):
         """Get LangChain retriever from vector store"""
         if not self.milvus_available:
@@ -1196,16 +1411,13 @@ class MilvusVectorStore:
             }
 
 
-# Global cache for MilvusVectorStore instances (keyed by collection_name)
-_milvus_store_cache = {}
-
 def get_milvus_store(
     collection_name: str,
     embedding_model: Optional[Embeddings] = None,
     **kwargs
 ) -> MilvusVectorStore:
     """
-    Factory function to get Milvus vector store (cached singleton per collection)
+    Factory function to get Milvus vector store
     
     Args:
         collection_name: Name of the collection
@@ -1213,20 +1425,10 @@ def get_milvus_store(
         **kwargs: Additional configuration
     
     Returns:
-        Configured MilvusVectorStore instance (cached)
+        Configured MilvusVectorStore instance
     """
-    global _milvus_store_cache
-    
-    # Use collection_name as cache key
-    if collection_name not in _milvus_store_cache:
-        logger.info(f"Creating new MilvusVectorStore instance for collection: {collection_name}")
-        _milvus_store_cache[collection_name] = MilvusVectorStore(
-            collection_name=collection_name,
-            embedding_model=embedding_model,
-            **kwargs
-        )
-    else:
-        logger.debug(f"Returning cached MilvusVectorStore instance for collection: {collection_name}")
-    
-    return _milvus_store_cache[collection_name]
-
+    return MilvusVectorStore(
+        collection_name=collection_name,
+        embedding_model=embedding_model,
+        **kwargs
+    )

@@ -339,6 +339,7 @@ from .routes.orchestration_api import router as orchestration_router
 from .routes.testing_api import router as testing_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
+from .routes.documents import router as documents_router
 
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
@@ -357,6 +358,7 @@ app.include_router(orchestration_router, tags=["orchestration"])
 app.include_router(testing_router, tags=["testing"])
 app.include_router(company_automation_router, tags=["company-automation"])
 app.include_router(universal_rag_router, tags=["universal-rag"])
+app.include_router(documents_router, tags=["documents"])
 
 
 if __name__ == "__main__":
