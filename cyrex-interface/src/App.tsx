@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import { FaSyncAlt, FaTrash, FaFolder, FaFile } from 'react-icons/fa';
 import './App.css';
 import { Sidebar } from './components/layout/Sidebar';
 import { useUI } from './context/UIContext';
@@ -112,6 +113,22 @@ export default function App() {
   const [ragTopK, setRagTopK] = useState(5);
   const [documentContent, setDocumentContent] = useState('');
   const [documentMetadata, setDocumentMetadata] = useState('{"source": "test", "type": "document"}');
+  const [selectedCollectionForAdd, setSelectedCollectionForAdd] = useState<string>('deepiri_knowledge');
+  const [selectedCollectionForQuery, setSelectedCollectionForQuery] = useState<string>('deepiri_knowledge');
+
+  // Collection browser state
+  const [collections, setCollections] = useState<string[]>([]);
+  const [expandedCollections, setExpandedCollections] = useState<Set<string>>(new Set());
+  const [collectionDocuments, setCollectionDocuments] = useState<Record<string, any[]>>({});
+  const [selectedDocument, setSelectedDocument] = useState<any>(null);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
+
+  // Load collections when RAG tab becomes active (only once)
+  useEffect(() => {
+    if (activeTab === 'rag' && collections.length === 0) {
+      loadCollections();
+    }
+  }, [activeTab]);
   
   // Tools state
   const [toolsList, setToolsList] = useState<unknown[]>([]);
@@ -473,30 +490,205 @@ export default function App() {
 
   // RAG tests
   const testRAGQuery = async () => {
+    if (!selectedCollectionForQuery) {
+      setRagResult('Error: Please select a collection to query');
+      return;
+    }
+
     try {
-      const result = await callEndpoint('/rag/query', {
-        query: ragQuery,
-        top_k: ragTopK,
-        rerank: true
-      }, 'POST', 'rag');
-      setRagResult(pretty(result));
+      // Check if this is a challenge collection (deepiri_challenges) - use RAG endpoint
+      if (selectedCollectionForQuery === 'deepiri_challenges') {
+        const result = await callEndpoint('/rag/query', {
+          query: ragQuery,
+          top_k: ragTopK,
+          rerank: true
+        }, 'POST', 'rag');
+        setRagResult(pretty(result));
+      } else {
+        // For all other collections, use the documents search API
+        const result = await callEndpoint(`/api/documents/search?query=${encodeURIComponent(ragQuery)}&k=${ragTopK}&collection_name=${encodeURIComponent(selectedCollectionForQuery)}`, {}, 'GET', 'rag');
+        setRagResult(pretty(result));
+      }
     } catch (err: any) {
       setRagResult(`Error: ${err.message}`);
     }
   };
 
-  const testAddDocument = async () => {
+  // Unified function to add document to selected collection
+  const addDocumentToCollection = async () => {
+    if (!selectedCollectionForAdd) {
+      setRagResult('Error: Please select a collection');
+      return;
+    }
+
+    if (!documentContent.trim()) {
+      setRagResult('Error: Document content cannot be empty');
+      return;
+    }
+
     try {
-      const metadata = JSON.parse(documentMetadata);
-      const result = await callEndpoint('/rag/index', {
-        challenges: [{
+      const metadata = documentMetadata.trim() ? JSON.parse(documentMetadata) : {};
+      const endpoint = selectedCollectionForAdd === 'deepiri_challenges' ? '/rag/index' : '/api/documents';
+      
+      // Check if this is a challenge collection (deepiri_challenges) - use RAG endpoint
+      if (selectedCollectionForAdd === 'deepiri_challenges') {
+        const result = await callEndpoint('/rag/index', {
+          challenges: [{
+            challenge_text: documentContent,
+            task_type: 'manual',
+            metadata: metadata
+          }]
+        }, 'POST', 'rag');
+        setRagResult(pretty(result));
+      } else {
+        // For all other collections, use the general documents API
+        const result = await callEndpoint('/api/documents', {
           content: documentContent,
-          metadata: metadata
-        }]
-      }, 'POST', 'rag');
-      setRagResult(pretty(result));
+          metadata: metadata,
+          collection_name: selectedCollectionForAdd
+        }, 'POST', 'rag');
+        setRagResult(pretty(result));
+      }
+      
+      // Reload documents for the collection we just added to
+      await loadCollectionDocuments(selectedCollectionForAdd, true);
+      // Also reload collections list to update counts
+      await loadCollections();
     } catch (err: any) {
       setRagResult(`Error: ${err.message}`);
+    }
+  };
+
+  // Load all collections
+  const loadCollections = async () => {
+    try {
+      const result = await callEndpoint('/api/documents/collections', {}, 'GET');
+      const collectionsList = (result as any)?.data?.collections || [];
+      setCollections(collectionsList);
+      
+      // Set default selection if current selection is not in the list
+      if (collectionsList.length > 0) {
+        if (!collectionsList.includes(selectedCollectionForAdd)) {
+          setSelectedCollectionForAdd(collectionsList[0]);
+        }
+        if (!collectionsList.includes(selectedCollectionForQuery)) {
+          setSelectedCollectionForQuery(collectionsList[0]);
+        }
+      }
+      
+      // Reload documents for all currently expanded collections
+      const reloadPromises = Array.from(expandedCollections).map(async (collectionName) => {
+        try {
+          await loadCollectionDocuments(collectionName, true);
+        } catch (err: any) {
+          console.error(`Failed to reload documents for ${collectionName}:`, err);
+        }
+      });
+      await Promise.all(reloadPromises);
+    } catch (err: any) {
+      console.error('Failed to load collections:', err);
+    }
+  };
+
+  // Load documents for a collection
+  const loadCollectionDocuments = async (collectionName: string, forceRefresh: boolean = false) => {
+    try {
+      // Add timestamp to prevent caching if forceRefresh is true
+      const cacheBuster = forceRefresh ? `&_t=${Date.now()}` : '';
+      const result = await callEndpoint(`/api/documents?collection_name=${collectionName}&limit=100&offset=0${cacheBuster}`, {}, 'GET');
+      const docs = (result as any)?.data || [];
+      setCollectionDocuments(prev => ({
+        ...prev,
+        [collectionName]: docs
+      }));
+    } catch (err: any) {
+      console.error(`Failed to load documents for ${collectionName}:`, err);
+      setCollectionDocuments(prev => ({
+        ...prev,
+        [collectionName]: []
+      }));
+    }
+  };
+
+  // Toggle collection expansion
+  const toggleCollection = async (collectionName: string) => {
+    const newExpanded = new Set(expandedCollections);
+    if (newExpanded.has(collectionName)) {
+      newExpanded.delete(collectionName);
+      setSelectedCollection(null);
+    } else {
+      newExpanded.add(collectionName);
+      setSelectedCollection(collectionName);
+      // Load documents if not already loaded
+      if (!collectionDocuments[collectionName]) {
+        await loadCollectionDocuments(collectionName);
+      }
+    }
+    setExpandedCollections(newExpanded);
+  };
+
+  // View document details
+  const viewDocument = async (collectionName: string, docId: string) => {
+    // If the same document is already selected and loaded, don't refetch
+    if (selectedDocument && selectedDocument.id === docId && ragResult && ragResult.trim()) {
+      return; // Document already displayed
+    }
+
+    try {
+      const result = await callEndpoint(`/api/documents/${docId}?collection_name=${collectionName}`, {}, 'GET');
+      const documentData = (result as any)?.data;
+      setSelectedDocument(documentData);
+      
+      // Format the result consistently - always use the same structure
+      const formattedResult = {
+        success: result.success,
+        message: result.message || null,
+        request_id: result.request_id,
+        data: documentData
+      };
+      setRagResult(pretty(formattedResult));
+    } catch (err: any) {
+      setRagResult(`Error loading document: ${err.message}`);
+      setSelectedDocument(null);
+    }
+  };
+
+  // Delete document
+  const deleteDocument = async (collectionName: string, docId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering viewDocument
+    
+    if (!confirm(`Are you sure you want to delete this document?`)) {
+      return;
+    }
+
+    try {
+      await callEndpoint(`/api/documents/${docId}?collection_name=${collectionName}`, {}, 'DELETE', 'rag');
+      setRagResult('Document deleted successfully');
+      
+      // Clear selected document if it was the deleted one
+      if (selectedDocument?.id === docId) {
+        setSelectedDocument(null);
+      }
+      
+      // Immediately remove from local state for instant UI update
+      setCollectionDocuments(prev => {
+        const updated = { ...prev };
+        if (updated[collectionName]) {
+          updated[collectionName] = updated[collectionName].filter((doc: any) => doc.id !== docId);
+        }
+        return updated;
+      });
+      
+      // Small delay to ensure Milvus flush completes, then reload to sync with server
+      setTimeout(async () => {
+        try {
+          await loadCollectionDocuments(collectionName, true); // Force refresh with cache busting
+        } catch (err: any) {
+          console.error('Failed to reload documents after deletion:', err);
+        }
+      }, 300);
+    } catch (err: any) {
+      setRagResult(`Error deleting document: ${err.message}`);
     }
   };
 
@@ -1190,7 +1382,12 @@ export default function App() {
         padding: '1rem',
         borderRadius: '8px',
         border: '1px solid #333',
-        marginTop: '1rem'
+        marginTop: '1rem',
+        maxWidth: '100%',
+        overflow: 'hidden',
+        wordWrap: 'break-word',
+        overflowWrap: 'break-word',
+        boxSizing: 'border-box'
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
           <h3 style={{ marginTop: 0, color: '#999', fontSize: '0.9rem' }}>Debug Information</h3>
@@ -1262,7 +1459,11 @@ export default function App() {
                   fontSize: '0.8rem',
                   overflow: 'auto',
                   maxHeight: '300px',
-                  border: '1px solid #333'
+                  border: '1px solid #333',
+                  maxWidth: '100%',
+                  wordWrap: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'pre-wrap'
                 }}>
                   {pretty(debug.request)}
                 </pre>
@@ -1279,6 +1480,10 @@ export default function App() {
                   overflow: 'auto',
                   maxHeight: '300px',
                   border: '1px solid #333',
+                  maxWidth: '100%',
+                  wordWrap: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'pre-wrap',
                   color: (() => {
                     const response = debug.response;
                     if (typeof response === 'object' && response !== null) {
@@ -1306,7 +1511,11 @@ export default function App() {
                   borderRadius: '4px',
                   color: '#ff4444',
                   fontSize: '0.85rem',
-                  border: '1px solid #ff4444'
+                  border: '1px solid #ff4444',
+                  maxWidth: '100%',
+                  wordWrap: 'break-word',
+                  overflowWrap: 'break-word',
+                  whiteSpace: 'pre-wrap'
                 }}>
                   {debug.error}
                 </div>
@@ -2221,11 +2430,193 @@ export default function App() {
                 <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>RAG / Vector Store Testing</h2>
                 {renderConnectionPanel()}
               </div>
-              <div style={{ display: 'grid', gap: '1.5rem' }}>
-                {/* Input and Output - Side by Side */}
-                <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                  {/* Left Column: Query Documents and Add Document */}
-                  <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%' }}>
+              <div style={{ display: 'flex', gap: '1.5rem', height: 'auto', minHeight: '600px', maxHeight: 'calc(100vh - 120px)', alignItems: 'flex-start' }}>
+                {/* Left Sidebar: Collection Browser*/}
+                <div style={{
+                  width: '280px',
+                  background: '#1a1a1a',
+                  borderRadius: '8px',
+                  border: '1px solid #333',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  alignSelf: 'stretch',
+                  boxSizing: 'border-box'
+                }}>
+                  <div style={{
+                    padding: '0.75rem 1rem',
+                    borderBottom: '1px solid #333',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <h3 style={{ margin: 0, fontSize: '0.85rem', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Collections
+                    </h3>
+                    <button
+                      onClick={loadCollections}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#888',
+                        cursor: 'pointer',
+                        fontSize: '1rem',
+                        padding: '0.25rem',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                      title="Refresh collections"
+                    >
+                      <FaSyncAlt />
+                    </button>
+                  </div>
+                  <div style={{
+                    flex: 1,
+                    overflow: 'auto',
+                    padding: '0.5rem 0'
+                  }}>
+                    {collections.length === 0 ? (
+                      <div style={{
+                        padding: '2rem 1rem',
+                        textAlign: 'center',
+                        color: '#666',
+                        fontSize: '0.85rem'
+                      }}>
+                        <div style={{ marginBottom: '0.5rem' }}>No collections found</div>
+                        <div style={{ fontSize: '0.75rem' }}>Click refresh to load</div>
+                      </div>
+                    ) : (
+                      collections.map(collection => {
+                        const isExpanded = expandedCollections.has(collection);
+                        const docs = collectionDocuments[collection] || [];
+                        return (
+                          <div key={collection}>
+                            {/* Collection item */}
+                            <div
+                              onClick={() => toggleCollection(collection)}
+                              style={{
+                                padding: '0.5rem 1rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                background: selectedCollection === collection ? '#2a2a2a' : 'transparent',
+                                color: '#e0e0e0',
+                                fontSize: '0.9rem',
+                                transition: 'background 0.1s',
+                                userSelect: 'none'
+                              }}
+                              onMouseEnter={(e) => {
+                                if (selectedCollection !== collection) {
+                                  e.currentTarget.style.background = '#222';
+                                }
+                              }}
+                              onMouseLeave={(e) => {
+                                if (selectedCollection !== collection) {
+                                  e.currentTarget.style.background = 'transparent';
+                                }
+                              }}
+                            >
+                              <span style={{ fontSize: '0.7rem', color: '#888' }}>
+                                {isExpanded ? '▼' : '▶'}
+                              </span>
+                              <FaFolder style={{ fontSize: '1rem', color: '#888' }} />
+                              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {collection}
+                              </span>
+                            </div>
+                            {/* Documents list */}
+                            {isExpanded && (
+                              <div style={{ paddingLeft: '2rem' }}>
+                                {docs.length === 0 ? (
+                                  <div style={{
+                                    padding: '0.5rem 1rem',
+                                    color: '#666',
+                                    fontSize: '0.8rem',
+                                    fontStyle: 'italic'
+                                  }}>
+                                    No documents
+                                  </div>
+                                ) : (
+                                  docs.map((doc: any) => (
+                                    <div
+                                      key={doc.id}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        viewDocument(collection, doc.id);
+                                      }}
+                                      style={{
+                                        padding: '0.4rem 1rem',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        color: '#bbb',
+                                        fontSize: '0.85rem',
+                                        transition: 'background 0.1s',
+                                        userSelect: 'none'
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.background = '#222';
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.background = 'transparent';
+                                      }}
+                                    >
+                                      <FaFile style={{ fontSize: '0.9rem', color: '#888' }} />
+                                      <span style={{
+                                        flex: 1,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap'
+                                      }}>
+                                        {doc.content?.substring(0, 30) || `Doc ${doc.id.substring(0, 8)}`}...
+                                      </span>
+                                      <button
+                                        onClick={(e) => deleteDocument(collection, doc.id, e)}
+                                        disabled={isLoading(`/api/documents/${doc.id}`)}
+                                        style={{
+                                          background: 'transparent',
+                                          border: 'none',
+                                          color: isLoading(`/api/documents/${doc.id}`) ? '#444' : '#cc0000',
+                                          cursor: isLoading(`/api/documents/${doc.id}`) ? 'not-allowed' : 'pointer',
+                                          fontSize: '0.85rem',
+                                          padding: '0.25rem',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'center',
+                                          borderRadius: '4px',
+                                          transition: 'background 0.1s, color 0.1s',
+                                          width: '20px',
+                                          height: '20px',
+                                          flexShrink: 0
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          if (!isLoading(`/api/documents/${doc.id}`)) {
+                                            e.currentTarget.style.background = '#cc000020';
+                                          }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.background = 'transparent';
+                                        }}
+                                        title="Delete document"
+                                      >
+                                        <FaTrash />
+                                      </button>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Middle Column: Actions */}
+                <div style={{ flex: '1', display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: '300px', maxWidth: '100%', overflow: 'visible', boxSizing: 'border-box' }}>
                     {/* Query Documents */}
                     <div style={{
                       background: '#1a1a1a',
@@ -2235,6 +2626,35 @@ export default function App() {
                     }}>
                       <h3 style={{ marginTop: 0, color: '#999' }}>Query Documents</h3>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                          <label style={{ fontSize: '0.85rem', color: '#999' }}>
+                            Collection
+                          </label>
+                          <select
+                            value={selectedCollectionForQuery}
+                            onChange={(e) => setSelectedCollectionForQuery(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              fontSize: '0.9rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {collections.length === 0 ? (
+                              <option value="">Loading collections...</option>
+                            ) : (
+                              collections.map((collection) => (
+                                <option key={collection} value={collection}>
+                                  {collection}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', minWidth: 0 }}>
                           <input
                             value={ragQuery}
@@ -2270,20 +2690,21 @@ export default function App() {
                         </div>
                         <button
                           onClick={testRAGQuery}
-                          disabled={isLoading('/rag/query')}
+                          disabled={isLoading('/rag/query') || isLoading('/api/documents/search') || !selectedCollectionForQuery || collections.length === 0}
                           style={{
                             padding: '0.75rem 1.5rem',
-                            background: isLoading('/rag/query') ? '#444' : '#FFB84D',
+                            background: (isLoading('/rag/query') || isLoading('/api/documents/search') || !selectedCollectionForQuery) ? '#444' : '#FFB84D',
                             border: 'none',
                             borderRadius: '4px',
                             color: '#fff',
-                            cursor: isLoading('/rag/query') ? 'not-allowed' : 'pointer',
+                            cursor: (isLoading('/rag/query') || isLoading('/api/documents/search') || !selectedCollectionForQuery) ? 'not-allowed' : 'pointer',
                             fontWeight: 600,
                             whiteSpace: 'nowrap',
-                            flexShrink: 0
+                            flexShrink: 0,
+                            width: '100%'
                           }}
                         >
-                          {isLoading('/rag/query') ? 'Searching...' : 'Search'}
+                          {(isLoading('/rag/query') || isLoading('/api/documents/search')) ? 'Searching...' : 'Search'}
                         </button>
                       </div>
                     </div>
@@ -2295,7 +2716,10 @@ export default function App() {
                       borderRadius: '8px',
                       border: '1px solid #333'
                     }}>
-                      <h3 style={{ marginTop: 0, color: '#999' }}>Add Document</h3>
+                      <h3 style={{ marginTop: 0, color: '#999' }}>Add Document to Milvus</h3>
+                      <p style={{ marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.85rem', color: '#666' }}>
+                        Select a collection and add your document
+                      </p>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                         <textarea
                           value={documentContent}
@@ -2328,47 +2752,79 @@ export default function App() {
                             resize: 'vertical'
                           }}
                         />
-                        <button
-                          onClick={testAddDocument}
-                          disabled={isLoading('/rag/index')}
-                          style={{
-                            padding: '0.75rem 1.5rem',
-                            background: isLoading('/rag/index') ? '#444' : '#00aa00',
-                            border: 'none',
-                            borderRadius: '4px',
-                            color: '#fff',
-                            cursor: isLoading('/rag/index') ? 'not-allowed' : 'pointer',
-                            fontWeight: 600,
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0
-                          }}
-                        >
-                          {isLoading('/rag/index') ? 'Adding...' : 'Add Document'}
-                        </button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                          <label style={{ fontSize: '0.85rem', color: '#999', marginBottom: '0.25rem' }}>
+                            Collection
+                          </label>
+                          <select
+                            value={selectedCollectionForAdd}
+                            onChange={(e) => setSelectedCollectionForAdd(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '0.75rem',
+                              background: '#222',
+                              border: '1px solid #444',
+                              borderRadius: '4px',
+                              color: '#e0e0e0',
+                              fontSize: '0.9rem',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {collections.length === 0 ? (
+                              <option value="">Loading collections...</option>
+                            ) : (
+                              collections.map((collection) => (
+                                <option key={collection} value={collection}>
+                                  {collection}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          <button
+                            onClick={addDocumentToCollection}
+                            disabled={isLoading('/rag/index') || isLoading('/api/documents') || !selectedCollectionForAdd || collections.length === 0 || !documentContent.trim()}
+                            style={{
+                              padding: '0.75rem 1.5rem',
+                              background: (isLoading('/rag/index') || isLoading('/api/documents') || !selectedCollectionForAdd || !documentContent.trim()) ? '#444' : '#00aa00',
+                              border: 'none',
+                              borderRadius: '4px',
+                              color: '#fff',
+                              cursor: (isLoading('/rag/index') || isLoading('/api/documents') || !selectedCollectionForAdd || !documentContent.trim()) ? 'not-allowed' : 'pointer',
+                              fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                              width: '100%'
+                            }}
+                          >
+                            {(isLoading('/rag/index') || isLoading('/api/documents')) ? 'Adding...' : 'Add Document'}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                </div>
 
-                  {/* Right Column: Result Output */}
-                  <div style={{
+                {/* Right Column: Result Output */}
+                <div style={{
                     background: '#0a0a0a',
                     padding: '1rem',
                     borderRadius: '8px',
                     border: '1px solid #333',
-                    height: '546px',
+                    flex: 1,
                     overflow: 'auto',
                     fontFamily: 'monospace',
                     fontSize: '0.85rem',
                     lineHeight: '1.5',
-                    flex: '2',
                     minWidth: '300px',
+                    minHeight: '400px',
+                    maxHeight: '750px',
                     position: 'relative',
-                    zIndex: 0
+                    zIndex: 0,
+                    boxSizing: 'border-box',
+                    alignSelf: 'stretch'
                   }}>
                     {ragResult && ragResult.trim() ? (
                       <div>
                         <h3 style={{ color: '#999', fontSize: '0.9rem', marginTop: 0, marginBottom: '1rem' }}>Result:</h3>
-                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap' }}>
+                        <div style={{ color: '#e0e0e0', whiteSpace: 'pre-wrap', wordWrap: 'break-word', overflowWrap: 'break-word' }}>
                           {ragResult}
                         </div>
                       </div>
@@ -2377,7 +2833,6 @@ export default function App() {
                         No result yet. Query documents or add a document to see results.
                       </div>
                     )}
-                  </div>
                 </div>
               </div>
             
