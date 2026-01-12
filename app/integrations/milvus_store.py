@@ -1410,6 +1410,141 @@ class MilvusVectorStore:
                 "healthy": False,
             }
 
+    @staticmethod
+    def list_all_collections(host: Optional[str] = None, port: Optional[int] = None) -> List[str]:
+        """
+        List all available collections in Milvus
+
+        Args:
+            host: Milvus host (default from settings)
+            port: Milvus port (default from settings)
+
+        Returns:
+            List of collection names
+        """
+        if not HAS_PYMILVUS or not utility:
+            logger.warning("pymilvus not available, cannot list collections")
+            return []
+
+        milvus_host = host or settings.MILVUS_HOST
+        milvus_port = port or settings.MILVUS_PORT
+
+        try:
+            import uuid
+            # Create temporary connection
+            temp_alias = f"temp_list_{uuid.uuid4().hex[:8]}"
+
+            connections.connect(
+                alias=temp_alias,
+                host=milvus_host,
+                port=milvus_port,
+                timeout=10.0
+            )
+
+            # List all collections
+            collections = utility.list_collections(using=temp_alias)
+
+            # Disconnect
+            connections.disconnect(temp_alias)
+
+            logger.info(f"Found {len(collections)} collections in Milvus")
+            return collections
+
+        except Exception as e:
+            logger.error(f"Failed to list collections: {e}", exc_info=True)
+            return []
+
+    @staticmethod
+    async def alist_all_collections(host: Optional[str] = None, port: Optional[int] = None) -> List[str]:
+        """Async version of list_all_collections"""
+        import asyncio
+        return await asyncio.to_thread(MilvusVectorStore.list_all_collections, host, port)
+
+    @staticmethod
+    def get_collection_info(collection_name: str, host: Optional[str] = None, port: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get detailed information about a specific collection without instantiating MilvusVectorStore
+
+        Args:
+            collection_name: Name of the collection
+            host: Milvus host (default from settings)
+            port: Milvus port (default from settings)
+
+        Returns:
+            Dictionary with collection info (schema, count, etc.)
+        """
+        if not HAS_PYMILVUS or not utility:
+            return {"error": "pymilvus not available"}
+
+        milvus_host = host or settings.MILVUS_HOST
+        milvus_port = port or settings.MILVUS_PORT
+
+        try:
+            import uuid
+            # Create temporary connection
+            temp_alias = f"temp_info_{uuid.uuid4().hex[:8]}"
+
+            connections.connect(
+                alias=temp_alias,
+                host=milvus_host,
+                port=milvus_port,
+                timeout=10.0
+            )
+
+            # Check if collection exists
+            if not utility.has_collection(collection_name, using=temp_alias):
+                connections.disconnect(temp_alias)
+                return {"error": f"Collection '{collection_name}' not found"}
+
+            # Get collection
+            from pymilvus import Collection as PyMilvusCollection
+            collection = PyMilvusCollection(name=collection_name, using=temp_alias)
+
+            # Get schema info
+            schema = collection.schema
+            fields_info = []
+            for field in schema.fields:
+                field_dict = {
+                    "name": field.name,
+                    "type": str(field.dtype),
+                    "is_primary": field.is_primary,
+                }
+                if hasattr(field, 'dim'):
+                    field_dict["dimension"] = field.dim
+                if hasattr(field, 'max_length'):
+                    field_dict["max_length"] = field.max_length
+                fields_info.append(field_dict)
+
+            # Get count
+            num_entities = collection.num_entities
+
+            # Disconnect
+            connections.disconnect(temp_alias)
+
+            return {
+                "collection_name": collection_name,
+                "num_entities": num_entities,
+                "description": schema.description,
+                "fields": fields_info,
+                "host": milvus_host,
+                "port": milvus_port,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get collection info: {e}", exc_info=True)
+            return {"error": str(e)}
+
+    @staticmethod
+    async def aget_collection_info(collection_name: str, host: Optional[str] = None, port: Optional[int] = None) -> Dict[str, Any]:
+        """Async version of get_collection_info"""
+        import asyncio
+        return await asyncio.to_thread(MilvusVectorStore.get_collection_info, collection_name, host, port)
+
+
+# Module-level cache for MilvusVectorStore instances (prevents recreating on every request)
+_store_cache: Dict[str, MilvusVectorStore] = {}
+_cache_lock = None  # Will be initialized as threading.Lock() when needed
+
 
 def get_milvus_store(
     collection_name: str,
