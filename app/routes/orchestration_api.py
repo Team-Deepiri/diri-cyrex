@@ -236,13 +236,13 @@ async def discover_llm_services():
     """Discover available local LLM services on Docker network"""
     import asyncio
     try:
-        from ..utils.docker_scanner import scan_docker_network
+        from ..utils.docker_scanner import scan_docker_network_async
         
-        # Run scanning in executor with timeout to prevent hanging
-        loop = asyncio.get_event_loop()
+        # Use async version directly - much more efficient
+        # Reduced timeout to 30 seconds (should be plenty with 5s per check)
         services = await asyncio.wait_for(
-            loop.run_in_executor(None, scan_docker_network),
-            timeout=60.0  # 60 second timeout for scanning
+            scan_docker_network_async(),
+            timeout=30.0  # 30 second timeout for scanning (5s per check * 7 hostnames = 35s max, but parallel)
         )
         
         return {
@@ -250,7 +250,7 @@ async def discover_llm_services():
             "count": len(services)
         }
     except asyncio.TimeoutError:
-        logger.warning("Docker network scanning timed out after 60 seconds")
+        logger.warning("Docker network scanning timed out after 30 seconds")
         # Return empty list instead of error - scanning is optional
         return {
             "services": [],

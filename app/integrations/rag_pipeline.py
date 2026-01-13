@@ -5,6 +5,8 @@ Retrieval-Augmented Generation with vector search, reranking, and context manage
 from typing import List, Dict, Optional, Tuple
 import os
 import numpy as np
+import threading
+import queue
 from sentence_transformers import SentenceTransformer
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
 import json
@@ -40,7 +42,10 @@ class RAGPipeline:
         self._load_reranker()
     
     def _initialize_milvus(self):
-        """Initialize Milvus connection and collection."""
+        """
+        Initialize Milvus connection and collection (lazy loading pattern).
+        Connection is established, but collection loading is deferred until first use.
+        """
         try:
             connections.connect(
                 alias="default",
@@ -54,17 +59,127 @@ class RAGPipeline:
             else:
                 self._create_collection()
             
-            # Load collection into memory for searching
-            if self.collection:
-                self.collection.load()
-                logger.info("Collection loaded into memory", collection=self.collection_name)
+            # Don't load collection at init - use lazy loading on first access
+            # This prevents blocking startup and connection issues
+            logger.info(
+                "Milvus connection established (lazy loading enabled)",
+                collection=self.collection_name,
+                host=self.milvus_host,
+                port=self.milvus_port
+            )
             
             self._milvus_available = True
-            logger.info("Milvus connection established", collection=self.collection_name, host=self.milvus_host, port=self.milvus_port)
         except Exception as e:
             self._milvus_available = False
             logger.warning("Milvus initialization failed - RAG features will be unavailable", error=str(e), host=self.milvus_host, port=self.milvus_port)
             # Don't raise - allow service to start without Milvus
+    
+    def _ensure_collection_loaded(self) -> bool:
+        """
+        Ensure collection is loaded (lazy loading pattern).
+        Checks loading state first to avoid redundant loads.
+        Returns True if loaded, False if failed.
+        """
+        if not self.collection or not self._milvus_available:
+            return False
+        
+        try:
+            # Check if collection is already loaded (optimization: avoid redundant loads)
+            try:
+                progress = utility.loading_progress(self.collection_name)
+                if progress.get("loading_progress", 0) == 100:
+                    logger.debug(f"Collection '{self.collection_name}' already loaded")
+                    return True
+            except Exception:
+                # Progress check failed, try to load anyway
+                pass
+            
+            # Load collection with timeout in background thread
+            return self._load_collection_with_timeout(self.collection, self.collection_name, timeout=15.0)
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            is_channel_error = (
+                "closed channel" in error_msg or 
+                "rpc" in error_msg or 
+                "cannot invoke" in error_msg
+            )
+            
+            if is_channel_error:
+                # Connection issue - try to reconnect
+                logger.warning(f"Channel error detected, attempting reconnection for '{self.collection_name}'")
+                try:
+                    connections.disconnect("default")
+                    connections.connect(
+                        alias="default",
+                        host=self.milvus_host,
+                        port=self.milvus_port,
+                        timeout=5.0
+                    )
+                    # Retry loading after reconnection
+                    return self._load_collection_with_timeout(self.collection, self.collection_name, timeout=15.0)
+                except Exception as reconnect_err:
+                    logger.warning(f"Reconnection failed: {reconnect_err}")
+            
+            logger.warning(f"Failed to ensure collection loaded: {e}")
+            return False
+    
+    def _load_collection_with_timeout(self, collection: Collection, collection_name: str, timeout: float = 10.0):
+        """
+        Load collection with timeout to prevent hanging.
+        Uses threading to enforce timeout since collection.load() is blocking.
+        """
+        result_queue = queue.Queue()
+        error_queue = queue.Queue()
+        
+        def load_collection():
+            try:
+                collection.load()
+                result_queue.put(True)
+            except Exception as e:
+                error_queue.put(e)
+        
+        # Run loading in thread with timeout
+        load_thread = threading.Thread(target=load_collection, daemon=True)
+        load_thread.start()
+        load_thread.join(timeout=timeout)
+        
+        if load_thread.is_alive():
+            # Thread is still running = timeout
+            logger.warning(
+                f"Collection loading timed out after {timeout}s for '{collection_name}'. "
+                "Collection may not be fully loaded, but will continue anyway."
+            )
+            # Don't raise - allow service to continue (collection might still work)
+            return
+        
+        # Check for errors
+        if not error_queue.empty():
+            error = error_queue.get()
+            error_msg = str(error).lower()
+            # Check for channel errors that we can recover from
+            is_channel_error = (
+                "closed channel" in error_msg or 
+                "rpc" in error_msg or 
+                "cannot invoke" in error_msg or
+                "channel closed" in error_msg
+            )
+            
+            if is_channel_error:
+                logger.warning(
+                    f"Collection loading failed due to channel error for '{collection_name}': {error}. "
+                    "Will retry on next access."
+                )
+                # Don't raise - allow service to continue
+            else:
+                logger.warning(
+                    f"Collection loading failed for '{collection_name}': {error}. "
+                    "Will retry on next access."
+                )
+                # Don't raise - allow service to continue
+        else:
+            # Success
+            logger.info("Collection loaded into memory", collection=collection_name)
     
     def _create_collection(self):
         """Create Milvus collection schema."""
@@ -123,7 +238,8 @@ class RAGPipeline:
             return
         
         texts = [c.get('challenge_text', '') for c in challenges]
-        embeddings = self.embedding_model.encode(texts, show_progress_bar=True)
+        # Disable progress bar to avoid cluttering logs during reloads
+        embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
         
         entities = []
         for i, challenge in enumerate(challenges):
@@ -150,6 +266,11 @@ class RAGPipeline:
         """Retrieve relevant challenges using semantic search."""
         if not self._milvus_available or not self.collection:
             logger.warning("Cannot retrieve - Milvus not available")
+            return []
+        
+        # Lazy load collection on first use (optimization: don't block startup)
+        if not self._ensure_collection_loaded():
+            logger.warning("Collection not loaded, cannot retrieve")
             return []
         
         query_embedding = self.embedding_model.encode([query])[0]

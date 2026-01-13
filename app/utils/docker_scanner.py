@@ -47,8 +47,9 @@ class DockerNetworkScanner:
     OLLAMA_PORT = 11434
     LOCALAI_PORT = 8080
     
-    # Fast timeout for HTTP checks (1 second - fast fail)
-    HTTP_TIMEOUT = 1.0
+    # Timeout for HTTP checks - increased to match Ollama's response time
+    # Ollama can be slow, especially when listing models, so we use a reasonable timeout
+    HTTP_TIMEOUT = 5.0
     
     def __init__(self):
         self.is_docker = os.path.exists("/.dockerenv") or os.path.exists("/proc/self/cgroup")
@@ -277,12 +278,24 @@ class DockerNetworkScanner:
         return ollama_services + localai_services
 
 
-def scan_docker_network() -> List[Dict[str, Any]]:
+async def scan_docker_network_async() -> List[Dict[str, Any]]:
     """
-    Convenience function to scan Docker network and return service list
+    Async function to scan Docker network and return service list
     Fast, optimistic approach with parallel HTTP checks
     """
     scanner = DockerNetworkScanner()
-    # Run async scan
+    services = await scanner.scan_all()
+    return [service.to_dict() for service in services]
+
+
+def scan_docker_network() -> List[Dict[str, Any]]:
+    """
+    Synchronous wrapper for scan_docker_network_async
+    For backward compatibility when called from executor
+    Creates a new event loop (safe for executor context)
+    """
+    scanner = DockerNetworkScanner()
+    # Always create a new event loop for executor context
+    # This is safe because executors run in separate threads
     services = asyncio.run(scanner.scan_all())
     return [service.to_dict() for service in services]

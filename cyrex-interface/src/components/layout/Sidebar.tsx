@@ -33,7 +33,7 @@ interface NavigationItem {
 
 const navigationItems: NavigationItem[] = [
   { id: 'agent-playground', label: 'Agent Playground', icon: <FaRobot /> },
-  { id: 'testing', label: 'Testing Suite', icon: <FaFlask /> },
+  { id: 'testing', label: 'Infrastructure Suite', icon: <FaFlask /> },
   { id: 'orchestration', label: 'Orchestration', icon: <FaRandom /> },
   { id: 'workflow', label: 'Workflows', icon: <FaProjectDiagram /> },
   { id: 'workflow-playground', label: 'LangGraph Workflow', icon: <FaSitemap /> },

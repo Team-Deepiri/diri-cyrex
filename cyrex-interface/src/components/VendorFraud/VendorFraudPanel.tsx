@@ -12,6 +12,27 @@ import type {
   ChatMessage,
   IndustryInfo,
 } from './types';
+import {
+  BuildingIcon,
+  PackageIcon,
+  ShieldIcon,
+  ConstructionIcon,
+  ShoppingCartIcon,
+  ScalesIcon,
+  SearchIcon,
+  ChartIcon,
+  WarningIcon,
+  RefreshIcon,
+  DocumentIcon,
+  GlobeIcon,
+  ChatIcon,
+  BooksIcon,
+  MoneyIcon,
+  DownloadIcon,
+  WaveIcon,
+  CheckIcon,
+  ArrowRightIcon,
+} from './VendorFraudIcons';
 import './VendorFraudPanel.css';
 
 // Risk level colors
@@ -22,14 +43,14 @@ const RISK_COLORS: Record<string, string> = {
   critical: '#9C27B0',
 };
 
-// Industry icons (using emojis for simplicity)
-const INDUSTRY_ICONS: Record<Industry, string> = {
-  property_management: '🏢',
-  corporate_procurement: '📦',
-  insurance_pc: '🛡️',
-  general_contractors: '🏗️',
-  retail_ecommerce: '🛒',
-  law_firms: '⚖️',
+// Industry icons
+const INDUSTRY_ICONS: Record<Industry, React.ComponentType<{ size?: number; className?: string }>> = {
+  property_management: BuildingIcon,
+  corporate_procurement: PackageIcon,
+  insurance_pc: ShieldIcon,
+  general_contractors: ConstructionIcon,
+  retail_ecommerce: ShoppingCartIcon,
+  law_firms: ScalesIcon,
 };
 
 interface Props {
@@ -229,7 +250,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
     <div className="vendor-fraud-panel">
       {/* Header */}
       <div className="vf-header">
-        <h2>🔍 Cyrex Vendor Fraud Detection</h2>
+        <h2><SearchIcon size={24} /> <span>Cyrex Vendor Fraud Detection</span></h2>
         <p>AI-powered fraud analysis across six industries</p>
       </div>
 
@@ -237,19 +258,22 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
       <div className="vf-industry-selector">
         <label>Industry:</label>
         <select value={industry} onChange={(e) => setIndustry(e.target.value as Industry)}>
-          {industries.map((ind) => (
-            <option key={ind.id} value={ind.id}>
-              {INDUSTRY_ICONS[ind.id as Industry]} {ind.name}
-            </option>
-          ))}
+          {industries.map((ind) => {
+            const IconComponent = INDUSTRY_ICONS[ind.id as Industry];
+            return (
+              <option key={ind.id} value={ind.id}>
+                {ind.name}
+              </option>
+            );
+          })}
           {industries.length === 0 && (
             <>
-              <option value="property_management">🏢 Property Management</option>
-              <option value="corporate_procurement">📦 Corporate Procurement</option>
-              <option value="insurance_pc">🛡️ P&C Insurance</option>
-              <option value="general_contractors">🏗️ General Contractors</option>
-              <option value="retail_ecommerce">🛒 Retail & E-Commerce</option>
-              <option value="law_firms">⚖️ Law Firms</option>
+              <option value="property_management">Property Management</option>
+              <option value="corporate_procurement">Corporate Procurement</option>
+              <option value="insurance_pc">P&C Insurance</option>
+              <option value="general_contractors">General Contractors</option>
+              <option value="retail_ecommerce">Retail & E-Commerce</option>
+              <option value="law_firms">Law Firms</option>
             </>
           )}
         </select>
@@ -261,50 +285,50 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
           className={activeTab === 'dashboard' ? 'active' : ''}
           onClick={() => setActiveTab('dashboard')}
         >
-          📊 Dashboard
+          <ChartIcon size={16} /> Dashboard
         </button>
         <button
           className={activeTab === 'analyze' ? 'active' : ''}
           onClick={() => setActiveTab('analyze')}
         >
-          🔍 Analyze Invoice
+          <SearchIcon size={16} /> Analyze Invoice
         </button>
         <button
           className={activeTab === 'vendors' ? 'active' : ''}
           onClick={() => setActiveTab('vendors')}
         >
-          🏢 Vendor Intelligence
+          <BuildingIcon size={16} /> Vendor Intelligence
         </button>
         <button
           className={activeTab === 'analytics' ? 'active' : ''}
           onClick={() => setActiveTab('analytics')}
         >
-          📈 Analytics
+          <ChartIcon size={16} /> Analytics
         </button>
         <button
           className={activeTab === 'chat' ? 'active' : ''}
           onClick={() => setActiveTab('chat')}
         >
-          💬 Chat
+          <ChatIcon size={16} /> Chat
         </button>
         <button
           className={activeTab === 'documents' ? 'active' : ''}
           onClick={() => setActiveTab('documents')}
         >
-          📚 Documents
+          <BooksIcon size={16} /> Documents
         </button>
         <button
           className={activeTab === 'benchmarks' ? 'active' : ''}
           onClick={() => setActiveTab('benchmarks')}
         >
-          💰 Benchmarks
+          <MoneyIcon size={16} /> Benchmarks
         </button>
       </div>
 
       {/* Error display */}
       {error && (
         <div className="vf-error">
-          ⚠️ {error}
+          <WarningIcon size={18} /> {error}
           <button onClick={() => setError(null)}>×</button>
         </div>
       )}
@@ -314,33 +338,33 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
         {/* Dashboard Tab */}
         {activeTab === 'dashboard' && (
           <div className="vf-dashboard-tab">
-            <h3>📊 Cyrex Intelligence Dashboard</h3>
+            <h3><ChartIcon size={24} /> Cyrex Intelligence Dashboard</h3>
             <p>Complete vendor intelligence and analytics overview</p>
             
             <div className="vf-dashboard-stats">
               <div className="vf-stat-card">
-                <div className="vf-stat-icon">📄</div>
+                <div className="vf-stat-icon"><DocumentIcon size={32} /></div>
                 <div className="vf-stat-info">
                   <div className="vf-stat-value">Loading...</div>
                   <div className="vf-stat-label">Invoices Analyzed</div>
                 </div>
               </div>
               <div className="vf-stat-card">
-                <div className="vf-stat-icon">⚠️</div>
+                <div className="vf-stat-icon"><WarningIcon size={32} /></div>
                 <div className="vf-stat-info">
                   <div className="vf-stat-value">Loading...</div>
                   <div className="vf-stat-label">Fraud Detected</div>
                 </div>
               </div>
               <div className="vf-stat-card">
-                <div className="vf-stat-icon">🏢</div>
+                <div className="vf-stat-icon"><BuildingIcon size={32} /></div>
                 <div className="vf-stat-info">
                   <div className="vf-stat-value">Loading...</div>
                   <div className="vf-stat-label">Vendors Tracked</div>
                 </div>
               </div>
               <div className="vf-stat-card">
-                <div className="vf-stat-icon">🌐</div>
+                <div className="vf-stat-icon"><GlobeIcon size={32} /></div>
                 <div className="vf-stat-info">
                   <div className="vf-stat-value">Loading...</div>
                   <div className="vf-stat-label">Network Effects</div>
@@ -350,13 +374,13 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
 
             <div className="vf-dashboard-actions">
               <button onClick={() => setActiveTab('analyze')} className="vf-action-btn">
-                🔍 Analyze New Invoice
+                <SearchIcon size={18} /> Analyze New Invoice
               </button>
               <button onClick={() => setActiveTab('vendors')} className="vf-action-btn">
-                🏢 View Vendor Database
+                <BuildingIcon size={18} /> View Vendor Database
               </button>
               <button onClick={() => setActiveTab('analytics')} className="vf-action-btn">
-                📈 View Analytics
+                <ChartIcon size={18} /> View Analytics
               </button>
             </div>
           </div>
@@ -365,7 +389,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
         {/* Vendor Intelligence Tab */}
         {activeTab === 'vendors' && (
           <div className="vf-vendors-tab">
-            <h3>🏢 Vendor Intelligence Database</h3>
+            <h3><BuildingIcon size={24} /> Vendor Intelligence Database</h3>
             <p>Cross-industry vendor tracking and risk assessment</p>
             
             <div className="vf-vendors-search">
@@ -375,7 +399,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
                 style={{ width: '100%', padding: '12px', marginBottom: '16px' }}
               />
               <button onClick={() => {}} className="vf-search-btn">
-                🔍 Search
+                <SearchIcon size={18} /> Search
               </button>
             </div>
 
@@ -392,7 +416,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <div className="vf-analytics-tab">
-            <h3>📈 Comprehensive Analytics</h3>
+            <h3><ChartIcon size={24} /> Comprehensive Analytics</h3>
             <p>Performance metrics, network effects, and insights</p>
             
             <div className="vf-analytics-grid">
@@ -512,7 +536,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
               disabled={loading}
               className="vf-analyze-btn"
             >
-              {loading ? '🔄 Analyzing...' : '🔍 Analyze Invoice'}
+              {loading ? <><RefreshIcon size={18} className="spin" /> Analyzing...</> : <><SearchIcon size={18} /> Analyze Invoice</>}
             </button>
 
             {/* Analysis Result */}
@@ -531,7 +555,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
 
                 {analysisResult.fraud_detected && (
                   <div className="vf-fraud-alert">
-                    ⚠️ FRAUD INDICATORS DETECTED
+                    <WarningIcon size={20} /> FRAUD INDICATORS DETECTED
                   </div>
                 )}
 
@@ -566,7 +590,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
             <div className="vf-chat-messages">
               {chatMessages.length === 0 && (
                 <div className="vf-chat-welcome">
-                  <p>👋 Ask me anything about vendor fraud detection!</p>
+                  <p><WaveIcon size={20} /> Ask me anything about vendor fraud detection!</p>
                   <p>Examples:</p>
                   <ul>
                     <li>"What are common HVAC contractor fraud patterns?"</li>
@@ -595,7 +619,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
                 disabled={loading}
               />
               <button onClick={sendChatMessage} disabled={loading}>
-                {loading ? '...' : '➤'}
+                {loading ? '...' : <ArrowRightIcon size={18} />}
               </button>
             </div>
           </div>
@@ -604,7 +628,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
         {/* Documents Tab */}
         {activeTab === 'documents' && (
           <div className="vf-documents-tab">
-            <h3>📚 Ingest Documents into Knowledge Base</h3>
+            <h3><BooksIcon size={24} /> Ingest Documents into Knowledge Base</h3>
             <p>Add vendor invoices, pricing guides, or fraud patterns to the RAG knowledge base.</p>
 
             <div className="vf-form-row">
@@ -628,11 +652,11 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
             </div>
 
             <button onClick={ingestDocument} disabled={loading} className="vf-ingest-btn">
-              {loading ? '🔄 Ingesting...' : '📥 Ingest Document'}
+              {loading ? <><RefreshIcon size={18} className="spin" /> Ingesting...</> : <><DownloadIcon size={18} /> Ingest Document</>}
             </button>
 
             {ingestionResult && (
-              <div className="vf-success-message">✅ {ingestionResult}</div>
+              <div className="vf-success-message"><CheckIcon size={18} /> {ingestionResult}</div>
             )}
           </div>
         )}
@@ -640,7 +664,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
         {/* Benchmarks Tab */}
         {activeTab === 'benchmarks' && (
           <div className="vf-benchmarks-tab">
-            <h3>📊 Pricing Benchmarks</h3>
+            <h3><ChartIcon size={24} /> Pricing Benchmarks</h3>
             <p>Check market rates for common services.</p>
 
             <div className="vf-form-row">
@@ -670,7 +694,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
             </div>
 
             <button onClick={checkBenchmark} disabled={loading} className="vf-benchmark-btn">
-              {loading ? '🔄 Checking...' : '📊 Check Benchmark'}
+              {loading ? <><RefreshIcon size={18} className="spin" /> Checking...</> : <><ChartIcon size={18} /> Check Benchmark</>}
             </button>
 
             {benchmarkResult && (

@@ -27,8 +27,12 @@ if command -v nvidia-smi &> /dev/null; then
     # Check if GPU meets minimum requirements
     if [ "$GPU_MEMORY_GB" -ge "$MIN_GPU_MEMORY_GB" ]; then
         echo "GPU meets requirements, using CUDA image" >&2
-        # Use latest stable PyTorch with CUDA 12.6 (most compatible)
-        echo "pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime"
+        # Check for RTX 5080 or newer (will automatically get CUDA 12.8 support)
+        if echo "$GPU_NAME" | grep -qiE "(RTX 5080|RTX 5090|Blackwell)"; then
+            echo "RTX 5080/5090 or Blackwell GPU detected - will automatically get CUDA 12.8 support" >&2
+        fi
+        # Use CUDA 12.8 base image for RTX 5080/5090 support
+        echo "pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime"
         exit 0
     else
         echo "GPU memory (${GPU_MEMORY_GB}GB) below minimum (${MIN_GPU_MEMORY_GB}GB), using CPU image" >&2
