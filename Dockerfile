@@ -285,6 +285,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         uvicorn[standard]==0.30.6 \
         pydantic==2.8.2 \
         pydantic-settings==2.2.1 \
+        python-multipart>=0.0.6 \
         openai==1.43.0 \
         python-dotenv==1.0.1 \
         httpx==0.27.2 \
@@ -414,6 +415,11 @@ RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
+# Copy K8s env loader scripts (before switching user)
+COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
+COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+
 # Switch to non-root user
 USER appuser
 
@@ -424,7 +430,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start the application
+# Start the application with entrypoint that loads K8s env
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
 # =============================================================================
@@ -494,6 +501,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         uvicorn[standard]==0.30.6 \
         pydantic==2.8.2 \
         pydantic-settings==2.2.1 \
+        python-multipart>=0.0.6 \
         openai==1.43.0 \
         python-dotenv==1.0.1 \
         httpx==0.27.2 \
@@ -623,6 +631,11 @@ RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
+# Copy K8s env loader scripts (before switching user)
+COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
+COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+
 # Switch to non-root user
 USER appuser
 
@@ -633,7 +646,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start the application
+# Start the application with entrypoint that loads K8s env
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
 # =============================================================================

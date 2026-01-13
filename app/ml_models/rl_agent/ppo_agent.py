@@ -1,13 +1,25 @@
 """
 PPO Agent for Adaptive Productivity Optimization
+Integrates with AbilityClassifier for intelligent action selection
 """
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from collections import deque
+import os
+import sys
+
+# Add parent directory to path for imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+try:
+    from ..classifiers.ability_classifier import AbilityClassifier
+except ImportError:
+    # Fallback if import fails
+    AbilityClassifier = None
 
 class ActorCritic(nn.Module):
     """Actor-Critic network for PPO"""
@@ -58,7 +70,14 @@ class ActorCritic(nn.Module):
 
 
 class PPOAgent:
-    """PPO agent for productivity optimization"""
+    """
+    PPO agent for productivity optimization
+    
+    Integrates with AbilityClassifier to:
+    - Filter actions based on user commands/context
+    - Use classifier confidence scores to guide policy
+    - Align action space with predefined abilities
+    """
     def __init__(
         self,
         state_dim: int = 128,
@@ -67,7 +86,9 @@ class PPOAgent:
         gamma: float = 0.99,
         epsilon: float = 0.2,
         value_coef: float = 0.5,
-        entropy_coef: float = 0.01
+        entropy_coef: float = 0.01,
+        use_classifier: bool = True,
+        classifier_model_path: str = "bert-base-uncased"
     ):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
@@ -76,6 +97,25 @@ class PPOAgent:
         self.epsilon = epsilon
         self.value_coef = value_coef
         self.entropy_coef = entropy_coef
+        self.use_classifier = use_classifier and AbilityClassifier is not None
+        
+        # Initialize ability classifier if available
+        if self.use_classifier:
+            try:
+                self.classifier = AbilityClassifier(
+                    model_path=classifier_model_path,
+                    num_abilities=action_dim
+                )
+                # Load ability map from classifier
+                self.action_map = self._load_action_map_from_classifier()
+            except Exception as e:
+                print(f"Warning: Could not initialize AbilityClassifier: {e}")
+                self.use_classifier = False
+                self.classifier = None
+                self.action_map = self._create_action_map(action_dim)
+        else:
+            self.classifier = None
+            self.action_map = self._create_action_map(action_dim)
         
         # Networks
         self.policy = ActorCritic(state_dim, action_dim).to(self.device)
@@ -91,20 +131,48 @@ class PPOAgent:
             'values': []
         }
         
-        # Action mapping
-        self.action_map = self._create_action_map(action_dim)
+        # Action filtering cache
+        self._action_filter_cache = {}
+    
+    def _load_action_map_from_classifier(self) -> Dict[int, str]:
+        """Load action map from AbilityClassifier"""
+        if self.classifier and hasattr(self.classifier, 'ability_map'):
+            # Reverse the classifier's ability_map (name -> id) to (id -> name)
+            reverse_map = {v: k for k, v in self.classifier.ability_map.items()}
+            return reverse_map
+        return self._create_action_map(50)
     
     def _create_action_map(self, action_dim: int) -> Dict[int, str]:
-        """Create mapping from action indices to ability names"""
-        return {
-            0: "suggest_objective",
-            1: "activate_focus_boost",
-            2: "activate_velocity_boost",
-            3: "schedule_break",
-            4: "prioritize_tasks",
-            5: "delegate_task",
-            # ... add all actions
-        }
+        """Create default mapping from action indices to ability names"""
+        default_abilities = [
+            "suggest_objective", "activate_focus_boost", "activate_velocity_boost",
+            "schedule_break", "prioritize_tasks", "delegate_task",
+            "summarize_text", "create_objective", "generate_code_review",
+            "refactor_suggest", "documentation_gen", "test_generation",
+            "commit_message_gen", "design_critique", "color_palette_gen",
+            "layout_suggest", "export_assets", "design_system_check",
+            "feature_breakdown", "user_story_gen", "sprint_planning",
+            "roadmap_suggest", "stakeholder_update", "copy_gen",
+            "campaign_suggest", "audience_analysis", "content_calendar",
+            "seo_optimize", "debug_assist", "performance_optimize",
+            "security_audit", "dependency_update", "migration_assist",
+            "api_documentation", "error_handling", "logging_setup",
+            "test_coverage", "code_quality", "architecture_review",
+            "database_optimize", "cache_strategy", "load_balancing",
+            "monitoring_setup", "deployment_automation", "ci_cd_setup",
+            "containerization", "scaling_strategy", "backup_strategy"
+        ]
+        
+        # Create mapping for available actions
+        action_map = {}
+        for i in range(min(action_dim, len(default_abilities))):
+            action_map[i] = default_abilities[i]
+        
+        # Fill remaining with generic names
+        for i in range(len(default_abilities), action_dim):
+            action_map[i] = f"ability_{i}"
+        
+        return action_map
     
     def encode_state(self, user_data: Dict) -> torch.Tensor:
         """Encode user state into embedding"""
@@ -139,43 +207,189 @@ class PPOAgent:
         }
         return encoding.get(time_of_day, 0.5)
     
-    def select_action(self, user_data: Dict) -> Tuple[int, str, float]:
-        """Select action based on current policy"""
+    def select_action(
+        self, 
+        user_data: Dict, 
+        user_command: Optional[str] = None,
+        context: Optional[Dict] = None
+    ) -> Tuple[int, str, float]:
+        """
+        Select action based on current policy
+        
+        Args:
+            user_data: User state data
+            user_command: Optional user command/request (used with classifier)
+            context: Optional context dict (used with classifier)
+        
+        Returns:
+            Tuple of (action_idx, action_name, confidence)
+        """
         state = self.encode_state(user_data)
         
+        # Get policy action probabilities
         with torch.no_grad():
-            action, log_prob, _ = self.policy.get_action(state.unsqueeze(0))
+            action_probs, value = self.policy.forward(state.unsqueeze(0))
+            action_probs = action_probs.squeeze(0)
+        
+        # If classifier is available and user command provided, filter/boost actions
+        if self.use_classifier and user_command:
+            action_probs = self._apply_classifier_filter(
+                action_probs, 
+                user_command, 
+                user_data.get('user_role'),
+                context
+            )
+        
+        # Sample from filtered distribution
+        dist = Categorical(action_probs)
+        action = dist.sample()
+        log_prob = dist.log_prob(action)
         
         action_idx = action.item()
         action_name = self.action_map.get(action_idx, "unknown")
-        confidence = torch.exp(log_prob).item()
+        confidence = action_probs[action_idx].item()
         
         return action_idx, action_name, confidence
     
-    def recommend_action(self, user_data: Dict) -> Dict:
-        """Get recommendation with reasoning"""
-        action_idx, action_name, confidence = self.select_action(user_data)
+    def _apply_classifier_filter(
+        self,
+        action_probs: torch.Tensor,
+        user_command: str,
+        user_role: Optional[str] = None,
+        context: Optional[Dict] = None
+    ) -> torch.Tensor:
+        """
+        Apply ability classifier to filter/boost action probabilities
         
-        # Generate reasoning based on state
-        reasoning = self._generate_reasoning(user_data, action_name)
+        Uses classifier to identify relevant abilities and adjusts probabilities
+        """
+        try:
+            # Get classifier predictions
+            if context:
+                classification = self.classifier.classify_with_context(
+                    user_command, 
+                    context, 
+                    user_role
+                )
+                top_abilities = [(classification.get('ability'), classification.get('confidence', 0.0))]
+            else:
+                top_abilities = self.classifier.classify(user_command, user_role, top_k=5)
+            
+            # Create boost mask for relevant abilities
+            boost_mask = torch.ones_like(action_probs) * 0.1  # Base probability boost
+            total_boost = 0.0
+            
+            for ability_name, ability_confidence in top_abilities:
+                # Find action index for this ability
+                action_idx = None
+                for idx, name in self.action_map.items():
+                    if name == ability_name or ability_name in name:
+                        action_idx = idx
+                        break
+                
+                if action_idx is not None:
+                    # Boost probability based on classifier confidence
+                    boost = ability_confidence * 0.5  # Scale classifier confidence
+                    boost_mask[action_idx] += boost
+                    total_boost += boost
+            
+            # Normalize: redistribute probability mass
+            if total_boost > 0:
+                # Apply boost
+                boosted_probs = action_probs * (1.0 + boost_mask)
+                # Renormalize
+                boosted_probs = boosted_probs / boosted_probs.sum()
+                return boosted_probs
+            
+            return action_probs
+            
+        except Exception as e:
+            print(f"Warning: Classifier filter failed: {e}")
+            return action_probs
+    
+    def recommend_action(
+        self, 
+        user_data: Dict,
+        user_command: Optional[str] = None,
+        context: Optional[Dict] = None
+    ) -> Dict:
+        """
+        Get recommendation with reasoning
+        
+        Args:
+            user_data: User state data
+            user_command: Optional user command/request
+            context: Optional context dict
+        
+        Returns:
+            Dict with recommendation details
+        """
+        action_idx, action_name, confidence = self.select_action(
+            user_data, 
+            user_command, 
+            context
+        )
+        
+        # Generate reasoning based on state and command
+        reasoning = self._generate_reasoning(user_data, action_name, user_command)
         
         # Estimate expected benefit
         expected_benefit = self._estimate_benefit(user_data, action_name)
         
-        return {
+        # Get classifier insights if available
+        classifier_insights = None
+        if self.use_classifier and user_command:
+            try:
+                if context:
+                    classification = self.classifier.classify_with_context(
+                        user_command,
+                        context,
+                        user_data.get('user_role')
+                    )
+                    classifier_insights = {
+                        "detected_ability": classification.get('ability'),
+                        "classifier_confidence": classification.get('confidence'),
+                        "extracted_parameters": classification.get('parameters', {})
+                    }
+                else:
+                    predictions = self.classifier.classify(
+                        user_command,
+                        user_data.get('user_role'),
+                        top_k=3
+                    )
+                    classifier_insights = {
+                        "top_predictions": predictions,
+                        "matched_action": action_name in [pred[0] for pred in predictions]
+                    }
+            except Exception as e:
+                print(f"Warning: Could not get classifier insights: {e}")
+        
+        result = {
             "action_type": self._get_action_type(action_name),
             "ability": action_name,
             "confidence": confidence,
             "reasoning": reasoning,
             "expected_benefit": expected_benefit
         }
+        
+        if classifier_insights:
+            result["classifier_insights"] = classifier_insights
+        
+        return result
     
-    def _generate_reasoning(self, user_data: Dict, action_name: str) -> str:
+    def _generate_reasoning(
+        self, 
+        user_data: Dict, 
+        action_name: str, 
+        user_command: Optional[str] = None
+    ) -> str:
         """Generate human-readable reasoning"""
         momentum = user_data.get('momentum', 0)
         efficiency = user_data.get('recent_efficiency', 0)
         streak = user_data.get('daily_streak', 0)
+        user_role = user_data.get('user_role', 'general')
         
+        # Base reasoning on action type
         if action_name == "activate_focus_boost":
             if efficiency > 0.8:
                 return "You're in high-efficiency mode. A focus boost now could maximize your productivity."
@@ -185,8 +399,17 @@ class PPOAgent:
         elif action_name == "schedule_break":
             return "You've been working consistently. A break will help maintain your healthy streak."
         
-        elif action_name == "suggest_objective":
+        elif action_name == "suggest_objective" or action_name == "create_objective":
             return f"You have {momentum} momentum. Creating a new objective can help channel this energy."
+        
+        # Role-specific reasoning
+        if user_role == "software_engineer":
+            if "code" in action_name or "refactor" in action_name:
+                return f"Based on your current state and role, {action_name} aligns with your software engineering workflow."
+        
+        # Command-aware reasoning
+        if user_command:
+            return f"Based on your request '{user_command[:50]}...' and current state, {action_name} is recommended."
         
         return f"Based on your current state, {action_name} is recommended."
     
@@ -359,7 +582,8 @@ class PPOAgent:
 
 # Example usage
 if __name__ == "__main__":
-    agent = PPOAgent()
+    # Initialize agent with classifier integration
+    agent = PPOAgent(use_classifier=True)
     
     # Example user data
     user_data = {
@@ -372,10 +596,35 @@ if __name__ == "__main__":
         'stress_level': 0.3,
         'active_tasks': [1, 2, 3],
         'active_boosts': [],
-        'recent_efficiency': 0.82
+        'recent_efficiency': 0.82,
+        'user_role': 'software_engineer'
     }
     
-    # Get recommendation
+    # Test 1: Recommendation without command
+    print("=== Test 1: Recommendation without user command ===")
     recommendation = agent.recommend_action(user_data)
-    print(f"Recommendation: {recommendation}")
+    print(f"Recommendation: {recommendation}\n")
+    
+    # Test 2: Recommendation with user command (uses classifier)
+    print("=== Test 2: Recommendation with user command ===")
+    user_command = "Can you help me review this code for security issues?"
+    context = {
+        'file_path': 'src/auth.py',
+        'project': 'backend-service'
+    }
+    recommendation_with_command = agent.recommend_action(
+        user_data, 
+        user_command=user_command,
+        context=context
+    )
+    print(f"User Command: {user_command}")
+    print(f"Recommendation: {recommendation_with_command}\n")
+    
+    # Test 3: Action selection with classifier filtering
+    print("=== Test 3: Action selection with classifier ===")
+    action_idx, action_name, confidence = agent.select_action(
+        user_data,
+        user_command="I need to refactor this codebase"
+    )
+    print(f"Selected Action: {action_name} (idx: {action_idx}, confidence: {confidence:.3f})")
 

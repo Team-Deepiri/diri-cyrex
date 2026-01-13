@@ -442,8 +442,48 @@ class MilvusVectorStore:
             return
         
         try:
-            # Check default connection
-            if not connections.has_connection(self.connection_alias):
+            # Check default connection - verify it's actually alive, not just registered
+            connection_needs_reconnect = True
+            try:
+                if connections.has_connection(self.connection_alias):
+                    # Connection exists, verify it's still valid
+                    try:
+                        # Try a simple operation to verify connection is alive
+                        utility.list_collections()
+                        connection_needs_reconnect = False
+                    except (ValueError, Exception) as verify_error:
+                        error_msg = str(verify_error).lower()
+                        error_type = type(verify_error).__name__
+                        # Check for gRPC channel errors
+                        is_channel_error = (
+                            "closed channel" in error_msg or 
+                            "rpc" in error_msg or 
+                            "cannot invoke" in error_msg or
+                            "channel closed" in error_msg or
+                            (error_type == "ValueError" and "channel" in error_msg)
+                        )
+                        
+                        if is_channel_error:
+                            # Connection channel is closed, need to reconnect
+                            logger.debug(f"Connection channel closed, will reconnect: {verify_error}")
+                            try:
+                                connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            connection_needs_reconnect = True
+                        else:
+                            # Other error, might be transient, but reconnect to be safe
+                            logger.debug(f"Connection verification failed, will reconnect: {verify_error}")
+                            try:
+                                connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            connection_needs_reconnect = True
+            except Exception:
+                # has_connection check failed, assume no connection
+                connection_needs_reconnect = True
+            
+            if connection_needs_reconnect:
                 logger.info(f"Reconnecting to Milvus at {self.host}:{self.port}")
                 connections.connect(
                     alias=self.connection_alias,
@@ -451,6 +491,23 @@ class MilvusVectorStore:
                     port=self.port,
                     timeout=10.0,
                 )
+                # Verify the connection is actually working after reconnect
+                try:
+                    utility.list_collections()
+                    logger.debug("Milvus connection verified after reconnect")
+                except Exception as verify_err:
+                    error_msg = str(verify_err).lower()
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg
+                    )
+                    if is_channel_error:
+                        logger.warning(f"Connection verification failed after reconnect: {verify_err}. Connection may be unstable.")
+                    else:
+                        # Non-channel error might be acceptable (e.g., no collections yet)
+                        logger.debug(f"Connection verification returned non-critical error: {verify_err}")
             
             # Check LangChain connection if it exists
             if hasattr(self, 'langchain_connection_alias') and self.langchain_connection_alias != self.connection_alias:
@@ -551,21 +608,150 @@ class MilvusVectorStore:
     
     def _get_or_create_collection(self) -> Collection:
         """Get existing collection or create new one"""
-        try:
-            if utility.has_collection(self.collection_name):
-                collection = Collection(self.collection_name)
-                logger.info(f"Using existing collection: {self.collection_name}")
-            else:
-                collection = self._create_collection()
-                logger.info(f"Created new collection: {self.collection_name}")
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                # Ensure connection is alive right before checking collection
+                # This prevents closed channel errors that can occur between operations
+                self._ensure_connection()
+                
+                # Check if collection exists - this can fail if RPC channel is closed
+                collection_exists = False
+                try:
+                    collection_exists = utility.has_collection(self.collection_name)
+                except (ValueError, Exception) as check_error:
+                    error_msg = str(check_error).lower()
+                    error_type = type(check_error).__name__
+                    # Check for gRPC channel errors - these can be ValueError or other exceptions
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg)
+                    )
+                    
+                    if is_channel_error:
+                        # Connection channel was closed, reconnect and retry
+                        logger.debug(f"gRPC channel error during has_collection check (attempt {attempt + 1}/{max_retries}): {check_error}")
+                        if attempt < max_retries - 1:
+                            # Reconnect and retry
+                            try:
+                                if connections.has_connection(self.connection_alias):
+                                    connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            
+                            connections.connect(
+                                alias=self.connection_alias,
+                                host=self.host,
+                                port=self.port,
+                                timeout=10.0,
+                            )
+                            logger.debug(f"Reconnected to Milvus, retrying collection check...")
+                            continue  # Retry the has_collection check
+                        else:
+                            # Last attempt failed, try to get collection anyway (might exist)
+                            logger.debug(f"Failed to check collection existence after {max_retries} attempts, attempting to get collection directly")
+                            collection_exists = None  # Unknown state, try to get it
+                    else:
+                        # Other error, re-raise
+                        raise
+                
+                # If we know the collection exists, use it
+                if collection_exists is True:
+                    collection = Collection(self.collection_name)
+                    logger.info(f"Using existing collection: {self.collection_name}")
+                elif collection_exists is False:
+                    # Collection doesn't exist, create it
+                    collection = self._create_collection()
+                    logger.info(f"Created new collection: {self.collection_name}")
+                else:
+                    # Unknown state (collection_exists is None), try to get it
+                    try:
+                        collection = Collection(self.collection_name)
+                        logger.info(f"Using existing collection: {self.collection_name} (existence check failed, but collection accessible)")
+                    except Exception as get_error:
+                        # Collection doesn't exist, create it
+                        logger.info(f"Collection not accessible, creating new one: {get_error}")
+                        collection = self._create_collection()
+                        logger.info(f"Created new collection: {self.collection_name}")
+                
+                # Load collection into memory
+                try:
+                    collection.load()
+                except (ValueError, Exception) as load_error:
+                    error_msg = str(load_error).lower()
+                    error_type = type(load_error).__name__
+                    # Check for gRPC channel errors
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg)
+                    )
+                    
+                    if is_channel_error:
+                        # Connection closed during load, reconnect and retry
+                        if attempt < max_retries - 1:
+                            logger.debug(f"gRPC channel error during collection.load() (attempt {attempt + 1}/{max_retries}), reconnecting...")
+                            try:
+                                if connections.has_connection(self.connection_alias):
+                                    connections.disconnect(self.connection_alias)
+                            except Exception:
+                                pass
+                            
+                            connections.connect(
+                                alias=self.connection_alias,
+                                host=self.host,
+                                port=self.port,
+                                timeout=10.0,
+                            )
+                            # Re-get the collection after reconnection
+                            collection = Collection(self.collection_name)
+                            collection.load()
+                        else:
+                            raise
+                    else:
+                        raise
+                
+                return collection
             
-            # Load collection into memory
-            collection.load()
-            return collection
-        
-        except Exception as e:
-            logger.error(f"Failed to get/create collection: {e}", exc_info=True)
-            raise
+            except (ValueError, Exception) as e:
+                if attempt < max_retries - 1:
+                    error_msg = str(e).lower()
+                    error_type = type(e).__name__
+                    # Check for gRPC channel errors
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg)
+                    )
+                    
+                    if is_channel_error:
+                        logger.debug(f"gRPC channel error during collection operation (attempt {attempt + 1}/{max_retries}): {e}")
+                        # Reconnect and retry
+                        try:
+                            if connections.has_connection(self.connection_alias):
+                                connections.disconnect(self.connection_alias)
+                        except Exception:
+                            pass
+                        
+                        connections.connect(
+                            alias=self.connection_alias,
+                            host=self.host,
+                            port=self.port,
+                            timeout=10.0,
+                        )
+                        logger.info(f"Reconnected to Milvus, retrying collection operation...")
+                        continue
+                
+                # Last attempt or non-recoverable error
+                logger.error(f"Failed to get/create collection after {attempt + 1} attempts: {e}", exc_info=True)
+                raise
     
     def _create_collection(self) -> Collection:
         """Create new Milvus collection with schema"""

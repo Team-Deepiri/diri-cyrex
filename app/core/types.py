@@ -24,6 +24,44 @@ class AgentRole(str, Enum):
     MEMORY_MANAGER = "memory_manager"
     TOOL_EXECUTOR = "tool_executor"
     GUARDRAIL_ENFORCER = "guardrail_enforcer"
+    # Cyrex Vendor Fraud Detection Agents
+    INVOICE_ANALYZER = "invoice_analyzer"
+    VENDOR_INTELLIGENCE = "vendor_intelligence"
+    PRICING_BENCHMARK = "pricing_benchmark"
+    FRAUD_DETECTOR = "fraud_detector"
+    DOCUMENT_PROCESSOR = "document_processor"
+    RISK_ASSESSOR = "risk_assessor"
+
+
+class IndustryNiche(str, Enum):
+    """Industry niches for vendor fraud detection"""
+    PROPERTY_MANAGEMENT = "property_management"
+    CORPORATE_PROCUREMENT = "corporate_procurement"
+    INSURANCE_PC = "insurance_pc"
+    GENERAL_CONTRACTORS = "general_contractors"
+    RETAIL_ECOMMERCE = "retail_ecommerce"
+    LAW_FIRMS = "law_firms"
+    GENERIC = "generic"
+
+
+class VendorFraudType(str, Enum):
+    """Types of vendor fraud"""
+    INFLATED_INVOICE = "inflated_invoice"
+    PHANTOM_WORK = "phantom_work"
+    DUPLICATE_BILLING = "duplicate_billing"
+    UNNECESSARY_SERVICES = "unnecessary_services"
+    KICKBACK_SCHEME = "kickback_scheme"
+    PRICE_GOUGING = "price_gouging"
+    CONTRACT_NON_COMPLIANCE = "contract_non_compliance"
+    FORGED_DOCUMENTS = "forged_documents"
+
+
+class RiskLevel(str, Enum):
+    """Risk level assessment"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 class AgentStatus(str, Enum):

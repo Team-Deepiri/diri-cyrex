@@ -7,6 +7,7 @@ from .time_optimizer_agent import TimeOptimizerAgent
 from .creative_sparker_agent import CreativeSparkerAgent
 from .quality_assurance_agent import QualityAssuranceAgent
 from .engagement_specialist_agent import EngagementSpecialistAgent
+from .vendor_fraud_agent import VendorFraudAgent
 
 __all__ = [
     'TaskDecomposerAgent',
@@ -14,5 +15,6 @@ __all__ = [
     'CreativeSparkerAgent',
     'QualityAssuranceAgent',
     'EngagementSpecialistAgent',
+    'VendorFraudAgent',
 ]
 

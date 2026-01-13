@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     CORS_ORIGIN: str = "http://localhost:5173"
-    NODE_BACKEND_URL: str = "http://localhost:5000"
+    # Default to api-gateway service name for Docker, fallback to localhost for local dev
+    NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
     
     # Logging Configuration
@@ -51,6 +52,14 @@ class Settings(BaseSettings):
     LOCAL_LLM_MODEL: str = "llama3:8b"  # Model name/identifier
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
+    
+    # PostgreSQL Configuration
+    # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
+    POSTGRES_HOST: str = "postgres"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "deepiri"
+    POSTGRES_USER: str = "deepiri"
+    POSTGRES_PASSWORD: str = "deepiripassword"
     
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30

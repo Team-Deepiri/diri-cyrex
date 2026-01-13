@@ -93,7 +93,7 @@ except ImportError:
 
 from .execution_engine import TaskExecutionEngine, get_execution_engine
 from .state_manager import WorkflowStateManager, get_state_manager
-from .tool_registry import ToolRegistry, get_tool_registry
+from .tool_registry import ToolRegistry, get_tool_registry, ToolCategory
 from .guardrails import SafetyGuardrails, get_guardrails
 from .queue_manager import TaskQueueManager, get_queue_manager, TaskPriority
 from .monitoring import SystemMonitor, get_monitor
@@ -203,8 +203,85 @@ class WorkflowOrchestrator:
             self.logger.debug("LangGraph workflow not available")
             self._langgraph_workflow_getter = None
         
+        # Register default tools
+        self._register_default_tools()
+        
         # Initialize chains
         self._setup_chains()
+    
+    def _register_default_tools(self):
+        """Register default tools for workflow execution"""
+        import asyncio
+        try:
+            # Register knowledge_retrieval tool if RAG bridge is available
+            if self.rag_bridge:
+                from langchain_core.tools import Tool
+                
+                async def knowledge_retrieval_func_async(input_data: Dict[str, Any]) -> str:
+                    """Retrieve knowledge from vector store using RAG"""
+                    query = input_data.get("query", "")
+                    if not query:
+                        return "Error: 'query' parameter is required"
+                    
+                    try:
+                        # Use RAG bridge to retrieve documents
+                        results = await self.rag_bridge.retrieve(query, top_k=5)
+                        if results and len(results) > 0:
+                            # Format results as string - handle Document objects
+                            formatted_parts = []
+                            for i, doc in enumerate(results[:5]):
+                                if hasattr(doc, 'page_content'):
+                                    content = doc.page_content
+                                    metadata = getattr(doc, 'metadata', {})
+                                    formatted_parts.append(
+                                        f"Document {i+1}:\n{content}\n"
+                                        f"(Source: {metadata.get('source', 'unknown')})"
+                                    )
+                                elif isinstance(doc, dict):
+                                    formatted_parts.append(
+                                        f"Document {i+1}:\n{doc.get('content', doc.get('text', ''))}"
+                                    )
+                                else:
+                                    formatted_parts.append(f"Document {i+1}:\n{str(doc)}")
+                            return "\n\n".join(formatted_parts)
+                        else:
+                            return "No relevant documents found for the query."
+                    except Exception as e:
+                        self.logger.error(f"Knowledge retrieval failed: {e}", exc_info=True)
+                        return f"Error retrieving knowledge: {str(e)}"
+                
+                # Create sync wrapper for async function
+                def knowledge_retrieval_func(input_data):
+                    """Sync wrapper for knowledge retrieval"""
+                    # Handle both dict and string inputs
+                    if isinstance(input_data, str):
+                        input_data = {"query": input_data}
+                    elif not isinstance(input_data, dict):
+                        input_data = {"query": str(input_data)}
+                    
+                    # Run async function
+                    try:
+                        loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                    
+                    return loop.run_until_complete(knowledge_retrieval_func_async(input_data))
+                
+                # Create tool from function
+                knowledge_tool = Tool(
+                    name="knowledge_retrieval",
+                    description="Retrieve relevant knowledge/documents from the vector store using semantic search. Input should be a dict with 'query' key containing the search query, or a string query.",
+                    func=knowledge_retrieval_func
+                )
+                
+                self.tool_registry.register_tool(
+                    knowledge_tool,
+                    category=ToolCategory.DATA,
+                )
+                self.logger.info("Registered knowledge_retrieval tool")
+        except Exception as e:
+            self.logger.warning(f"Failed to register default tools: {e}", exc_info=True)
     
     def _setup_chains(self):
         """Setup LangChain chains for different workflows"""
