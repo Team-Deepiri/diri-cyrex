@@ -4,10 +4,9 @@ from app.integrations.local_llm import get_local_llm  # or your LLM constructor
 
 async def main():
     # 1. Initialize LLM
-    llm = get_local_llm()
-
+    
     # 2. Create agent
-    agent = create_agent(llm)
+    agent = create_agent()
 
     # 3. Provide input
     user_input = "Write a step-by-step plan to set up a PostgreSQL database with replication"

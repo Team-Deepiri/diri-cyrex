@@ -5,18 +5,11 @@ from .chain import AgentChain
 from .guardrails import run_guardrails
 
 # Tools
-from .tools import classify_task
-from .tools import generate_plan
-from .guardrails import SafetyGuardrails
+from .tools import TaskClassifierTool
+from .tools import TopicExtractorTool
 from app.integrations.local_llm import get_local_llm
 
-async def run_guardrails(prompt: str):
-    guardrails = SafetyGuardrails()
-    try:
-        guardrails.check_prompt(prompt)
-        return prompt
-    except ValueError as e:
-        raise ValueError(f"Guardrail blocked prompt: {str(e)}")
+
 
 def create_agent() -> AgentChain:
     """
@@ -29,24 +22,23 @@ def create_agent() -> AgentChain:
 
     # 2. Register tools
     tool_registry.register(
-        name="classify_task",
-        func=classify_task,
-        description="Classifies the user's request and intent"
+    name="classify_task",
+    func=TaskClassifierTool().invoke,
+    description="Classifies the user's request and intent"
     )
 
     tool_registry.register(
-        name="generate_plan",
-        func=generate_plan,
-        description="Generates a detailed technical plan"
+        name="extract_topic",
+        func=TopicExtractorTool().invoke,
+        description="Extracts the core technical topic from a user prompt"
     )
     
     llm = get_local_llm()
 
     # 3. Create the chain
     chain = AgentChain(     
+        tools=tool_registry,
         llm=llm,
-        tool_registry=tool_registry,
-        guardrail_runner=run_guardrails
     )
 
     return chain

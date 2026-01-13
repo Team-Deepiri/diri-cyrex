@@ -6,6 +6,9 @@ from .prompts import (
     TASK_PLANNING_PROMPT,
     PLAN_OUTPUT_FORMAT,
 )
+import json
+import re
+from .helpers import extract_plan_json, repair_truncated_json
 
 class AgentChain:
     def __init__(self, tools: ToolRegistry, llm):
@@ -39,11 +42,11 @@ class AgentChain:
             safe_input = await run_guardrails(validated_input)
 
             self.transition(AgentState.PROCESSING)
-            plan = await self.create_plan(safe_input)
-            result = await self.execute_tools(plan)
+            plan = self.create_plan(safe_input)
+            #result = await self.execute_tools(plan)
 
             self.transition(AgentState.FORMATTING_OUTPUT)
-            formatted = self.format_output(plan, result)
+            formatted = self.format_output(plan, {})
 
             self.transition(AgentState.DONE)
             return formatted
@@ -61,21 +64,43 @@ class AgentChain:
             raise ValueError("Input cannot be empty")
         return cleaned
 
-    async def create_plan(self, task: str) -> dict:
+    def create_plan(self, task: str) -> dict:
         """
-        Uses the LLM + prompts to generate a structured plan.
+        Synchronously calls the LLM to generate a plan and ensures valid JSON.
+        If the JSON is truncated or incomplete, it automatically asks the LLM to finish it.
         """
-        prompt = (
-            SYSTEM_PROMPT
-            + TASK_PLANNING_PROMPT.format(task=task)
-            + PLAN_OUTPUT_FORMAT
-        )
+        prompt = SYSTEM_PROMPT + TASK_PLANNING_PROMPT.format(task=task) + PLAN_OUTPUT_FORMAT
 
-        response = await self.llm.invoke(prompt)
+        # Call LLM synchronously
+        response_str = self.llm.invoke(prompt)
 
-        # For now assume JSON output
-        return response
+        # Attempt JSON extraction
+        response_dict = extract_plan_json(response_str)
 
+        # If extraction fails due to truncation, ask LLM to continue
+        retry_count = 0
+        while response_dict is None and retry_count < 3:
+            retry_count += 1
+            retry_prompt = (
+                "The previous JSON output was incomplete or invalid. "
+                "Here is what was generated so far:\n\n"
+                f"{response_str}\n\n"
+                "Continue the JSON exactly from where it left off. "
+                "Return strictly valid JSON only, using the format specified:\n"
+                f"{PLAN_OUTPUT_FORMAT}"
+            )
+
+            response_str = self.llm.invoke(retry_prompt)
+            response_dict = extract_plan_json(response_str)
+
+        if response_dict is None:
+            raise ValueError("Failed to generate valid JSON plan after retries.")
+
+        return response_dict
+
+
+
+    
     async def execute_tools(self, plan: dict) -> dict:
         """
         Execute tools based on the plan.
@@ -90,13 +115,17 @@ class AgentChain:
             if not tool:
                 raise ValueError(f"Tool '{tool_name}' not registered")
 
-            results[tool_name] = await tool.run(tool_input)
+            results[tool_name] = await tool.invoke(tool_input)
 
         return results
 
     def format_output(self, plan: dict, results: dict) -> dict:
+        # Make a copy of the plan so we don’t mutate the original
+        
         return {
             "plan": plan,
-            "results": results,
+            "results": results or {},  # will be empty if execution skipped
             "state": self.current_state.value,
         }
+
+

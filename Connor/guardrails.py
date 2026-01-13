@@ -85,3 +85,8 @@ class SafetyGuardrails:
 
 def get_guardrails_two() -> SafetyGuardrails:
     return SafetyGuardrails()
+
+_guardrails = SafetyGuardrails()
+
+async def run_guardrails(prompt: str, user_id: Optional[str] = None) -> str:
+    return await _guardrails.check_prompt(prompt, user_id=user_id)
