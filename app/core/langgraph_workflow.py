@@ -19,10 +19,10 @@ logger = get_logger("cyrex.langgraph.workflow")
 
 # LangGraph imports with graceful fallback
 HAS_LANGGRAPH = False
+HAS_REDIS_CHECKPOINT = False
 try:
     from langgraph.graph import StateGraph, END, START
     from langgraph.graph.message import add_messages
-    from langgraph.checkpoint.redis import RedisSaver
     from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
     HAS_LANGGRAPH = True
 except ImportError as e:
@@ -30,7 +30,6 @@ except ImportError as e:
     StateGraph = None
     END = None
     START = None
-    RedisSaver = None
     # Create dummy classes for type hints
     class BaseMessage:
         pass
@@ -43,6 +42,20 @@ except ImportError as e:
     class SystemMessage:
         def __init__(self, content):
             self.content = content
+
+# Redis checkpoint import (separate from main LangGraph for better error handling)
+RedisSaver = None
+if HAS_LANGGRAPH:
+    try:
+        from langgraph.checkpoint.redis import RedisSaver
+        HAS_REDIS_CHECKPOINT = True
+        logger.info("Redis checkpoint support available for LangGraph")
+    except ImportError as e:
+        logger.warning(f"Redis checkpoint not available: {e}. LangGraph will work without checkpointing. Install langgraph-checkpoint-redis to enable state persistence.")
+        HAS_REDIS_CHECKPOINT = False
+        RedisSaver = None
+else:
+    RedisSaver = None
 
 # Redis client for checkpointing
 try:
@@ -328,8 +341,8 @@ class LangGraphMultiAgentWorkflow:
             workflow.add_edge("fraud_agent", END)
             workflow.add_edge("qa_agent", END)
             
-            # Compile with checkpointing if Redis available
-            if HAS_REDIS and self.redis_client:
+            # Compile with checkpointing if Redis checkpoint support is available
+            if HAS_REDIS_CHECKPOINT and HAS_REDIS and self.redis_client and RedisSaver:
                 try:
                     self.checkpointer = RedisSaver(redis_client=self.redis_client)
                     self.graph = workflow.compile(checkpointer=self.checkpointer)
@@ -339,7 +352,10 @@ class LangGraphMultiAgentWorkflow:
                     self.graph = workflow.compile()
             else:
                 self.graph = workflow.compile()
-                logger.info("LangGraph workflow compiled without checkpointing")
+                if not HAS_REDIS_CHECKPOINT:
+                    logger.debug("LangGraph workflow compiled without checkpointing (Redis checkpoint package not installed)")
+                else:
+                    logger.info("LangGraph workflow compiled without checkpointing")
                 
         except Exception as e:
             logger.error(f"Failed to build LangGraph workflow: {e}", exc_info=True)
@@ -1169,7 +1185,7 @@ async def get_langgraph_workflow(
                     else:
                         redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
                 
-                redis_client = redis.from_url(redis_url, decode_responses=True)
+                redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=5.0)
                 logger.info(f"Redis client created: {redis_url.split('@')[-1] if '@' in redis_url else redis_url}")
             except Exception as e:
                 logger.warning(f"Failed to create Redis client: {e}")

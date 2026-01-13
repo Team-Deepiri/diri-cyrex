@@ -25,6 +25,15 @@ import {
   FaNetworkWired,
   FaSyncAlt
 } from 'react-icons/fa';
+import {
+  TargetIcon,
+  CodeIcon,
+  ChartIcon,
+  SearchIcon,
+  ChatIcon,
+  GearIcon,
+  TimerIcon
+} from './AgentIcons';
 import './AgentPlayground.css';
 
 // Types
@@ -79,12 +88,12 @@ interface ConversationMessage {
 
 // Available agent types
 const AGENT_TYPES = [
-  { id: 'task_decomposer', name: 'Task Decomposer', icon: '🎯' },
-  { id: 'code_generator', name: 'Code Generator', icon: '💻' },
-  { id: 'data_analyst', name: 'Data Analyst', icon: '📊' },
-  { id: 'vendor_fraud', name: 'Vendor Fraud Detector', icon: '🔍' },
-  { id: 'conversational', name: 'Conversational', icon: '💬' },
-  { id: 'automation', name: 'Automation Agent', icon: '⚙️' },
+  { id: 'task_decomposer', name: 'Task Decomposer', icon: TargetIcon },
+  { id: 'code_generator', name: 'Code Generator', icon: CodeIcon },
+  { id: 'data_analyst', name: 'Data Analyst', icon: ChartIcon },
+  { id: 'vendor_fraud', name: 'Vendor Fraud Detector', icon: SearchIcon },
+  { id: 'conversational', name: 'Conversational', icon: ChatIcon },
+  { id: 'automation', name: 'Automation Agent', icon: GearIcon },
 ];
 
 // Models will be auto-detected from Ollama container
@@ -197,11 +206,16 @@ export function AgentPlayground() {
       // Could be network issue or timeout
       console.debug('Models check failed:', modelsError.name, modelsError.message);
       
-      // If it's just a timeout or network error, and we have cached models, stay connected
-      if (availableModels.length > 0 && 
-          (modelsError.name === 'AbortError' || modelsError.message?.includes('fetch') || modelsError.message?.includes('aborted'))) {
-        console.debug('Models check timeout but have cached models, staying connected');
-        setOllamaStatus('connected');
+      // If it's just a timeout or network error, check current state before marking disconnected
+      if (modelsError.name === 'AbortError' || modelsError.message?.includes('fetch') || modelsError.message?.includes('aborted')) {
+        // Use functional update to access current state without dependency
+        setOllamaStatus(prev => {
+          if (prev === 'connected') {
+            console.debug('Models check timeout but was connected, staying connected');
+            return 'connected';
+          }
+          return prev;
+        });
         return;
       }
     } finally {
@@ -250,18 +264,21 @@ export function AgentPlayground() {
       }
     }
     
-    // If we have cached models, assume still connected (might be transient issue)
-    if (availableModels.length > 0) {
-      console.debug('Have cached models, staying connected despite check failures');
-      setOllamaStatus('connected');
-    } else {
-      // Only mark as disconnected if we have no cached models and all checks failed
-      console.debug('No cached models and all checks failed, marking as disconnected');
-      setOllamaStatus('disconnected');
+    // Only mark as disconnected if all checks failed
+    // Use functional update to check current state
+    setOllamaStatus(prev => {
+      if (prev === 'connected') {
+        // Was connected, but checks failed - might be transient, keep connected
+        console.debug('Checks failed but was connected, keeping connected (might be transient)');
+        return 'connected';
+      }
+      // Was not connected, mark as disconnected
+      console.debug('No cached connection and all checks failed, marking as disconnected');
       setAvailableModels([]);
       setModelInfo([]);
-    }
-  }, [availableModels]);
+      return 'disconnected';
+    });
+  }, []);
 
   // Fetch available models from Ollama
   const fetchAvailableModels = useCallback(async () => {
@@ -312,35 +329,42 @@ export function AgentPlayground() {
       } else if (isConnected) {
         // Connected but no models yet (might be loading)
         setOllamaStatus('connected');
-        // Keep existing models if we have them
+        // Keep existing models if we have them (use functional update)
+        setAvailableModels(prev => prev.length > 0 ? prev : []);
+        setModelInfo(prev => prev.length > 0 ? prev : []);
       } else {
-        // Not connected - but don't clear if we have cached models (might be transient)
-        if (availableModels.length === 0) {
-          setOllamaStatus('disconnected');
-          setAvailableModels([]);
-          setModelInfo([]);
-        }
+        // Not connected - use functional update to check current state
+        setAvailableModels(prev => {
+          if (prev.length === 0) {
+            setOllamaStatus('disconnected');
+            setModelInfo([]);
+            return [];
+          }
+          // Have cached models, might be transient issue
+          return prev;
+        });
       }
     } catch (error: any) {
       console.error('Failed to fetch models:', error);
       
-      // Don't immediately mark as disconnected - might be transient
-      // Only mark disconnected if we don't have cached models
-      if (availableModels.length === 0) {
-        // Check if it's a timeout/network error vs actual failure
-        if (error.name === 'TimeoutError' || error.name === 'AbortError') {
-          // Timeout - keep current status if we have models
-          if (availableModels.length === 0) {
+      // Use functional update to check current state without dependency
+      setAvailableModels(prev => {
+        if (prev.length === 0) {
+          // Check if it's a timeout/network error vs actual failure
+          if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+            // Timeout - keep current status
+            setOllamaStatus(currentStatus => currentStatus === 'connected' ? 'connected' : 'disconnected');
+          } else {
             setOllamaStatus('disconnected');
+            setModelInfo([]);
           }
-        } else {
-          setOllamaStatus('disconnected');
-          setAvailableModels([]);
-          setModelInfo([]);
+          return [];
         }
-      }
+        // Have cached models, might be transient issue - keep them
+        return prev;
+      });
     }
-  }, [availableModels]);
+  }, []);
 
   // Check Ollama status and fetch models on mount and periodically
   useEffect(() => {
@@ -353,13 +377,14 @@ export function AgentPlayground() {
     };
     initialCheck();
     
-    // Set up periodic checks
+    // Set up periodic checks - every 30 seconds
     const interval = setInterval(() => {
       checkOllamaStatus();
       fetchAvailableModels();
     }, 30000);
     return () => clearInterval(interval);
-  }, [checkOllamaStatus, fetchAvailableModels]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps - callbacks are stable now
 
   // Add event
   const addEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
@@ -599,16 +624,19 @@ export function AgentPlayground() {
       <div className="config-section">
         <label>Agent Type</label>
         <div className="agent-type-grid">
-          {AGENT_TYPES.map(type => (
-            <button
-              key={type.id}
-              className={`agent-type-btn ${agentConfig.agentType === type.id ? 'active' : ''}`}
-              onClick={() => setAgentConfig(prev => ({ ...prev, agentType: type.id }))}
-            >
-              <span className="icon">{type.icon}</span>
-              <span className="name">{type.name}</span>
-            </button>
-          ))}
+          {AGENT_TYPES.map(type => {
+            const IconComponent = type.icon;
+            return (
+              <button
+                key={type.id}
+                className={`agent-type-btn ${agentConfig.agentType === type.id ? 'active' : ''}`}
+                onClick={() => setAgentConfig(prev => ({ ...prev, agentType: type.id }))}
+              >
+                <span className="icon"><IconComponent size={20} /></span>
+                <span className="name">{type.name}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -683,6 +711,14 @@ export function AgentPlayground() {
             value={agentConfig.temperature}
             onChange={e => setAgentConfig(prev => ({ ...prev, temperature: parseFloat(e.target.value) }))}
           />
+          <div className="temperature-info">
+            <p className="temperature-description">
+              LLM temperature controls text generation randomness, acting like a creativity dial: 
+              <strong> low values (near 0)</strong> yield predictable, factual text (e.g., summarization), 
+              while <strong>high values (above 1)</strong> produce diverse, creative, sometimes unexpected results (e.g., brainstorming), 
+              influencing how the model samples from potential next words.
+            </p>
+          </div>
         </div>
         <div className="config-section">
           <label>Max Tokens: {agentConfig.maxTokens}</label>
@@ -754,7 +790,7 @@ export function AgentPlayground() {
         <div className="agent-metrics">
           <span><FaBrain /> {Math.round(agentInstance?.metrics.tokensUsed || 0)} tokens</span>
           <span><FaTools /> {agentInstance?.metrics.toolCalls || 0} tool calls</span>
-          <span>⏱️ {Math.round((agentInstance?.metrics.responseTime || 0) / 1000)}s avg</span>
+          <span><TimerIcon size={16} /> {Math.round((agentInstance?.metrics.responseTime || 0) / 1000)}s avg</span>
         </div>
         <button className="btn-danger btn-small" onClick={stopAgent}>
           <FaStop /> Stop Agent

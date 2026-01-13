@@ -167,7 +167,15 @@ async def get_postgres_manager() -> PostgreSQLManager:
         _postgres_manager = PostgreSQLManager()
         initialized = await _postgres_manager.initialize()
         if not initialized:
-            logger.error("PostgreSQL manager created but initialization failed. Pool is not available.")
+            error_msg = (
+                f"PostgreSQL initialization failed. "
+                f"Connection details: {_postgres_manager.host}:{_postgres_manager.port}/{_postgres_manager.database} "
+                f"as user {_postgres_manager.user}. "
+                f"Check logs above for connection errors. Pool is not available."
+            )
+            logger.error(error_msg)
+            # Don't raise exception - allow service to start but mark as unhealthy
+            # This allows health checks to report the issue
     return _postgres_manager
 
 

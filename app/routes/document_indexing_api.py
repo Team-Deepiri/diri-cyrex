@@ -352,6 +352,45 @@ async def delete_document(req: DeleteDocumentRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class BatchDeleteDocumentsRequest(BaseModel):
+    """Request to delete multiple documents"""
+    document_ids: List[str] = Field(..., description="List of document IDs to delete")
+
+
+@router.post("/delete/batch")
+async def batch_delete_documents(req: BatchDeleteDocumentsRequest, request: Request):
+    """Delete multiple documents and all their chunks"""
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    try:
+        service = await get_document_indexing_service()
+        deleted_count = 0
+        failed = []
+        
+        for document_id in req.document_ids:
+            try:
+                success = await service.delete_document(document_id)
+                if success:
+                    deleted_count += 1
+                else:
+                    failed.append(document_id)
+            except Exception as e:
+                logger.warning(f"Failed to delete document {document_id}: {e}")
+                failed.append(document_id)
+        
+        return {
+            "success": deleted_count > 0,
+            "deleted_count": deleted_count,
+            "failed_count": len(failed),
+            "failed": failed,
+            "request_id": request_id,
+        }
+    
+    except Exception as e:
+        logger.error(f"Error batch deleting documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats")
 async def get_statistics(request: Request):
     """
@@ -484,4 +523,3 @@ async def health_check(request: Request):
             "status": "unhealthy",
             "error": str(e),
         }
-

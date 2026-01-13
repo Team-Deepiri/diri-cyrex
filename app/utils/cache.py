@@ -24,7 +24,8 @@ def get_redis_client():
                 port=settings.REDIS_PORT,
                 password=settings.REDIS_PASSWORD,
                 db=settings.REDIS_DB,
-                decode_responses=True
+                decode_responses=True,
+                socket_connect_timeout=5.0
             )
             _redis_client.ping()
             logger.info("Redis connection established")

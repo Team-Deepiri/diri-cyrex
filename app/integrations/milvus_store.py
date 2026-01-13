@@ -2,15 +2,175 @@
 Milvus Vector Store Integration
 Production-grade vector database for RAG and semantic search
 Integrates with existing KnowledgeRetrievalEngine
+
+Industry-standard features:
+- Connection pooling and reuse
+- Exponential backoff retry strategy
+- Circuit breaker pattern for repeated failures
+- Thread-safe connection management
+- Graceful degradation to in-memory fallback
 """
 from typing import List, Dict, Optional, Any
 import os
 import warnings
+import threading
+import time
+from enum import Enum
 from pydantic import ConfigDict
 from ..logging_config import get_logger
 from ..settings import settings
 
 logger = get_logger("cyrex.milvus_store")
+
+
+class CircuitState(Enum):
+    """Circuit breaker states"""
+    CLOSED = "closed"  # Normal operation
+    OPEN = "open"  # Failing, reject requests
+    HALF_OPEN = "half_open"  # Testing if service recovered
+
+
+class MilvusConnectionManager:
+    """
+    Industry-standard connection manager with circuit breaker and exponential backoff.
+    Manages connection lifecycle, health checks, and automatic recovery.
+    """
+    
+    def __init__(self, host: str, port: int, connection_alias: str = "default"):
+        self.host = host
+        self.port = port
+        self.connection_alias = connection_alias
+        self._lock = threading.Lock()
+        self._circuit_state = CircuitState.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0.0
+        self._success_count = 0
+        
+        # Circuit breaker configuration
+        self.failure_threshold = 5  # Open circuit after 5 consecutive failures
+        self.recovery_timeout = 30.0  # Try recovery after 30 seconds
+        self.half_open_max_attempts = 3  # Max attempts in half-open state
+        
+    def _is_circuit_open(self) -> bool:
+        """Check if circuit breaker should be open"""
+        if self._circuit_state == CircuitState.OPEN:
+            # Check if recovery timeout has passed
+            if time.time() - self._last_failure_time > self.recovery_timeout:
+                self._circuit_state = CircuitState.HALF_OPEN
+                self._success_count = 0
+                logger.info(f"Circuit breaker transitioning to HALF_OPEN for {self.connection_alias}")
+                return False
+            return True
+        return False
+    
+    def _record_success(self):
+        """Record successful operation"""
+        with self._lock:
+            if self._circuit_state == CircuitState.HALF_OPEN:
+                self._success_count += 1
+                if self._success_count >= self.half_open_max_attempts:
+                    self._circuit_state = CircuitState.CLOSED
+                    self._failure_count = 0
+                    logger.info(f"Circuit breaker CLOSED for {self.connection_alias} - service recovered")
+            elif self._circuit_state == CircuitState.CLOSED:
+                self._failure_count = 0
+    
+    def _record_failure(self):
+        """Record failed operation"""
+        with self._lock:
+            self._failure_count += 1
+            self._last_failure_time = time.time()
+            
+            if self._circuit_state == CircuitState.HALF_OPEN:
+                # Failed in half-open, go back to open
+                self._circuit_state = CircuitState.OPEN
+                logger.warning(f"Circuit breaker OPEN for {self.connection_alias} - recovery attempt failed")
+            elif self._failure_count >= self.failure_threshold:
+                self._circuit_state = CircuitState.OPEN
+                logger.warning(f"Circuit breaker OPEN for {self.connection_alias} - {self._failure_count} consecutive failures")
+    
+    def get_state(self) -> CircuitState:
+        """Get current circuit breaker state"""
+        return self._circuit_state
+    
+    def ensure_connection(self) -> bool:
+        """
+        Ensure connection exists and is valid (thread-safe).
+        Returns True if connection is available, False otherwise.
+        """
+        if not HAS_PYMILVUS or not connections:
+            return False
+        
+        # Check circuit breaker
+        if self._is_circuit_open():
+            logger.debug(f"Circuit breaker is OPEN for {self.connection_alias}, skipping connection attempt")
+            return False
+        
+        with self._lock:
+            try:
+                # Check if connection exists
+                if connections.has_connection(self.connection_alias):
+                    # Connection exists - assume valid (don't verify with operations that can fail)
+                    return True
+                
+                # Connection doesn't exist, create it
+                try:
+                    connections.connect(
+                        alias=self.connection_alias,
+                        host=self.host,
+                        port=self.port,
+                        timeout=10.0,
+                    )
+                    self._record_success()
+                    logger.debug(f"Connected to Milvus at {self.host}:{self.port} (alias: {self.connection_alias})")
+                    return True
+                except Exception as connect_err:
+                    self._record_failure()
+                    error_msg = str(connect_err).lower()
+                    if "connection refused" in error_msg or "cannot connect" in error_msg:
+                        logger.debug(f"Milvus connection refused at {self.host}:{self.port}")
+                    elif "timeout" in error_msg:
+                        logger.debug(f"Milvus connection timeout at {self.host}:{self.port}")
+                    else:
+                        logger.debug(f"Milvus connection failed: {connect_err}")
+                    return False
+            except Exception as e:
+                self._record_failure()
+                logger.debug(f"Connection check failed: {e}")
+                return False
+    
+    def reconnect(self) -> bool:
+        """
+        Force reconnection (thread-safe).
+        Returns True if reconnection successful, False otherwise.
+        """
+        if not HAS_PYMILVUS or not connections:
+            return False
+        
+        with self._lock:
+            try:
+                # Disconnect existing connection if it exists
+                try:
+                    if connections.has_connection(self.connection_alias):
+                        connections.disconnect(self.connection_alias)
+                except Exception:
+                    pass
+                
+                # Create new connection
+                connections.connect(
+                    alias=self.connection_alias,
+                    host=self.host,
+                    port=self.port,
+                    timeout=10.0,
+                )
+                self._record_success()
+                logger.info(f"Reconnected to Milvus at {self.host}:{self.port} (alias: {self.connection_alias})")
+                return True
+            except Exception as e:
+                self._record_failure()
+                logger.warning(f"Reconnection failed: {e}")
+                return False
+
 
 # Suppress AsyncMilvusClient initialization warning - it's expected when initializing in sync context
 # The async client will be created automatically when async methods are called
@@ -154,65 +314,54 @@ class MilvusVectorStore:
         self.connection_alias = "default"
         self.langchain_connection_alias = f"langchain_{self.collection_name}"
         
+        # Industry-standard connection managers with circuit breakers
+        self._connection_manager = MilvusConnectionManager(
+            host=self.host,
+            port=self.port,
+            connection_alias=self.connection_alias
+        )
+        self._langchain_connection_manager = MilvusConnectionManager(
+            host=self.host,
+            port=self.port,
+            connection_alias=self.langchain_connection_alias
+        )
+        
+        # Thread lock for connection management to prevent race conditions
+        self._connection_lock = threading.Lock()
+        
         try:
             # Connect with default alias for PyMilvus operations
-            # Check if connection already exists and is valid before creating new one
-            connection_exists = False
-            try:
-                if connections.has_connection(self.connection_alias):
-                    # Connection exists, verify it's still valid by trying a simple operation
-                    try:
-                        # Try to list collections to verify connection is alive
-                        utility.list_collections()
+            # Use thread lock to prevent concurrent connection attempts
+            with self._connection_lock:
+                # Check if connection already exists
+                connection_exists = False
+                try:
+                    if connections.has_connection(self.connection_alias):
+                        # Connection exists - don't verify with utility.list_collections()
+                        # as it can cause channel errors. If it's actually closed, the next
+                        # operation will fail and we'll reconnect then.
                         connection_exists = True
                         logger.debug(f"Reusing existing Milvus connection: {self.connection_alias}")
-                    except (ValueError, Exception) as verify_error:
-                        error_msg = str(verify_error).lower()
-                        error_type = type(verify_error).__name__
-                        # Check for gRPC channel errors
-                        is_channel_error = (
-                            "closed channel" in error_msg or 
-                            "rpc" in error_msg or 
-                            "cannot invoke" in error_msg or
-                            "channel closed" in error_msg or
-                            (error_type == "ValueError" and "channel" in error_msg)
-                        )
-                        
-                        if is_channel_error:
-                            # Connection exists but channel is closed, disconnect and reconnect
-                            logger.debug(f"Existing connection has closed channel, reconnecting...")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_exists = False
-                        else:
-                            # Other error, might still be valid, but reconnect to be safe
-                            logger.debug(f"Connection verification failed: {verify_error}, reconnecting...")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_exists = False
-            except Exception:
-                # has_connection check failed, assume no connection
-                connection_exists = False
-            
-            if not connection_exists:
-                logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
-                connections.connect(
-                    alias=self.connection_alias,
-                    host=self.host,
-                    port=self.port,
-                    timeout=10.0,  # Increased timeout for better reliability
-                )
-            
-            # Verify connection by checking server version
-            try:
-                from pymilvus import __version__ as pymilvus_version
-                logger.info(f"Connected to Milvus at {self.host}:{self.port} (pymilvus version: {pymilvus_version})")
-            except Exception:
-                logger.info(f"Connected to Milvus at {self.host}:{self.port}")
+                except Exception:
+                    # has_connection check failed, assume no connection
+                    connection_exists = False
+                
+                if not connection_exists:
+                    # Disconnect any existing connection in bad state
+                    try:
+                        if connections.has_connection(self.connection_alias):
+                            connections.disconnect(self.connection_alias)
+                    except Exception:
+                        pass
+                    
+                    logger.info(f"Attempting to connect to Milvus at {self.host}:{self.port}...")
+                    connections.connect(
+                        alias=self.connection_alias,
+                        host=self.host,
+                        port=self.port,
+                        timeout=10.0,  # Increased timeout for better reliability
+                    )
+                    logger.info(f"Connected to Milvus at {self.host}:{self.port}")
             
             self.milvus_available = True
         except Exception as e:
@@ -460,109 +609,19 @@ class MilvusVectorStore:
         self._ensure_connection()
     
     def _ensure_connection(self):
-        """Ensure Milvus connections are alive, reconnect if needed"""
+        """Ensure Milvus connections are alive, reconnect if needed (thread-safe with circuit breaker)"""
         if not HAS_PYMILVUS or not connections:
             return
         
-        try:
-            # Check default connection - verify it's actually alive, not just registered
-            connection_needs_reconnect = True
-            try:
-                if connections.has_connection(self.connection_alias):
-                    # Connection exists, verify it's still valid
-                    try:
-                        # Try a simple operation to verify connection is alive
-                        utility.list_collections()
-                        connection_needs_reconnect = False
-                    except (ValueError, Exception) as verify_error:
-                        error_msg = str(verify_error).lower()
-                        error_type = type(verify_error).__name__
-                        # Check for gRPC channel errors
-                        is_channel_error = (
-                            "closed channel" in error_msg or 
-                            "rpc" in error_msg or 
-                            "cannot invoke" in error_msg or
-                            "channel closed" in error_msg or
-                            (error_type == "ValueError" and "channel" in error_msg)
-                        )
-                        
-                        if is_channel_error:
-                            # Connection channel is closed, need to reconnect
-                            logger.debug(f"Connection channel closed, will reconnect: {verify_error}")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_needs_reconnect = True
-                        else:
-                            # Other error, might be transient, but reconnect to be safe
-                            logger.debug(f"Connection verification failed, will reconnect: {verify_error}")
-                            try:
-                                connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            connection_needs_reconnect = True
-            except Exception:
-                # has_connection check failed, assume no connection
-                connection_needs_reconnect = True
-            
-            if connection_needs_reconnect:
-                logger.info(f"Reconnecting to Milvus at {self.host}:{self.port}")
-                connections.connect(
-                    alias=self.connection_alias,
-                    host=self.host,
-                    port=self.port,
-                    timeout=10.0,
-                )
-                # Verify the connection is actually working after reconnect
-                try:
-                    utility.list_collections()
-                    logger.debug("Milvus connection verified after reconnect")
-                except Exception as verify_err:
-                    error_msg = str(verify_err).lower()
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg
-                    )
-                    if is_channel_error:
-                        logger.warning(f"Connection verification failed after reconnect: {verify_err}. Connection may be unstable.")
-                    else:
-                        # Non-channel error might be acceptable (e.g., no collections yet)
-                        logger.debug(f"Connection verification returned non-critical error: {verify_err}")
-            
-            # Check LangChain connection if it exists
-            if hasattr(self, 'langchain_connection_alias') and self.langchain_connection_alias != self.connection_alias:
-                langchain_needs_reconnect = True
-                try:
-                    if connections.has_connection(self.langchain_connection_alias):
-                        # Verify it's alive
-                        try:
-                            utility.list_collections()
-                            langchain_needs_reconnect = False
-                        except Exception:
-                            # Channel might be closed, reconnect
-                            try:
-                                connections.disconnect(self.langchain_connection_alias)
-                            except Exception:
-                                pass
-                            langchain_needs_reconnect = True
-                except Exception:
-                    langchain_needs_reconnect = True
-                
-                if langchain_needs_reconnect:
-                    logger.info(f"Reconnecting LangChain connection to Milvus at {self.host}:{self.port}")
-                    connections.connect(
-                        alias=self.langchain_connection_alias,
-                        host=self.host,
-                        port=self.port,
-                        timeout=10.0,
-                    )
-        except Exception as e:
-            logger.warning(f"Failed to ensure Milvus connections: {e}")
-            # Mark as unavailable if connection fails
+        # Use connection manager with circuit breaker
+        if self._connection_manager.ensure_connection():
+            self.milvus_available = True
+        else:
             self.milvus_available = False
+        
+        # Ensure LangChain connection if needed
+        if hasattr(self, 'langchain_connection_alias') and self.langchain_connection_alias != self.connection_alias:
+            self._langchain_connection_manager.ensure_connection()
     
     def health_check(self) -> Dict[str, Any]:
         """
@@ -649,152 +708,215 @@ class MilvusVectorStore:
         
         return health_status
     
-    def _get_or_create_collection(self) -> Collection:
-        """Get existing collection or create new one"""
-        max_retries = 2
+    def _exponential_backoff_retry(self, func, max_retries: int = 3, base_delay: float = 0.1):
+        """
+        Execute function with exponential backoff retry strategy.
+        Industry-standard retry pattern with exponential delay.
+        """
+        last_exception = None
         for attempt in range(max_retries):
             try:
-                # Ensure connection is alive right before checking collection
-                # This prevents closed channel errors that can occur between operations
-                self._ensure_connection()
+                return func()
+            except Exception as e:
+                last_exception = e
+                error_msg = str(e).lower()
+                error_type = type(e).__name__
                 
-                # Check if collection exists - this can fail if RPC channel is closed
-                collection_exists = False
-                try:
-                    collection_exists = utility.has_collection(self.collection_name)
-                except (ValueError, Exception) as check_error:
-                    error_msg = str(check_error).lower()
-                    error_type = type(check_error).__name__
-                    # Check for gRPC channel errors - these can be ValueError or other exceptions
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg or
-                        (error_type == "ValueError" and "channel" in error_msg)
-                    )
+                # Check for gRPC channel errors
+                is_channel_error = (
+                    "closed channel" in error_msg or 
+                    "rpc" in error_msg or 
+                    "cannot invoke" in error_msg or
+                    "channel closed" in error_msg or
+                    (error_type == "ValueError" and "channel" in error_msg) or
+                    "connectionnotexistexception" in error_msg or
+                    "should create connection first" in error_msg
+                )
+                
+                if is_channel_error and attempt < max_retries - 1:
+                    # Exponential backoff: delay = base_delay * (2 ^ attempt)
+                    delay = base_delay * (2 ** attempt)
+                    logger.debug(f"Channel error (attempt {attempt + 1}/{max_retries}), retrying after {delay:.2f}s: {e}")
+                    time.sleep(delay)
                     
-                    if is_channel_error:
-                        # Connection channel was closed, reconnect and retry
-                        logger.debug(f"gRPC channel error during has_collection check (attempt {attempt + 1}/{max_retries}): {check_error}")
-                        if attempt < max_retries - 1:
-                            # Reconnect and retry
-                            try:
-                                if connections.has_connection(self.connection_alias):
-                                    connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            
-                            connections.connect(
-                                alias=self.connection_alias,
-                                host=self.host,
-                                port=self.port,
-                                timeout=10.0,
-                            )
-                            logger.debug(f"Reconnected to Milvus, retrying collection check...")
-                            continue  # Retry the has_collection check
-                        else:
-                            # Last attempt failed, try to get collection anyway (might exist)
-                            logger.debug(f"Failed to check collection existence after {max_retries} attempts, attempting to get collection directly")
-                            collection_exists = None  # Unknown state, try to get it
-                    else:
-                        # Other error, re-raise
-                        raise
+                    # Reconnect before retry
+                    with self._connection_lock:
+                        self._connection_manager.reconnect()
+                    continue
+                else:
+                    # Not a channel error or last attempt
+                    if attempt < max_retries - 1:
+                        logger.debug(f"Non-channel error (attempt {attempt + 1}/{max_retries}): {e}")
+                    raise
+        
+        # All retries exhausted
+        if last_exception:
+            raise last_exception
+    
+    def _get_or_create_collection(self) -> Collection:
+        """Get existing collection or create new one (with exponential backoff retry)"""
+        def _get_collection():
+            # Ensure connection is alive right before checking collection
+            self._ensure_connection()
+            
+            if not self.milvus_available:
+                raise RuntimeError("Milvus connection not available")
                 
-                # If we know the collection exists, use it
-                if collection_exists is True:
+            # Check if collection exists
+            collection_exists = False
+            try:
+                collection_exists = utility.has_collection(self.collection_name)
+            except (ValueError, Exception) as check_error:
+                error_msg = str(check_error).lower()
+                error_type = type(check_error).__name__
+                # Check for gRPC channel errors
+                is_channel_error = (
+                    "closed channel" in error_msg or 
+                    "rpc" in error_msg or 
+                    "cannot invoke" in error_msg or
+                    "channel closed" in error_msg or
+                    (error_type == "ValueError" and "channel" in error_msg) or
+                    "connectionnotexistexception" in error_msg or
+                    "should create connection first" in error_msg
+                )
+                
+                if is_channel_error:
+                    # Re-raise to trigger exponential backoff retry
+                    raise
+                else:
+                    # Other error, try to get collection anyway (might exist)
+                    collection_exists = None  # Unknown state
+            
+            # If we know the collection exists, use it
+            if collection_exists is True:
+                collection = Collection(self.collection_name)
+                logger.info(f"Using existing collection: {self.collection_name}")
+            elif collection_exists is False:
+                # Collection doesn't exist, create it
+                collection = self._create_collection()
+                logger.info(f"Created new collection: {self.collection_name}")
+            else:
+                # Unknown state (collection_exists is None), try to get it
+                try:
                     collection = Collection(self.collection_name)
-                    logger.info(f"Using existing collection: {self.collection_name}")
-                elif collection_exists is False:
+                    logger.info(f"Using existing collection: {self.collection_name} (existence check failed, but collection accessible)")
+                except Exception as get_error:
                     # Collection doesn't exist, create it
+                    logger.info(f"Collection not accessible, creating new one: {get_error}")
                     collection = self._create_collection()
                     logger.info(f"Created new collection: {self.collection_name}")
-                else:
-                    # Unknown state (collection_exists is None), try to get it
-                    try:
-                        collection = Collection(self.collection_name)
-                        logger.info(f"Using existing collection: {self.collection_name} (existence check failed, but collection accessible)")
-                    except Exception as get_error:
-                        # Collection doesn't exist, create it
-                        logger.info(f"Collection not accessible, creating new one: {get_error}")
-                        collection = self._create_collection()
-                        logger.info(f"Created new collection: {self.collection_name}")
-                
-                # Load collection into memory
-                try:
-                    collection.load()
-                except (ValueError, Exception) as load_error:
-                    error_msg = str(load_error).lower()
-                    error_type = type(load_error).__name__
-                    # Check for gRPC channel errors
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg or
-                        (error_type == "ValueError" and "channel" in error_msg)
-                    )
-                    
-                    if is_channel_error:
-                        # Connection closed during load, reconnect and retry
-                        if attempt < max_retries - 1:
-                            logger.debug(f"gRPC channel error during collection.load() (attempt {attempt + 1}/{max_retries}), reconnecting...")
-                            try:
-                                if connections.has_connection(self.connection_alias):
-                                    connections.disconnect(self.connection_alias)
-                            except Exception:
-                                pass
-                            
-                            connections.connect(
-                                alias=self.connection_alias,
-                                host=self.host,
-                                port=self.port,
-                                timeout=10.0,
-                            )
-                            # Re-get the collection after reconnection
-                            collection = Collection(self.collection_name)
-                            collection.load()
-                        else:
-                            raise
-                    else:
-                        raise
-                
-                return collection
             
-            except (ValueError, Exception) as e:
-                if attempt < max_retries - 1:
-                    error_msg = str(e).lower()
-                    error_type = type(e).__name__
-                    # Check for gRPC channel errors
-                    is_channel_error = (
-                        "closed channel" in error_msg or 
-                        "rpc" in error_msg or 
-                        "cannot invoke" in error_msg or
-                        "channel closed" in error_msg or
-                        (error_type == "ValueError" and "channel" in error_msg)
-                    )
-                    
-                    if is_channel_error:
-                        logger.debug(f"gRPC channel error during collection operation (attempt {attempt + 1}/{max_retries}): {e}")
-                        # Reconnect and retry
-                        try:
-                            if connections.has_connection(self.connection_alias):
-                                connections.disconnect(self.connection_alias)
-                        except Exception:
-                            pass
-                        
-                        connections.connect(
-                            alias=self.connection_alias,
-                            host=self.host,
-                            port=self.port,
-                            timeout=10.0,
-                        )
-                        logger.info(f"Reconnected to Milvus, retrying collection operation...")
-                        continue
-                
-                # Last attempt or non-recoverable error
-                logger.error(f"Failed to get/create collection after {attempt + 1} attempts: {e}", exc_info=True)
-                raise
+            # Don't load collection at init - use lazy loading on first access
+            # This prevents blocking startup and connection issues
+            logger.info(f"Collection '{self.collection_name}' ready (lazy loading enabled)")
+            
+            return collection
+    
+    def _ensure_collection_loaded(self, collection: Collection) -> bool:
+        """
+        Ensure collection is loaded (lazy loading pattern).
+        Checks loading state first to avoid redundant loads.
+        Returns True if loaded, False if failed.
+        """
+        try:
+            # Check if collection is already loaded (optimization: avoid redundant loads)
+            try:
+                # Check loading progress - if already loaded, this returns quickly
+                progress = utility.loading_progress(self.collection_name)
+                if progress.get("loading_progress", 0) == 100:
+                    logger.debug(f"Collection '{self.collection_name}' already loaded")
+                    return True
+            except Exception:
+                # Progress check failed, try to load anyway
+                pass
+            
+            # Verify connection is alive before loading
+            self._ensure_connection()
+            if not self.milvus_available:
+                logger.warning(f"Cannot load collection '{self.collection_name}': connection unavailable")
+                return False
+            
+            # Load collection with timeout in background thread
+            return self._load_collection_with_timeout(collection, timeout=15.0)
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            is_channel_error = (
+                "closed channel" in error_msg or 
+                "rpc" in error_msg or 
+                "cannot invoke" in error_msg
+            )
+            
+            if is_channel_error:
+                # Connection issue - try to reconnect
+                logger.warning(f"Channel error detected, attempting reconnection for '{self.collection_name}'")
+                if self.connection_manager.reconnect():
+                    # Retry loading after reconnection
+                    return self._load_collection_with_timeout(collection, timeout=15.0)
+            
+            logger.warning(f"Failed to ensure collection loaded: {e}")
+            return False
+    
+    def _load_collection_with_timeout(self, collection: Collection, timeout: float = 15.0) -> bool:
+        """
+        Load collection with timeout and proper error handling.
+        Uses threading to enforce timeout since collection.load() is blocking.
+        Returns True if successful, False otherwise.
+        """
+        import queue
+        
+        result_queue = queue.Queue()
+        error_queue = queue.Queue()
+        
+        def load_collection():
+            try:
+                # Use load with specific fields if possible (optimization)
+                # For now, use standard load - can be optimized later with load_fields
+                collection.load()
+                result_queue.put(True)
+            except Exception as e:
+                error_queue.put(e)
+        
+        # Run loading in background thread with timeout
+        load_thread = threading.Thread(target=load_collection, daemon=True)
+        load_thread.start()
+        load_thread.join(timeout=timeout)
+        
+        if load_thread.is_alive():
+            # Thread is still running = timeout
+            logger.warning(
+                f"Collection loading timed out after {timeout}s for '{self.collection_name}'. "
+                "Will retry on next access."
+            )
+            return False
+        
+        # Check for errors
+        if not error_queue.empty():
+            error = error_queue.get()
+            error_msg = str(error).lower()
+            # Check for channel errors that we can recover from
+            is_channel_error = (
+                "closed channel" in error_msg or 
+                "rpc" in error_msg or 
+                "cannot invoke" in error_msg or
+                "channel closed" in error_msg
+            )
+            
+            if is_channel_error:
+                logger.warning(
+                    f"Collection loading failed due to channel error for '{self.collection_name}': {error}"
+                )
+                # Trigger reconnection attempt
+                self.connection_manager.reconnect()
+            else:
+                logger.warning(
+                    f"Collection loading failed for '{self.collection_name}': {error}"
+                )
+            return False
+        
+        # Success
+        logger.debug(f"Collection '{self.collection_name}' loaded successfully")
+        return True
     
     def _create_collection(self) -> Collection:
         """Create new Milvus collection with schema"""
@@ -890,7 +1012,17 @@ class MilvusVectorStore:
         # Ensure connection is alive before searching
         self._ensure_connection()
         
-        try:
+        if not self.milvus_available:
+            # Fallback to in-memory
+            if not hasattr(self, '_memory_docs'):
+                self._memory_docs = []
+            return self._memory_docs[:k]
+        
+        # Lazy load collection on first use (optimization: don't block startup)
+        if self.collection:
+            self._ensure_collection_loaded(self.collection)
+        
+        def _search():
             results = []
             if self.langchain_store:
                 results = self.langchain_store.similarity_search(
@@ -910,36 +1042,24 @@ class MilvusVectorStore:
                 return []
             
             return results
+        
+        try:
+            results = self._exponential_backoff_retry(_search, max_retries=2, base_delay=0.1)
+            # Record success for circuit breaker
+            self._connection_manager._record_success()
+            return results
         except Exception as e:
             error_msg = str(e).lower()
+            # Record failure for circuit breaker
+            self._connection_manager._record_failure()
+            
             # Check if it's an empty collection error (not a connection error)
             if "empty" in error_msg or "no entities" in error_msg or "collection is empty" in error_msg:
                 logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
                 return []
             
-            logger.error(f"Similarity search failed: {e}", exc_info=True)
-            # Try to reconnect and retry once
-            try:
-                self._ensure_connection()
-                if self.langchain_store:
-                    results = self.langchain_store.similarity_search(
-                        query=query,
-                        k=k,
-                        filter=filter,
-                        **kwargs
-                    )
-                    if not results:
-                        logger.debug(f"No documents found in collection '{self.collection_name}' after retry")
-                        return []
-                    return results
-            except Exception as retry_error:
-                retry_error_msg = str(retry_error).lower()
-                if "empty" in retry_error_msg or "no entities" in retry_error_msg:
-                    logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
-                    return []
-                logger.error(f"Similarity search retry failed: {retry_error}")
+            logger.error(f"Similarity search failed: {e}")
             # Fallback to in-memory
-            # Ensure _memory_docs exists (safety check)
             if not hasattr(self, '_memory_docs'):
                 self._memory_docs = []
             return self._memory_docs[:k]
@@ -963,7 +1083,13 @@ class MilvusVectorStore:
         # Ensure connection is alive before searching
         self._ensure_connection()
         
-        try:
+        if not self.milvus_available:
+            # Fallback to in-memory
+            if not hasattr(self, '_memory_docs'):
+                self._memory_docs = []
+            return self._memory_docs[:k]
+        
+        async def _async_search():
             results = []
             if self.langchain_store and hasattr(self.langchain_store, 'asimilarity_search'):
                 results = await self.langchain_store.asimilarity_search(
@@ -992,36 +1118,68 @@ class MilvusVectorStore:
                 return []
             
             return results
-        except Exception as e:
-            error_msg = str(e).lower()
-            # Check if it's an empty collection error (not a connection error)
-            if "empty" in error_msg or "no entities" in error_msg or "collection is empty" in error_msg:
-                logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
-                return []
+        
+        try:
+            # For async, we need to handle retries differently
+            import asyncio
+            max_retries = 2
+            last_exception = None
             
-            logger.error(f"Async similarity search failed: {e}", exc_info=True)
-            # Try to reconnect and retry once
-            try:
-                self._ensure_connection()
-                if self.langchain_store and hasattr(self.langchain_store, 'asimilarity_search'):
-                    results = await self.langchain_store.asimilarity_search(
-                        query=query,
-                        k=k,
-                        filter=filter,
-                        **kwargs
-                    )
-                    if not results:
-                        logger.debug(f"No documents found in collection '{self.collection_name}' after retry")
-                        return []
+            for attempt in range(max_retries):
+                try:
+                    results = await _async_search()
+                    # Record success for circuit breaker
+                    self._connection_manager._record_success()
                     return results
-            except Exception as retry_error:
-                retry_error_msg = str(retry_error).lower()
-                if "empty" in retry_error_msg or "no entities" in retry_error_msg:
-                    logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
-                    return []
-                logger.error(f"Async similarity search retry failed: {retry_error}")
+                except Exception as e:
+                    last_exception = e
+                    error_msg = str(e).lower()
+                    error_type = type(e).__name__
+                    
+                    # Check if it's an empty collection error
+                    if "empty" in error_msg or "no entities" in error_msg or "collection is empty" in error_msg:
+                        logger.debug(f"Collection '{self.collection_name}' is empty - no documents indexed yet")
+                        return []
+                    
+                    # Check for gRPC channel errors
+                    is_channel_error = (
+                        "closed channel" in error_msg or 
+                        "rpc" in error_msg or 
+                        "cannot invoke" in error_msg or
+                        "channel closed" in error_msg or
+                        (error_type == "ValueError" and "channel" in error_msg) or
+                        "connectionnotexistexception" in error_msg or
+                        "should create connection first" in error_msg
+                    )
+                    
+                    if is_channel_error and attempt < max_retries - 1:
+                        # Exponential backoff
+                        delay = 0.1 * (2 ** attempt)
+                        logger.debug(f"Channel error during async search (attempt {attempt + 1}/{max_retries}), retrying after {delay:.2f}s")
+                        await asyncio.sleep(delay)
+                        
+                        # Reconnect
+                        with self._connection_lock:
+                            self._connection_manager.reconnect()
+                        continue
+                    else:
+                        # Not a channel error or last attempt
+                        break
+            
+            # All retries exhausted
+            self._connection_manager._record_failure()
+            if last_exception:
+                logger.error(f"Async similarity search failed after {max_retries} attempts: {last_exception}")
             # Fallback to in-memory
-            # Ensure _memory_docs exists (safety check)
+            if not hasattr(self, '_memory_docs'):
+                self._memory_docs = []
+            return self._memory_docs[:k]
+        except Exception as e:
+            self._connection_manager._record_failure()
+            error_msg = str(e).lower()
+            if "empty" in error_msg or "no entities" in error_msg:
+                return []
+            logger.error(f"Async similarity search failed: {e}")
             if not hasattr(self, '_memory_docs'):
                 self._memory_docs = []
             return self._memory_docs[:k]

@@ -6,6 +6,7 @@ from .routes.challenge import router as challenge_router
 from .routes.company_automation_api import router as company_automation_router
 from .routes.universal_rag_api import router as universal_rag_router
 from .routes.document_indexing_api import router as document_indexing_router
+from .routes.collection_management_api import router as collection_management_router
 from .routes.language_intelligence_api import router as language_intelligence_router
 from .routes.document_extraction_api import router as document_extraction_router
 from .settings import settings
@@ -221,7 +222,7 @@ async def health():
             redis_url,
             db=settings.REDIS_DB,
             decode_responses=True,
-            socket_connect_timeout=2.0
+            socket_connect_timeout=5.0
         )
         await redis_client.ping()
         await redis_client.close()
@@ -422,6 +423,7 @@ app.include_router(company_automation_router, tags=["company-automation"])
 app.include_router(universal_rag_router, tags=["universal-rag"])
 app.include_router(vendor_fraud_router, tags=["vendor-fraud"])
 app.include_router(document_indexing_router, tags=["document-indexing"])
+app.include_router(collection_management_router, tags=["collection-management"])
 app.include_router(agent_playground_router, tags=["agent-playground"])
 app.include_router(workflow_router, tags=["workflow"])
 app.include_router(cyrex_guard_router, tags=["cyrex-guard"])
