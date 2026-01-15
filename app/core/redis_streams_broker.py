@@ -128,7 +128,8 @@ class RedisStreamsBroker:
             if self.redis_url:
                 self._redis = await aioredis.from_url(
                     self.redis_url,
-                    decode_responses=True
+                    decode_responses=True,
+                    socket_connect_timeout=5.0
                 )
             else:
                 self._redis = aioredis.Redis(
@@ -137,6 +138,7 @@ class RedisStreamsBroker:
                     password=settings.REDIS_PASSWORD,
                     db=settings.REDIS_DB,
                     decode_responses=True,
+                    socket_connect_timeout=5.0,
                 )
             
             # Test connection

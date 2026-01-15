@@ -4,10 +4,12 @@
 # Build args to control build type
 ARG BUILD_TYPE=prebuilt
 ARG PYTORCH_VERSION=2.9.1
-ARG CUDA_VERSION=12.1
+ARG CUDA_VERSION=12.8
 ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
-
+## Use CUDA 12.8 base image for RTX 5080/5090 (sm_120) support
+# If official PyTorch image doesn't exist, fallback to CUDA 12.6 and upgrade PyTorch
+ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+# ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
 # =============================================================================
 # OPTION 1: PREBUILT (Fast, Reliable, Larger) - DEFAULT
 # =============================================================================
@@ -24,6 +26,17 @@ ENV BUILD_TYPE=prebuilt \
 
 # Upgrade pip first for better package resolution
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Check if PyTorch with CUDA 12.8 is already installed (from CUDA 12.8 base image)
+# If not, upgrade to CUDA 12.8 for RTX 5080/5090 (sm_120) compatibility
+RUN python -c "import torch; cuda_ver = torch.version.cuda; exit(0 if cuda_ver and (cuda_ver.startswith('12.8') or float(cuda_ver.split('.')[0] + '.' + cuda_ver.split('.')[1]) >= 12.8) else 1)" 2>/dev/null || \
+    (echo "Upgrading PyTorch to CUDA 12.8 support (supports sm_50 through sm_120)..." && \
+     pip uninstall -y torch torchvision torchaudio 2>/dev/null || true && \
+     pip install --no-cache-dir --upgrade-strategy=only-if-needed \
+         --pre torch torchvision torchaudio \
+         --index-url https://download.pytorch.org/whl/nightly/cu128 && \
+     echo "✓ PyTorch with CUDA 12.8 installed successfully") || \
+    echo "✓ PyTorch with CUDA 12.8 already installed in base image"
 
 # If PyTorch is not already installed (e.g., using python:3.11-slim for CPU), install it
 # If using pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime (GPU build), PyTorch is already installed
@@ -294,6 +307,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
         asyncpg>=0.29.0 \
+        watchdog>=3.0.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
@@ -314,6 +328,14 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
     (echo "❌ ERROR: Failed to install critical LangChain packages" && \
      pip list | grep -E "langchain|ollama" && \
      exit 1)
+
+# Install LangGraph packages (required for multi-agent workflows)
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+        langgraph>=0.2.0,<0.3.0 \
+        langgraph-checkpoint-redis>=0.2.0 || \
+    (echo "⚠️  WARNING: LangGraph packages installation failed (optional), continuing..." && \
+     pip list | grep -E "langgraph" || echo "LangGraph not installed") && \
+    echo "✓ LangGraph packages installation completed"
 
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \
@@ -510,6 +532,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
         asyncpg>=0.29.0 \
+        watchdog>=3.0.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
@@ -530,6 +553,14 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
     (echo "❌ ERROR: Failed to install critical LangChain packages" && \
      pip list | grep -E "langchain|ollama" && \
      exit 1)
+
+# Install LangGraph packages (required for multi-agent workflows)
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+        langgraph>=0.2.0,<0.3.0 \
+        langgraph-checkpoint-redis>=0.2.0 || \
+    (echo "⚠️  WARNING: LangGraph packages installation failed (optional), continuing..." && \
+     pip list | grep -E "langgraph" || echo "LangGraph not installed") && \
+    echo "✓ LangGraph packages installation completed"
 
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \

@@ -13,9 +13,9 @@ echo "🔍 Detecting GPU capabilities..."
 BASE_IMAGE=$(bash "$SCRIPT_DIR/detect_gpu.sh")
 
 echo "📦 Using base image: $BASE_IMAGE"
-echo "🔨 Building Docker image..."
+echo "🔨 Building Docker image with CUDA 12.8 support (automatic RTX 5080/5090 compatibility)..."
 
-# Build with detected base image
+# Build with detected base image (CUDA 12.8 is now automatic)
 docker build \
     --build-arg BASE_IMAGE="$BASE_IMAGE" \
     --file "$SCRIPT_DIR/$DOCKERFILE" \

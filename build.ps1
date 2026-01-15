@@ -14,9 +14,9 @@ Write-Host "🔍 Detecting GPU capabilities..." -ForegroundColor Cyan
 $BaseImage = & "$ScriptDir\detect_gpu.ps1"
 
 Write-Host "📦 Using base image: $BaseImage" -ForegroundColor Green
-Write-Host "🔨 Building Docker image..." -ForegroundColor Cyan
+Write-Host "🔨 Building Docker image with CUDA 12.8 support (automatic RTX 5080/5090 compatibility)..." -ForegroundColor Cyan
 
-# Build with detected base image
+# Build with detected base image (CUDA 12.8 is now automatic)
 docker build `
     --build-arg BASE_IMAGE="$BaseImage" `
     --file "$ScriptDir\$Dockerfile" `

@@ -414,12 +414,12 @@ async def list_available_models() -> Dict[str, Any]:
     try:
         ollama = await get_ollama_client()
         
-        # Try to connect if not connected, but don't fail if it times out
+        # If already connected, skip connection check and go straight to listing models
         connection_ok = ollama.is_connected
         if not connection_ok:
             try:
-                # Try quick connection with timeout
-                connection_ok = await asyncio.wait_for(ollama.connect(), timeout=5.0)
+                # Try quick connection with timeout (only if not connected)
+                connection_ok = await asyncio.wait_for(ollama.connect(), timeout=3.0)
                 logger.info(f"Ollama connection attempt: {connection_ok}")
             except asyncio.TimeoutError:
                 logger.debug("Connection attempt timed out, but will try to list models anyway")
@@ -428,18 +428,18 @@ async def list_available_models() -> Dict[str, Any]:
                 logger.debug(f"Connection attempt failed: {connect_err}, but will try to list models anyway")
                 connection_ok = False
         
-        # Try to get models even if connection check failed
-        # (Ollama might be working but health check is slow)
+        # Try to get models - list_models() uses parallel URL checks with 5s timeout per URL
+        # Parallel execution means total time is ~5s max (not 5s * number of URLs)
         models = []
         try:
-            # Use a timeout for listing models too
-            models = await asyncio.wait_for(ollama.list_models(), timeout=10.0)
+            # list_models() uses parallel checks with 5s timeout, so 8s here gives buffer
+            models = await asyncio.wait_for(ollama.list_models(), timeout=8.0)
             # If we got models, we're definitely connected
             if models:
                 connection_ok = True
                 logger.info(f"Successfully listed {len(models)} models from Ollama")
         except asyncio.TimeoutError:
-            logger.warning("Model listing timed out")
+            logger.warning("Model listing timed out at endpoint level")
             # If we have cached models, use those
             if ollama.available_models:
                 models = ollama.available_models

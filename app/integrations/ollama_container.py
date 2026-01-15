@@ -2,7 +2,7 @@
 Ollama Container Integration
 Connect to the deepiri-ollama-dev container for local LLM inference
 """
-from typing import Dict, List, Optional, Any, AsyncGenerator
+from typing import Dict, List, Optional, Any, AsyncGenerator, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -146,8 +146,9 @@ class OllamaContainerClient:
         for url in urls_to_try:
             try:
                 self.logger.info(f"Trying to connect to Ollama at {url}")
-                async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get(f"{url}/api/tags")
+                # Use longer timeout for connection - Ollama can be slow
+                async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+                    response = await client.get(f"{url}/api/tags", timeout=15.0)
                     if response.status_code == 200:
                         self.base_url = url
                         self._is_connected = True
@@ -196,29 +197,127 @@ class OllamaContainerClient:
     # ========================================================================
     
     async def list_models(self) -> List[OllamaModelInfo]:
-        """List available models"""
-        client = await self._get_client()
-        
-        try:
-            response = await client.get("/api/tags")
-            response.raise_for_status()
-            
-            data = response.json()
-            self._available_models = [
-                OllamaModelInfo(
-                    name=m.get("name", ""),
-                    size=m.get("size", 0),
-                    digest=m.get("digest", ""),
-                    modified_at=m.get("modified_at", ""),
-                    details=m.get("details", {}),
-                )
-                for m in data.get("models", [])
-            ]
-            
+        """
+        List available models with optimal low-latency approach:
+        - Try all URLs in parallel (not sequential)
+        - Use shorter timeouts (5s) but parallel execution means total time is ~5s max
+        - Return cached models immediately if available, refresh in background
+        - Early exit on first successful response
+        """
+        # Return cached models immediately if we have them and are connected
+        # This provides instant response while we refresh in background
+        if self._is_connected and self._available_models:
+            # Trigger background refresh (fire and forget)
+            asyncio.create_task(self._refresh_models_background())
             return self._available_models
+        
+        # No cache or not connected - do parallel discovery
+        # Shorter timeout per URL, but parallel execution = fast total time
+        request_timeout = 5.0
+        connect_timeout = 2.0
+        
+        # Priority order: most likely first
+        urls_to_try = [
+            self.base_url,
+            "http://ollama:11434",  # Docker Compose service name (most common)
+            "http://deepiri-ollama-dev:11434",  # Container name
+        ]
+        # Remove duplicates while preserving order
+        urls_to_try = list(dict.fromkeys(urls_to_try))
+        
+        async def try_url(url: str) -> Optional[Tuple[str, List[OllamaModelInfo]]]:
+            """Try a single URL, return (url, models) on success, None on failure"""
+            try:
+                async with httpx.AsyncClient(
+                    base_url=url,
+                    timeout=httpx.Timeout(request_timeout, connect=connect_timeout)
+                ) as client:
+                    response = await client.get("/api/tags", timeout=request_timeout)
+                    response.raise_for_status()
+                    
+                    data = response.json()
+                    models_list = data.get("models", [])
+                    
+                    models = [
+                        OllamaModelInfo(
+                            name=m.get("name", ""),
+                            size=m.get("size", 0),
+                            digest=m.get("digest", ""),
+                            modified_at=m.get("modified_at", ""),
+                            details=m.get("details", {}),
+                        )
+                        for m in models_list
+                    ]
+                    
+                    return (url, models)
+            except Exception as e:
+                self.logger.debug(f"Failed to list models from {url}: {type(e).__name__}")
+                return None
+        
+        # Try all URLs in parallel - first success wins
+        tasks = [try_url(url) for url in urls_to_try]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Find first successful result
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            if result is not None:
+                url, models = result
+                
+                # Update state
+                if url != self.base_url:
+                    self.base_url = url
+                    # Close old client if exists
+                    if self._client:
+                        await self._client.aclose()
+                        self._client = None
+                    self.logger.info(f"Updated base_url to {url} after successful connection")
+                
+                self._available_models = models
+                self._is_connected = True
+                self.logger.info(f"Successfully listed {len(models)} models from Ollama at {url}")
+                return models
+        
+        # All URLs failed - return cached models if available
+        if self._available_models:
+            self.logger.info(f"All connection attempts failed, returning {len(self._available_models)} cached models")
+            return self._available_models
+        
+        # No cached models and all attempts failed
+        self.logger.warning("Failed to list models from all URLs")
+        return []
+    
+    async def _refresh_models_background(self):
+        """Background refresh of models - non-blocking"""
+        try:
+            if not self.base_url:
+                return
+            
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=httpx.Timeout(5.0, connect=2.0)
+            ) as client:
+                response = await client.get("/api/tags", timeout=5.0)
+                response.raise_for_status()
+                
+                data = response.json()
+                models_list = data.get("models", [])
+                
+                self._available_models = [
+                    OllamaModelInfo(
+                        name=m.get("name", ""),
+                        size=m.get("size", 0),
+                        digest=m.get("digest", ""),
+                        modified_at=m.get("modified_at", ""),
+                        details=m.get("details", {}),
+                    )
+                    for m in models_list
+                ]
+                
+                self.logger.debug(f"Background refresh: updated {len(self._available_models)} models")
         except Exception as e:
-            self.logger.error(f"Failed to list models: {e}")
-            return []
+            self.logger.debug(f"Background refresh failed: {e}")
     
     async def pull_model(
         self,

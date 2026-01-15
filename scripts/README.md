@@ -1,38 +1,83 @@
 # Scripts Directory
 
-Utility scripts for diri-cyrex service.
+Utility scripts for diri-cyrex service, organized by category.
 
-## Available Scripts
+## 📁 Directory Structure
 
-### `run_tests.py`
-Master test runner with interactive CLI for running tests.
-
-**Usage:**
-```bash
-# Interactive mode
-python3 scripts/run_tests.py
-
-# Run all tests
-python3 scripts/run_tests.py --category all
-
-# List available tests
-python3 scripts/run_tests.py --list
+```
+scripts/
+├── gpu/          # GPU configuration and setup scripts
+├── llm/          # LLM/Ollama management scripts
+├── dev/          # Development tools and utilities
+└── docs/         # Documentation and guides
 ```
 
-See [tests/TEST_RUNNER_GUIDE.md](../tests/TEST_RUNNER_GUIDE.md) for complete documentation.
+## 🚀 Quick Start
 
-### `install-git-hooks.sh`
-Installs Git hooks for branch protection.
+### GPU Setup
+- **NVIDIA (Linux/WSL)**: `gpu/install-nvidia-container-toolkit.sh`
+- **Apple Silicon (macOS - MPS)**: `gpu/configure-mps-macos.sh`
 
-### `setup_local_model.sh`
-Sets up local LLM models (Ollama, etc.).
+### LLM Setup
+- **Install Ollama**: `llm/install-local-llm.sh`
+- **Check Models**: `llm/check-ollama-models.sh`
+- **Test Connection**: `llm/test-ollama-connection.sh`
 
-## Running Scripts
+### Development
+- **Run Tests**: `dev/run_tests.py`
+- **Install Git Hooks**: `dev/install-git-hooks.sh`
+
+## 📚 Documentation
+
+See `docs/README.md` for detailed documentation and guides.
+
+## 🔧 Categories
+
+### `gpu/` - GPU Configuration
+Scripts for configuring GPU acceleration:
+- NVIDIA Container Toolkit installation (Linux/WSL)
+- MPS (Metal Performance Shaders) setup (macOS)
+- GPU detection and testing
+
+### `llm/` - LLM Management
+Scripts for managing local LLMs (Ollama, etc.):
+- Ollama installation and setup
+- Model management and checking
+- Connection testing
+- Docker integration
+
+### `dev/` - Development Tools
+Development and testing utilities:
+- Test runners
+- Git hooks installation
+- Integration checks
+
+### `docs/` - Documentation
+Guides and documentation:
+- Setup guides
+- Troubleshooting
+- Quick reference
+
+## 💡 Usage
 
 All scripts should be run from the project root directory:
 
 ```bash
-cd deepiri/diri-cyrex
-python3 scripts/run_tests.py
+# Example: Install NVIDIA Container Toolkit
+cd deepiri-platform/diri-cyrex
+bash scripts/gpu/install-nvidia-container-toolkit.sh
+
+# Example: Check Ollama models
+bash scripts/llm/check-ollama-models.sh
+
+# Example: Run tests
+python3 scripts/dev/run_tests.py
 ```
 
+## 📝 Notes
+
+- **Windows Users**: Most scripts are bash-based. Use WSL2 or Git Bash.
+- **macOS Users**: Use the MPS configuration script for Apple Silicon GPU support.
+- **Linux Users**: Use NVIDIA Container Toolkit script for GPU support in Docker.
+
+For detailed information about each script, see the README in each subdirectory.

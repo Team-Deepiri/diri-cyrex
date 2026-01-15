@@ -52,8 +52,12 @@ class MemoryManager:
         """)
         
         # Initialize vector store for semantic search
+        # get_milvus_store is synchronous, so we run it in a thread to avoid blocking
         try:
-            self.vector_store = await get_milvus_store(collection_name="cyrex_memories")
+            self.vector_store = await asyncio.to_thread(
+                get_milvus_store,
+                collection_name="cyrex_memories"
+            )
         except Exception as e:
             self.logger.warning(f"Vector store not available for memory search: {e}")
         

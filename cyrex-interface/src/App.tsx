@@ -1585,11 +1585,11 @@ export default function App() {
             <WorkflowPlayground />
           )}
 
-          {/* Testing Tab */}
+          {/* Infrastructure Suite Tab */}
           {activeTab === 'testing' && (
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Test Runner</h2>
+                <h2 style={{ margin: 0, fontSize: '2rem', fontWeight: 600 }}>Infrastructure Suite</h2>
                 {renderConnectionPanel()}
               </div>
               
