@@ -5,7 +5,7 @@ REST API for full CRUD operations on Milvus vector store documents
 from fastapi import APIRouter, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
-from ..integrations.milvus_store import get_milvus_store
+from ..integrations.milvus import get_milvus_store
 from ..logging_config import get_logger, ErrorLogger
 
 router = APIRouter()
@@ -271,7 +271,7 @@ async def list_collections(request: Request = None):
     request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
 
     try:
-        from ..integrations.milvus_store import MilvusVectorStore
+        from ..integrations.milvus import MilvusVectorStore
 
         # List all collections
         collections = await MilvusVectorStore.alist_all_collections()
@@ -305,7 +305,7 @@ async def get_collection_info(collection_name: str, request: Request = None):
     request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
 
     try:
-        from ..integrations.milvus_store import MilvusVectorStore
+        from ..integrations.milvus import MilvusVectorStore
 
         # Get collection info
         info = await MilvusVectorStore.aget_collection_info(collection_name)
