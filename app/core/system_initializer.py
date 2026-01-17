@@ -27,6 +27,86 @@ class SystemInitializer:
         self.initialized = False
         self.logger = logger
     
+    async def _initialize_vector_collections(self):
+        """Initialize vector store collections for Language Intelligence Platform"""
+        try:
+            self.logger.info("Initializing vector store collections...")
+            import asyncio
+            from pymilvus import connections, utility
+            from ..settings import settings
+
+            # Wait for Milvus to be ready (with timeout)
+            max_wait = 30  # seconds
+            wait_interval = 2  # seconds
+            milvus_ready = False
+            init_alias = "collection_init"
+
+            self.logger.info(f"Waiting for Milvus to be ready at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}...")
+            for attempt in range(max_wait // wait_interval):
+                try:
+                    # Try to connect and verify Milvus is ready
+                    if not connections.has_connection(init_alias):
+                        connections.connect(alias=init_alias, host=settings.MILVUS_HOST, port=settings.MILVUS_PORT, timeout=5.0)
+                    # Try to list collections as a health check
+                    utility.list_collections(using=init_alias)
+                    milvus_ready = True
+                    self.logger.info(f"Milvus is ready (took {attempt * wait_interval}s)")
+                    break
+                except Exception as e:
+                    if attempt == 0:
+                        self.logger.info(f"Milvus not ready yet, waiting... ({e})")
+                    # Disconnect failed connection
+                    try:
+                        if connections.has_connection(init_alias):
+                            connections.disconnect(init_alias)
+                    except:
+                        pass
+                    await asyncio.sleep(wait_interval)
+
+            if not milvus_ready:
+                self.logger.warning(f"Milvus not available after {max_wait}s, skipping collection initialization")
+                return
+
+            # Create collections
+            from pymilvus import Collection
+            from ..integrations.milvus import get_default_collections, get_collection_schema, DEFAULT_INDEX_PARAMS
+
+            collections_to_create = get_default_collections()
+
+            created_count = 0
+
+            for collection_name in collections_to_create:
+                try:
+                    # Check if collection already exists
+                    if utility.has_collection(collection_name, using=init_alias):
+                        self.logger.info(f"Collection already exists: {collection_name}")
+                        created_count += 1
+                        continue
+
+                    # Create collection with schema from milvus module
+                    schema = get_collection_schema()
+                    collection = Collection(name=collection_name, schema=schema, using=init_alias)
+
+                    # Create index for vector search
+                    collection.create_index(field_name="embedding", index_params=DEFAULT_INDEX_PARAMS)
+
+                    created_count += 1
+                    self.logger.info(f"Created collection: {collection_name}")
+
+                except Exception as e:
+                    self.logger.warning(f"Could not create collection {collection_name}: {e}")
+
+            # Disconnect the initialization connection
+            try:
+                connections.disconnect(init_alias)
+            except:
+                pass
+
+            self.logger.info(f"Vector collections initialized: {created_count} collections ready")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to initialize vector collections: {e}")
+
     async def initialize_all(self):
         """Initialize all systems"""
         if self.initialized:
@@ -60,7 +140,8 @@ class SystemInitializer:
             from ..integrations.company_data_automation import get_automation_service
             await get_lora_service()
             await get_automation_service()
-            
+            # 5. Initialize vector store collections
+            await self._initialize_vector_collections()
             self.initialized = True
             self.logger.info("System initialization complete!")
             

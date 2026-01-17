@@ -403,6 +403,7 @@ from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
+from .routes.documents import router as documents_router
 
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
@@ -411,7 +412,7 @@ app.include_router(agent_router, prefix="/agent", tags=["agent"])
 app.include_router(challenge_router, prefix="/agent", tags=["challenge"])
 app.include_router(task_router, prefix="/agent", tags=["task"])
 app.include_router(personalization_router, prefix="/agent", tags=["personalization"])
-app.include_router(rag_router, prefix="/agent", tags=["rag"])
+app.include_router(rag_router, tags=["rag"])
 app.include_router(inference_router, prefix="/agent", tags=["inference"])
 app.include_router(bandit_router, prefix="/agent", tags=["bandit"])
 app.include_router(session_router, prefix="/agent", tags=["session"])
@@ -421,6 +422,7 @@ app.include_router(orchestration_router, tags=["orchestration"])
 app.include_router(testing_router, tags=["testing"])
 app.include_router(company_automation_router, tags=["company-automation"])
 app.include_router(universal_rag_router, tags=["universal-rag"])
+app.include_router(documents_router, tags=["documents"])
 app.include_router(vendor_fraud_router, tags=["vendor-fraud"])
 app.include_router(document_indexing_router, tags=["document-indexing"])
 app.include_router(collection_management_router, tags=["collection-management"])
@@ -429,6 +431,7 @@ app.include_router(workflow_router, tags=["workflow"])
 app.include_router(cyrex_guard_router, tags=["cyrex-guard"])
 app.include_router(language_intelligence_router, tags=["language-intelligence"])
 app.include_router(document_extraction_router, tags=["document-extraction"])
+
 
 
 if __name__ == "__main__":
