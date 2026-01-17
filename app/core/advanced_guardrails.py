@@ -149,6 +149,8 @@ class AdvancedGuardrails:
         ))
         
         # PII Detection
+        # Note: Email addresses are excluded as they are commonly shared in business contexts
+        # This policy was updated to allow email addresses in chat (2024-01-XX)
         self.add_policy(GuardrailPolicy(
             name="pii_detection",
             category=GuardrailCategory.DATA_PRIVACY,
@@ -157,7 +159,8 @@ class AdvancedGuardrails:
             patterns=[
                 r"\b\d{3}[-.]?\d{2}[-.]?\d{4}\b",  # SSN
                 r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",  # Credit card
-                r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",  # Email
+                # Email addresses removed - commonly shared in business contexts
+                # Users can now freely share email addresses like corporate@deepiri.com
                 r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",  # Phone
                 r"\b(?:password|passwd|pwd)\s*[:=]\s*\S+",  # Passwords
                 r"\b(?:api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*\S+",  # API keys
@@ -214,6 +217,13 @@ class AdvancedGuardrails:
             ]
         
         self.logger.info(f"Added guardrail policy: {policy.name}")
+    
+    def reload_policies(self):
+        """Reload all policies (useful for hot-reload scenarios)"""
+        self.policies.clear()
+        self._compiled_patterns.clear()
+        self._initialize_default_policies()
+        self.logger.info("Guardrail policies reloaded")
     
     def remove_policy(self, policy_name: str):
         """Remove a guardrail policy"""
@@ -460,15 +470,26 @@ class AdvancedGuardrails:
         for pattern in compiled:
             match = pattern.search(text)
             if match:
+                matched_text = match.group()
+                
+                # SAFEGUARD: Skip if match looks like an email address (even if pattern matches)
+                # This prevents false positives from old cached patterns or accidental matches
+                if '@' in matched_text and '.' in matched_text:
+                    self.logger.warning(
+                        f"Skipping email-like match in policy '{policy.name}': '{matched_text}' "
+                        f"(pattern: '{pattern.pattern}') - emails are allowed"
+                    )
+                    continue
+                
                 return GuardrailResult(
                     passed=False,
                     risk_level=policy.risk_threshold,
                     action=policy.action_on_violation,
                     category=policy.category,
-                    message=f"Pattern match: {match.group()}",
+                    message=f"Pattern match: {matched_text}",
                     details={
                         "policy": policy.name,
-                        "match": match.group(),
+                        "match": matched_text,
                         "position": match.start(),
                     },
                 )
@@ -523,10 +544,20 @@ class AdvancedGuardrails:
 _guardrails: Optional[AdvancedGuardrails] = None
 
 
-async def get_advanced_guardrails() -> AdvancedGuardrails:
-    """Get or create advanced guardrails singleton"""
+async def get_advanced_guardrails(force_reload: bool = False) -> AdvancedGuardrails:
+    """Get or create advanced guardrails singleton
+    
+    Args:
+        force_reload: If True, force re-initialization of the guardrails instance
+    """
     global _guardrails
-    if _guardrails is None:
+    if _guardrails is None or force_reload:
         _guardrails = AdvancedGuardrails()
     return _guardrails
+
+
+def reload_guardrails():
+    """Force reload of the guardrails singleton (useful for hot-reload scenarios)"""
+    global _guardrails
+    _guardrails = None
 

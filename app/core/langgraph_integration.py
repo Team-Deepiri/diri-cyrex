@@ -170,7 +170,7 @@ class LangGraphWorkflow:
         try:
             postgres = await get_postgres_manager()
             await postgres.execute("""
-                INSERT INTO langgraph_states (state_id, workflow_id, current_node, next_nodes, data, history, status, updated_at)
+                INSERT INTO cyrex.langgraph_states (state_id, workflow_id, current_node, next_nodes, data, history, status, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (state_id) DO UPDATE SET
                     current_node = EXCLUDED.current_node,
@@ -195,11 +195,12 @@ class LangGraphManager:
         self.logger = logger
     
     async def initialize(self):
-        """Initialize LangGraph manager and create database tables"""
+        """Initialize LangGraph manager and create database tables in cyrex schema"""
         # Create states table
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS langgraph_states (
+            CREATE TABLE IF NOT EXISTS cyrex.langgraph_states (
                 state_id VARCHAR(255) PRIMARY KEY,
                 workflow_id VARCHAR(255) NOT NULL,
                 current_node VARCHAR(255),
@@ -210,8 +211,8 @@ class LangGraphManager:
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_langgraph_workflow_id ON langgraph_states(workflow_id);
-            CREATE INDEX IF NOT EXISTS idx_langgraph_status ON langgraph_states(status);
+            CREATE INDEX IF NOT EXISTS idx_langgraph_workflow_id ON cyrex.langgraph_states(workflow_id);
+            CREATE INDEX IF NOT EXISTS idx_langgraph_status ON cyrex.langgraph_states(status);
         """)
         
         self.logger.info("LangGraph manager initialized")

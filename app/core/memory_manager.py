@@ -29,10 +29,11 @@ class MemoryManager:
     
     async def initialize(self):
         """Initialize memory manager and vector store"""
-        # Create memories table in PostgreSQL
+        # Create memories table in cyrex schema
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS memories (
+            CREATE TABLE IF NOT EXISTS cyrex.memories (
                 memory_id VARCHAR(255) PRIMARY KEY,
                 session_id VARCHAR(255),
                 user_id VARCHAR(255),
@@ -45,10 +46,10 @@ class MemoryManager:
                 created_at TIMESTAMP NOT NULL,
                 expires_at TIMESTAMP
             );
-            CREATE INDEX IF NOT EXISTS idx_memories_session_id ON memories(session_id);
-            CREATE INDEX IF NOT EXISTS idx_memories_user_id ON memories(user_id);
-            CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
-            CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_memories_session_id ON cyrex.memories(session_id);
+            CREATE INDEX IF NOT EXISTS idx_memories_user_id ON cyrex.memories(user_id);
+            CREATE INDEX IF NOT EXISTS idx_memories_type ON cyrex.memories(memory_type);
+            CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON cyrex.memories(expires_at);
         """)
         
         # Initialize vector store for semantic search
@@ -88,7 +89,7 @@ class MemoryManager:
             # Store in PostgreSQL
             postgres = await get_postgres_manager()
             await postgres.execute("""
-                INSERT INTO memories (memory_id, session_id, user_id, memory_type, content,
+                INSERT INTO cyrex.memories (memory_id, session_id, user_id, memory_type, content,
                                     metadata, importance, access_count, last_accessed, created_at, expires_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             """, memory.memory_id, memory.session_id, memory.user_id, memory.memory_type.value,
@@ -132,7 +133,7 @@ class MemoryManager:
         # Load from PostgreSQL
         postgres = await get_postgres_manager()
         row = await postgres.fetchrow(
-            "SELECT * FROM memories WHERE memory_id = $1", memory_id
+            "SELECT * FROM cyrex.memories WHERE memory_id = $1", memory_id
         )
         
         if row:
@@ -152,7 +153,7 @@ class MemoryManager:
             
             # Update access count
             await postgres.execute(
-                "UPDATE memories SET access_count = access_count + 1, last_accessed = $1 WHERE memory_id = $2",
+                "UPDATE cyrex.memories SET access_count = access_count + 1, last_accessed = $1 WHERE memory_id = $2",
                 datetime.utcnow(), memory_id
             )
             
@@ -204,7 +205,7 @@ class MemoryManager:
         if not memories:
             postgres = await get_postgres_manager()
             query_sql = """
-                SELECT * FROM memories
+                SELECT * FROM cyrex.memories
                 WHERE content ILIKE $1
             """
             params = [f"%{query}%"]
@@ -267,7 +268,7 @@ class MemoryManager:
         if session_id:
             postgres = await get_postgres_manager()
             rows = await postgres.fetch("""
-                SELECT * FROM memories
+                SELECT * FROM cyrex.memories
                 WHERE session_id = $1 AND memory_type = 'short_term'
                 ORDER BY created_at DESC
                 LIMIT $2

@@ -5,6 +5,7 @@ import { useUI } from './context/UIContext';
 import { VendorFraudPanel } from './components/VendorFraud';
 import { AgentPlayground } from './components/AgentPlayground';
 import { WorkflowPlayground } from './components/WorkflowPlayground';
+import { MessagesWidget } from './components/MessagesWidget/MessagesWidget';
 
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -107,6 +108,9 @@ export default function App() {
   const [llmResult, setLlmResult] = useState('');
   const [llmModel, setLlmModel] = useState('llama3:8b');
   const [llmBackend, setLlmBackend] = useState('ollama');
+  
+  // Messages widget state
+  const [messagesWidgetOpen, setMessagesWidgetOpen] = useState(false);
   
   // RAG/Vector Store state
   const [ragQuery, setRagQuery] = useState('productivity tips');
@@ -1344,6 +1348,44 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui', display: 'flex' }}>
+      {/* Messages Widget */}
+      <MessagesWidget isOpen={messagesWidgetOpen} onClose={() => setMessagesWidgetOpen(false)} />
+      
+      {/* Floating Messages Button */}
+      <button
+        onClick={() => setMessagesWidgetOpen(true)}
+        style={{
+          position: 'fixed',
+          bottom: '20px',
+          right: '20px',
+          width: '60px',
+          height: '60px',
+          borderRadius: '50%',
+          background: '#4a9eff',
+          color: 'white',
+          border: 'none',
+          cursor: 'pointer',
+          boxShadow: '0 4px 12px rgba(74, 158, 255, 0.4)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '24px',
+          zIndex: 9999,
+          transition: 'all 0.3s',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'scale(1.1)';
+          e.currentTarget.style.boxShadow = '0 6px 16px rgba(74, 158, 255, 0.6)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.boxShadow = '0 4px 12px rgba(74, 158, 255, 0.4)';
+        }}
+        title="Open Messages"
+      >
+        💬
+      </button>
+      
       {/* Sidebar */}
       <Sidebar />
 

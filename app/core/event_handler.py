@@ -36,10 +36,12 @@ class EventHandler:
         # Get event registry
         self._event_registry = get_event_registry()
         
-        # Create events table
+        # Create events table in cyrex schema (for event routing/processing)
+        # Note: This is separate from cyrex.events (audit log) - different purpose
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS events (
+            CREATE TABLE IF NOT EXISTS cyrex.event_processing (
                 event_id VARCHAR(255) PRIMARY KEY,
                 event_type VARCHAR(255) NOT NULL,
                 source VARCHAR(255) NOT NULL,
@@ -49,11 +51,11 @@ class EventHandler:
                 timestamp TIMESTAMP NOT NULL,
                 processed BOOLEAN DEFAULT FALSE
             );
-            CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
-            CREATE INDEX IF NOT EXISTS idx_events_source ON events(source);
-            CREATE INDEX IF NOT EXISTS idx_events_target ON events(target);
-            CREATE INDEX IF NOT EXISTS idx_events_processed ON events(processed);
-            CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_event_processing_type ON cyrex.event_processing(event_type);
+            CREATE INDEX IF NOT EXISTS idx_event_processing_source ON cyrex.event_processing(source);
+            CREATE INDEX IF NOT EXISTS idx_event_processing_target ON cyrex.event_processing(target);
+            CREATE INDEX IF NOT EXISTS idx_event_processing_processed ON cyrex.event_processing(processed);
+            CREATE INDEX IF NOT EXISTS idx_event_processing_timestamp ON cyrex.event_processing(timestamp);
         """)
         
         # Start event processing task
@@ -104,7 +106,7 @@ class EventHandler:
         # Store in database
         postgres = await get_postgres_manager()
         await postgres.execute("""
-            INSERT INTO events (event_id, event_type, source, target, payload, metadata, timestamp)
+            INSERT INTO cyrex.event_processing (event_id, event_type, source, target, payload, metadata, timestamp)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
         """, event.event_id, event.event_type, event.source, event.target,
             json.dumps(event.payload), json.dumps(event.metadata), event.timestamp)
@@ -176,7 +178,7 @@ class EventHandler:
                 # Mark as processed
                 postgres = await get_postgres_manager()
                 await postgres.execute(
-                    "UPDATE events SET processed = TRUE WHERE event_id = $1",
+                    "UPDATE cyrex.event_processing SET processed = TRUE WHERE event_id = $1",
                     event.event_id
                 )
             
@@ -196,7 +198,7 @@ class EventHandler:
         """Query events from database"""
         postgres = await get_postgres_manager()
         
-        query = "SELECT * FROM events WHERE 1=1"
+        query = "SELECT * FROM cyrex.event_processing WHERE 1=1"
         params = []
         param_count = 0
         

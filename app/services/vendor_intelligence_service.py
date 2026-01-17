@@ -113,12 +113,13 @@ class VendorIntelligenceService:
             raise
     
     async def _create_tables(self):
-        """Create database tables for vendor intelligence"""
+        """Create database tables for vendor intelligence in cyrex schema"""
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         
         # Vendors table
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS cyrex_vendors (
+            CREATE TABLE IF NOT EXISTS cyrex.cyrex_vendors (
                 vendor_id VARCHAR(255) PRIMARY KEY,
                 vendor_name VARCHAR(500) NOT NULL,
                 industries_served JSONB DEFAULT '[]',
@@ -143,15 +144,15 @@ class VendorIntelligenceService:
                 updated_at TIMESTAMP DEFAULT NOW()
             );
             
-            CREATE INDEX IF NOT EXISTS idx_vendors_name ON cyrex_vendors(vendor_name);
-            CREATE INDEX IF NOT EXISTS idx_vendors_risk ON cyrex_vendors(risk_level, current_risk_score);
-            CREATE INDEX IF NOT EXISTS idx_vendors_status ON cyrex_vendors(status);
-            CREATE INDEX IF NOT EXISTS idx_vendors_industries ON cyrex_vendors USING GIN(industries_served);
+            CREATE INDEX IF NOT EXISTS idx_vendors_name ON cyrex.cyrex_vendors(vendor_name);
+            CREATE INDEX IF NOT EXISTS idx_vendors_risk ON cyrex.cyrex_vendors(risk_level, current_risk_score);
+            CREATE INDEX IF NOT EXISTS idx_vendors_status ON cyrex.cyrex_vendors(status);
+            CREATE INDEX IF NOT EXISTS idx_vendors_industries ON cyrex.cyrex_vendors USING GIN(industries_served);
         """)
         
         # Invoices table
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS cyrex_invoices (
+            CREATE TABLE IF NOT EXISTS cyrex.cyrex_invoices (
                 invoice_id VARCHAR(255) PRIMARY KEY,
                 vendor_id VARCHAR(255) NOT NULL,
                 vendor_name VARCHAR(500) NOT NULL,
@@ -169,15 +170,15 @@ class VendorIntelligenceService:
                 created_at TIMESTAMP DEFAULT NOW()
             );
             
-            CREATE INDEX IF NOT EXISTS idx_invoices_vendor ON cyrex_invoices(vendor_id);
-            CREATE INDEX IF NOT EXISTS idx_invoices_industry ON cyrex_invoices(industry);
-            CREATE INDEX IF NOT EXISTS idx_invoices_date ON cyrex_invoices(invoice_date);
-            CREATE INDEX IF NOT EXISTS idx_invoices_fraud ON cyrex_invoices(fraud_detected);
+            CREATE INDEX IF NOT EXISTS idx_invoices_vendor ON cyrex.cyrex_invoices(vendor_id);
+            CREATE INDEX IF NOT EXISTS idx_invoices_industry ON cyrex.cyrex_invoices(industry);
+            CREATE INDEX IF NOT EXISTS idx_invoices_date ON cyrex.cyrex_invoices(invoice_date);
+            CREATE INDEX IF NOT EXISTS idx_invoices_fraud ON cyrex.cyrex_invoices(fraud_detected);
         """)
         
         # Pricing benchmarks table
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS cyrex_pricing_benchmarks (
+            CREATE TABLE IF NOT EXISTS cyrex.cyrex_pricing_benchmarks (
                 benchmark_id VARCHAR(255) PRIMARY KEY,
                 service_type VARCHAR(255) NOT NULL,
                 industry VARCHAR(100) NOT NULL,
@@ -192,8 +193,8 @@ class VendorIntelligenceService:
                 created_at TIMESTAMP DEFAULT NOW()
             );
             
-            CREATE INDEX IF NOT EXISTS idx_benchmarks_service ON cyrex_pricing_benchmarks(service_type, industry);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_benchmarks_unique ON cyrex_pricing_benchmarks(service_type, industry, location);
+            CREATE INDEX IF NOT EXISTS idx_benchmarks_service ON cyrex.cyrex_pricing_benchmarks(service_type, industry);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_benchmarks_unique ON cyrex.cyrex_pricing_benchmarks(service_type, industry, location);
         """)
         
         logger.info("Vendor intelligence database tables created")
@@ -216,7 +217,7 @@ class VendorIntelligenceService:
         # Check database
         postgres = await get_postgres_manager()
         row = await postgres.fetchrow(
-            "SELECT * FROM cyrex_vendors WHERE vendor_id = $1",
+            "SELECT * FROM cyrex.cyrex_vendors WHERE vendor_id = $1",
             vendor_id
         )
         
@@ -239,7 +240,7 @@ class VendorIntelligenceService:
         postgres = await get_postgres_manager()
         
         await postgres.execute("""
-            INSERT INTO cyrex_vendors (
+            INSERT INTO cyrex.cyrex_vendors (
                 vendor_id, vendor_name, industries_served, total_invoices_analyzed,
                 total_invoice_amount, fraud_flags_count, fraud_flags_by_industry,
                 fraud_types_detected, average_invoice_amount, average_price_deviation,
@@ -339,7 +340,7 @@ class VendorIntelligenceService:
         postgres = await get_postgres_manager()
         
         await postgres.execute("""
-            INSERT INTO cyrex_invoices (
+            INSERT INTO cyrex.cyrex_invoices (
                 invoice_id, vendor_id, vendor_name, industry, invoice_number,
                 invoice_date, total_amount, service_category, fraud_detected,
                 risk_score, risk_level, fraud_indicators, analyzed_at, metadata
@@ -492,7 +493,7 @@ class VendorIntelligenceService:
         
         postgres = await get_postgres_manager()
         row = await postgres.fetchrow(
-            "SELECT * FROM cyrex_vendors WHERE vendor_id = $1",
+            "SELECT * FROM cyrex.cyrex_vendors WHERE vendor_id = $1",
             vendor_id
         )
         
@@ -541,7 +542,7 @@ class VendorIntelligenceService:
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         
         query_sql = f"""
-            SELECT * FROM cyrex_vendors
+            SELECT * FROM cyrex.cyrex_vendors
             WHERE {where_clause}
             ORDER BY current_risk_score DESC, last_activity DESC
             LIMIT ${param_idx}
@@ -585,7 +586,7 @@ class VendorIntelligenceService:
         benchmark_id = f"bench_{uuid.uuid4().hex[:12]}"
         
         await postgres.execute("""
-            INSERT INTO cyrex_pricing_benchmarks (
+            INSERT INTO cyrex.cyrex_pricing_benchmarks (
                 benchmark_id, service_type, industry, location,
                 min_price, avg_price, max_price, unit, last_updated
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
@@ -595,7 +596,7 @@ class VendorIntelligenceService:
                 avg_price = EXCLUDED.avg_price,
                 max_price = EXCLUDED.max_price,
                 unit = EXCLUDED.unit,
-                sample_size = cyrex_pricing_benchmarks.sample_size + 1,
+                sample_size = cyrex.cyrex_pricing_benchmarks.sample_size + 1,
                 last_updated = NOW()
         """,
             benchmark_id,
@@ -618,7 +619,7 @@ class VendorIntelligenceService:
         postgres = await get_postgres_manager()
         
         row = await postgres.fetchrow("""
-            SELECT * FROM cyrex_pricing_benchmarks
+            SELECT * FROM cyrex.cyrex_pricing_benchmarks
             WHERE service_type = $1 AND industry = $2
             AND (location = $3 OR location IS NULL)
             ORDER BY location NULLS LAST
@@ -666,30 +667,30 @@ class VendorIntelligenceService:
         
         # Total invoices
         total_invoices = await postgres.fetchval(
-            f"SELECT COUNT(*) FROM cyrex_invoices WHERE 1=1 {date_filter} {industry_filter}",
+            f"SELECT COUNT(*) FROM cyrex.cyrex_invoices WHERE 1=1 {date_filter} {industry_filter}",
             *params
         )
         
         # Fraud detected
         fraud_count = await postgres.fetchval(
-            f"SELECT COUNT(*) FROM cyrex_invoices WHERE fraud_detected = TRUE {date_filter} {industry_filter}",
+            f"SELECT COUNT(*) FROM cyrex.cyrex_invoices WHERE fraud_detected = TRUE {date_filter} {industry_filter}",
             *params
         )
         
         # Total amount analyzed
         total_amount = await postgres.fetchval(
-            f"SELECT COALESCE(SUM(total_amount), 0) FROM cyrex_invoices WHERE 1=1 {date_filter} {industry_filter}",
+            f"SELECT COALESCE(SUM(total_amount), 0) FROM cyrex.cyrex_invoices WHERE 1=1 {date_filter} {industry_filter}",
             *params
         )
         
         # High-risk vendors
         high_risk_vendors = await postgres.fetchval(
-            "SELECT COUNT(*) FROM cyrex_vendors WHERE risk_level IN ('high', 'critical')"
+            "SELECT COUNT(*) FROM cyrex.cyrex_vendors WHERE risk_level IN ('high', 'critical')"
         )
         
         # Cross-industry flags
         cross_industry_flags = await postgres.fetchval(
-            "SELECT SUM(cross_industry_flags) FROM cyrex_vendors"
+            "SELECT SUM(cross_industry_flags) FROM cyrex.cyrex_vendors"
         )
         
         return {

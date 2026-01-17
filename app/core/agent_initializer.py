@@ -25,10 +25,11 @@ class AgentInitializer:
     
     async def initialize(self):
         """Initialize agent initializer and create database tables"""
-        # Create agents table
+        # Create agents tables in cyrex schema
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS agents (
+            CREATE TABLE IF NOT EXISTS cyrex.agents (
                 agent_id VARCHAR(255) PRIMARY KEY,
                 role VARCHAR(100) NOT NULL,
                 name VARCHAR(255) NOT NULL,
@@ -44,13 +45,13 @@ class AgentInitializer:
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_agents_role ON agents(role);
-            CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name);
+            CREATE INDEX IF NOT EXISTS idx_agents_role ON cyrex.agents(role);
+            CREATE INDEX IF NOT EXISTS idx_agents_name ON cyrex.agents(name);
         """)
         
         # Create agent states table
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS agent_states (
+            CREATE TABLE IF NOT EXISTS cyrex.agent_states (
                 agent_id VARCHAR(255) PRIMARY KEY,
                 status VARCHAR(50) NOT NULL,
                 current_task VARCHAR(255),
@@ -94,7 +95,7 @@ class AgentInitializer:
         # Store in database
         postgres = await get_postgres_manager()
         await postgres.execute("""
-            INSERT INTO agents (agent_id, role, name, description, capabilities, tools,
+            INSERT INTO cyrex.agents (agent_id, role, name, description, capabilities, tools,
                               model_config, temperature, max_tokens, system_prompt, guardrails, metadata, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             ON CONFLICT (agent_id) DO UPDATE SET
@@ -122,7 +123,7 @@ class AgentInitializer:
         
         # Initialize agent state
         await postgres.execute("""
-            INSERT INTO agent_states (agent_id, status, last_activity, updated_at)
+            INSERT INTO cyrex.agent_states (agent_id, status, last_activity, updated_at)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (agent_id) DO NOTHING
         """, agent.agent_id, AgentStatus.IDLE.value, datetime.utcnow(), datetime.utcnow())
@@ -138,7 +139,7 @@ class AgentInitializer:
         
         # Load from database
         postgres = await get_postgres_manager()
-        row = await postgres.fetchrow("SELECT * FROM agents WHERE agent_id = $1", agent_id)
+        row = await postgres.fetchrow("SELECT * FROM cyrex.agents WHERE agent_id = $1", agent_id)
         
         if row:
             agent = AgentConfig(
@@ -170,7 +171,7 @@ class AgentInitializer:
         """List agents with optional filtering"""
         postgres = await get_postgres_manager()
         
-        query = "SELECT * FROM agents WHERE 1=1"
+        query = "SELECT * FROM cyrex.agents WHERE 1=1"
         params = []
         
         if role:
@@ -216,7 +217,7 @@ class AgentInitializer:
         """Update agent status"""
         postgres = await get_postgres_manager()
         await postgres.execute("""
-            UPDATE agent_states SET
+            UPDATE cyrex.agent_states SET
                 status = $1,
                 current_task = $2,
                 metadata = $3,

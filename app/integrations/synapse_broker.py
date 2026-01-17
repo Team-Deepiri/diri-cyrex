@@ -32,10 +32,11 @@ class SynapseBroker:
     
     async def initialize(self):
         """Initialize broker and create database tables"""
-        # Create messages table
+        # Create messages table in cyrex schema
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS synapse_messages (
+            CREATE TABLE IF NOT EXISTS cyrex.synapse_messages (
                 message_id VARCHAR(255) PRIMARY KEY,
                 channel VARCHAR(255) NOT NULL,
                 sender VARCHAR(255) NOT NULL,
@@ -49,10 +50,10 @@ class SynapseBroker:
                 max_retries INTEGER DEFAULT 3,
                 processed BOOLEAN DEFAULT FALSE
             );
-            CREATE INDEX IF NOT EXISTS idx_synapse_channel ON synapse_messages(channel);
-            CREATE INDEX IF NOT EXISTS idx_synapse_recipient ON synapse_messages(recipient);
-            CREATE INDEX IF NOT EXISTS idx_synapse_processed ON synapse_messages(processed);
-            CREATE INDEX IF NOT EXISTS idx_synapse_expires_at ON synapse_messages(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_synapse_channel ON cyrex.synapse_messages(channel);
+            CREATE INDEX IF NOT EXISTS idx_synapse_recipient ON cyrex.synapse_messages(recipient);
+            CREATE INDEX IF NOT EXISTS idx_synapse_processed ON cyrex.synapse_messages(processed);
+            CREATE INDEX IF NOT EXISTS idx_synapse_expires_at ON cyrex.synapse_messages(expires_at);
         """)
         
         self.logger.info("Synapse broker initialized")
@@ -82,7 +83,7 @@ class SynapseBroker:
             # Store in database
             postgres = await get_postgres_manager()
             await postgres.execute("""
-                INSERT INTO synapse_messages (message_id, channel, sender, recipient, priority,
+                INSERT INTO cyrex.synapse_messages (message_id, channel, sender, recipient, priority,
                                             payload, headers, timestamp, expires_at, retry_count, max_retries)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             """, message.message_id, message.channel, message.sender, message.recipient,
@@ -158,7 +159,7 @@ class SynapseBroker:
                 # Check database for unprocessed messages
                 postgres = await get_postgres_manager()
                 query = """
-                    SELECT * FROM synapse_messages
+                    SELECT * FROM cyrex.synapse_messages
                     WHERE channel = $1 AND processed = FALSE
                     AND (expires_at IS NULL OR expires_at > $2)
                 """
@@ -221,7 +222,7 @@ class SynapseBroker:
             # Store in database
             postgres = await get_postgres_manager()
             await postgres.execute("""
-                INSERT INTO synapse_messages (message_id, channel, sender, priority, payload, timestamp)
+                INSERT INTO cyrex.synapse_messages (message_id, channel, sender, priority, payload, timestamp)
                 VALUES ($1, $2, $3, $4, $5, $6)
             """, message.message_id, queue_name, sender, priority.value, json.dumps(payload), message.timestamp)
             
@@ -244,7 +245,7 @@ class SynapseBroker:
         """Mark a message as processed"""
         postgres = await get_postgres_manager()
         await postgres.execute(
-            "UPDATE synapse_messages SET processed = TRUE WHERE message_id = $1",
+            "UPDATE cyrex.synapse_messages SET processed = TRUE WHERE message_id = $1",
             message_id
         )
 
