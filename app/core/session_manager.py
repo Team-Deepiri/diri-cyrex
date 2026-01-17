@@ -28,10 +28,11 @@ class SessionManager:
     
     async def initialize(self):
         """Initialize session manager and start cleanup task"""
-        # Create cyrex_sessions table (renamed to avoid conflict with auth service sessions table)
+        # Create cyrex_sessions table in cyrex schema
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS cyrex_sessions (
+            CREATE TABLE IF NOT EXISTS cyrex.cyrex_sessions (
                 session_id VARCHAR(255) PRIMARY KEY,
                 user_id VARCHAR(255),
                 agent_id VARCHAR(255),
@@ -47,9 +48,9 @@ class SessionManager:
         
         # Create indexes
         await postgres.execute("""
-            CREATE INDEX IF NOT EXISTS idx_cyrex_sessions_user_id ON cyrex_sessions(user_id);
-            CREATE INDEX IF NOT EXISTS idx_cyrex_sessions_agent_id ON cyrex_sessions(agent_id);
-            CREATE INDEX IF NOT EXISTS idx_cyrex_sessions_expires_at ON cyrex_sessions(expires_at);
+            CREATE INDEX IF NOT EXISTS idx_cyrex_sessions_user_id ON cyrex.cyrex_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_cyrex_sessions_agent_id ON cyrex.cyrex_sessions(agent_id);
+            CREATE INDEX IF NOT EXISTS idx_cyrex_sessions_expires_at ON cyrex.cyrex_sessions(expires_at);
         """)
         
         # Start cleanup task
@@ -80,7 +81,7 @@ class SessionManager:
             # Persist to PostgreSQL
             postgres = await get_postgres_manager()
             await postgres.execute("""
-                INSERT INTO cyrex_sessions (session_id, user_id, agent_id, status, context, metadata, 
+                INSERT INTO cyrex.cyrex_sessions (session_id, user_id, agent_id, status, context, metadata, 
                                     created_at, updated_at, expires_at, last_activity)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT (session_id) DO UPDATE SET
@@ -113,7 +114,7 @@ class SessionManager:
         # Load from PostgreSQL
         postgres = await get_postgres_manager()
         row = await postgres.fetchrow(
-            "SELECT * FROM cyrex_sessions WHERE session_id = $1", session_id
+            "SELECT * FROM cyrex.cyrex_sessions WHERE session_id = $1", session_id
         )
         
         if row:
@@ -161,7 +162,7 @@ class SessionManager:
             # Update PostgreSQL
             postgres = await get_postgres_manager()
             await postgres.execute("""
-                UPDATE cyrex_sessions SET
+                UPDATE cyrex.cyrex_sessions SET
                     context = $1,
                     metadata = $2,
                     status = $3,
@@ -181,7 +182,7 @@ class SessionManager:
             
             # Remove from PostgreSQL
             postgres = await get_postgres_manager()
-            await postgres.execute("DELETE FROM cyrex_sessions WHERE session_id = $1", session_id)
+            await postgres.execute("DELETE FROM cyrex.cyrex_sessions WHERE session_id = $1", session_id)
             
             self.logger.info(f"Session deleted: {session_id}")
             return True
@@ -196,7 +197,7 @@ class SessionManager:
         """List sessions with filters"""
         postgres = await get_postgres_manager()
         
-        query = "SELECT * FROM cyrex_sessions WHERE 1=1"
+        query = "SELECT * FROM cyrex.cyrex_sessions WHERE 1=1"
         params = []
         param_count = 0
         
@@ -258,7 +259,7 @@ class SessionManager:
                 # Also clean up in PostgreSQL
                 postgres = await get_postgres_manager()
                 await postgres.execute(
-                    "DELETE FROM cyrex_sessions WHERE expires_at < $1", now
+                    "DELETE FROM cyrex.cyrex_sessions WHERE expires_at < $1", now
                 )
                 
                 if expired_ids:

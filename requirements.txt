@@ -2,6 +2,7 @@ fastapi==0.112.2
 uvicorn[standard]==0.30.6
 pydantic==2.8.2
 watchdog>=3.0.0  # For custom file watcher in development
+psutil>=5.9.0  # For process management and port cleanup
 python-multipart>=0.0.6  # Required for FastAPI file uploads (File, Form)
 openai==1.109.1
 python-dotenv==1.0.1

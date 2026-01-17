@@ -214,7 +214,7 @@ class EnhancedMemoryTools:
         
         if memory_id:
             await postgres.execute(
-                "DELETE FROM memories WHERE memory_id = $1",
+                "DELETE FROM cyrex.memories WHERE memory_id = $1",
                 memory_id
             )
             return 1
@@ -240,7 +240,7 @@ class EnhancedMemoryTools:
             params.append(memory_type.value)
         
         if conditions:
-            query_sql = f"DELETE FROM memories WHERE {' AND '.join(conditions)}"
+            query_sql = f"DELETE FROM cyrex.memories WHERE {' AND '.join(conditions)}"
             result = await postgres.execute(query_sql, *params)
             # Parse result to get count
             return int(result.split()[-1]) if result else 0
@@ -308,7 +308,7 @@ class EnhancedMemoryTools:
         postgres = await get_postgres_manager()
         
         query = """
-            SELECT * FROM memories 
+            SELECT * FROM cyrex.memories 
             WHERE memory_type = 'episodic'
         """
         params = []

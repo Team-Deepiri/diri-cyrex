@@ -59,10 +59,11 @@ class EnhancedGuardrails:
     
     async def initialize(self):
         """Initialize guardrails and create database tables"""
-        # Create guardrails table
+        # Create guardrails tables in cyrex schema
         postgres = await get_postgres_manager()
+        await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS guardrail_rules (
+            CREATE TABLE IF NOT EXISTS cyrex.guardrail_rules (
                 rule_id VARCHAR(255) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 pattern TEXT NOT NULL,
@@ -73,12 +74,12 @@ class EnhancedGuardrails:
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_guardrails_enabled ON guardrail_rules(enabled);
+            CREATE INDEX IF NOT EXISTS idx_guardrails_enabled ON cyrex.guardrail_rules(enabled);
         """)
         
         # Create violations log table
         await postgres.execute("""
-            CREATE TABLE IF NOT EXISTS guardrail_violations (
+            CREATE TABLE IF NOT EXISTS cyrex.guardrail_violations (
                 violation_id VARCHAR(255) PRIMARY KEY,
                 rule_id VARCHAR(255) NOT NULL,
                 content TEXT,
@@ -87,8 +88,8 @@ class EnhancedGuardrails:
                 metadata JSONB,
                 timestamp TIMESTAMP NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_violations_rule_id ON guardrail_violations(rule_id);
-            CREATE INDEX IF NOT EXISTS idx_violations_timestamp ON guardrail_violations(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_violations_rule_id ON cyrex.guardrail_violations(rule_id);
+            CREATE INDEX IF NOT EXISTS idx_violations_timestamp ON cyrex.guardrail_violations(timestamp);
         """)
         
         # Load default rules
@@ -113,10 +114,11 @@ class EnhancedGuardrails:
             {
                 "rule_id": "pii_1",
                 "name": "PII Detection",
-                "pattern": r"\b\d{3}-\d{2}-\d{4}|\b\d{16}\b|\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+                # Email addresses removed - commonly shared in business contexts
+                "pattern": r"\b\d{3}-\d{2}-\d{4}|\b\d{16}\b",
                 "action": "warn",
                 "severity": "high",
-                "description": "Detects potential PII (SSN, credit card, email)",
+                "description": "Detects potential PII (SSN, credit card) - email addresses excluded",
             },
             {
                 "rule_id": "toxicity_1",
@@ -135,7 +137,7 @@ class EnhancedGuardrails:
     async def _load_rules_from_db(self):
         """Load rules from database"""
         postgres = await get_postgres_manager()
-        rows = await postgres.fetch("SELECT * FROM guardrail_rules WHERE enabled = TRUE")
+        rows = await postgres.fetch("SELECT * FROM cyrex.guardrail_rules WHERE enabled = TRUE")
         
         for row in rows:
             rule = GuardrailRule(
@@ -164,7 +166,7 @@ class EnhancedGuardrails:
         # Persist to database
         postgres = await get_postgres_manager()
         await postgres.execute("""
-            INSERT INTO guardrail_rules (rule_id, name, pattern, action, severity, description, created_at, updated_at)
+            INSERT INTO cyrex.guardrail_rules (rule_id, name, pattern, action, severity, description, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (rule_id) DO UPDATE SET
                 name = EXCLUDED.name,
@@ -257,7 +259,7 @@ class EnhancedGuardrails:
         for violation in violations:
             violation_id = f"{violation['rule_id']}_{datetime.utcnow().isoformat()}"
             await postgres.execute("""
-                INSERT INTO guardrail_violations (violation_id, rule_id, content, action_taken, severity, timestamp)
+                INSERT INTO cyrex.guardrail_violations (violation_id, rule_id, content, action_taken, severity, timestamp)
                 VALUES ($1, $2, $3, $4, $5, $6)
             """, violation_id, violation['rule_id'], content[:1000], action_taken,
                 violation['severity'], datetime.utcnow())

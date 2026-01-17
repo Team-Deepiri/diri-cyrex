@@ -567,21 +567,63 @@ class OllamaContainerClient:
         }
         
         try:
+            self.logger.debug(f"Starting chat stream with model: {model}, messages: {len(messages)}")
             async with client.stream("POST", "/api/chat", json=payload) as response:
+                # Check status before reading
+                if response.status_code != 200:
+                    error_body = ""
+                    try:
+                        error_body = await response.aread()
+                        error_data = json.loads(error_body.decode()) if error_body else {}
+                        error_msg = error_data.get("error", {}).get("message", f"HTTP {response.status_code}")
+                    except:
+                        error_msg = f"HTTP {response.status_code}: {response.reason_phrase}"
+                    
+                    self.logger.error(f"Ollama API error: {error_msg}")
+                    raise RuntimeError(f"Ollama API returned error: {error_msg}")
+                
                 response.raise_for_status()
                 
+                line_count = 0
                 async for line in response.aiter_lines():
                     if line:
-                        data = json.loads(line)
-                        msg = data.get("message", {})
-                        content = msg.get("content", "")
-                        if content:
-                            yield content
-                        
-                        if data.get("done", False):
-                            break
+                        try:
+                            data = json.loads(line)
+                            line_count += 1
+                            
+                            # Check for error in response
+                            if "error" in data:
+                                error_msg = data.get("error", {}).get("message", "Unknown error")
+                                self.logger.error(f"Ollama stream error: {error_msg}")
+                                raise RuntimeError(f"Ollama stream error: {error_msg}")
+                            
+                            msg = data.get("message", {})
+                            content = msg.get("content", "")
+                            if content:
+                                yield content
+                            
+                            if data.get("done", False):
+                                self.logger.debug(f"Stream completed after {line_count} lines")
+                                break
+                        except json.JSONDecodeError as json_err:
+                            self.logger.warning(f"Failed to parse JSON line: {line[:100]}... Error: {json_err}")
+                            # Continue to next line
+                            continue
+                
+                if line_count == 0:
+                    self.logger.warning(f"No lines received from Ollama stream for model: {model}")
+                    raise RuntimeError(f"No response received from Ollama. Model '{model}' may not be available or may have timed out.")
+                    
+        except httpx.HTTPStatusError as e:
+            error_msg = f"HTTP error {e.response.status_code}: {e.response.text[:200]}"
+            self.logger.error(f"HTTP error in chat_stream: {error_msg}")
+            raise RuntimeError(f"Failed to connect to Ollama: {error_msg}")
+        except httpx.RequestError as e:
+            error_msg = f"Request error: {str(e)}"
+            self.logger.error(f"Request error in chat_stream: {error_msg}")
+            raise RuntimeError(f"Failed to reach Ollama service at {self.base_url}: {error_msg}")
         except Exception as e:
-            self.logger.error(f"Streaming chat failed: {e}")
+            self.logger.error(f"Streaming chat failed: {e}", exc_info=True)
             raise
     
     # ========================================================================

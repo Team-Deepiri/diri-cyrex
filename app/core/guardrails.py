@@ -57,8 +57,7 @@ class SafetyGuardrails:
     def _load_pii_patterns(self) -> List[Tuple[re.Pattern, str]]:
         """Load patterns for PII detection"""
         patterns = [
-            # Email
-            (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), 'email'),
+            # Email addresses excluded - commonly shared in business contexts
             # Phone (US format)
             (re.compile(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'), 'phone'),
             # SSN

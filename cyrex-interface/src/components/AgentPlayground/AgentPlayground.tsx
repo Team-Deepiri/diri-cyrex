@@ -84,6 +84,7 @@ interface ConversationMessage {
   toolCalls?: ToolCall[];
   timestamp: string;
   streaming?: boolean;
+  isError?: boolean;
 }
 
 // Available agent types
@@ -409,15 +410,29 @@ export function AgentPlayground() {
         body: JSON.stringify(agentConfig),
       });
 
-      if (!response.ok) throw new Error('Failed to initialize agent');
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to initialize agent';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
 
       const data = await response.json();
       
+      if (!data.instance_id) {
+        throw new Error('Invalid response from server: missing instance_id');
+      }
+      
       const instance: AgentInstance = {
-        instanceId: data.instance_id || `inst-${Date.now()}`,
-        agentId: agentConfig.agentId || `agent-${Date.now()}`,
+        instanceId: data.instance_id,
+        agentId: data.agent_id || agentConfig.agentId || `agent-${Date.now()}`,
         status: 'idle',
-        startedAt: new Date().toISOString(),
+        startedAt: data.started_at || new Date().toISOString(),
         metrics: {
           tokensUsed: 0,
           responseTime: 0,
@@ -429,17 +444,80 @@ export function AgentPlayground() {
       addEvent('agent_initialized', { instanceId: instance.instanceId });
       setActiveTab('test');
     } catch (error) {
-      addEvent('agent_error', { error: String(error) });
-      // Create mock instance for testing even if API fails
-      const mockInstance: AgentInstance = {
-        instanceId: `inst-${Date.now()}`,
-        agentId: agentConfig.agentId || `agent-${Date.now()}`,
-        status: 'idle',
-        startedAt: new Date().toISOString(),
-        metrics: { tokensUsed: 0, responseTime: 0, toolCalls: 0 },
-      };
-      setAgentInstance(mockInstance);
-      setActiveTab('test');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      addEvent('agent_error', { error: errorMessage });
+      // Don't create mock instance - show error to user
+      setAgentInstance(null);
+      alert(`Failed to initialize agent: ${errorMessage}\n\nPlease check:\n- Ollama is running\n- Model is available\n- Network connection`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Initialize multiple test agents
+  const initializeMultipleAgents = async () => {
+    setIsLoading(true);
+    addEvent('multiple_agents_initializing', {});
+
+    try {
+      // Create 3 different test agents
+      const testAgents = [
+        {
+          ...agentConfig,
+          name: 'Code Assistant',
+          agentType: 'code_generator',
+          systemPrompt: 'You are a helpful code assistant. Write clean, efficient code.',
+          tools: ['calculate', 'http_get'],
+        },
+        {
+          ...agentConfig,
+          name: 'Data Analyst',
+          agentType: 'data_analyst',
+          systemPrompt: 'You are a data analyst. Help analyze and interpret data.',
+          tools: ['calculate', 'search_documents'],
+        },
+        {
+          ...agentConfig,
+          name: 'Task Decomposer',
+          agentType: 'task_decomposer',
+          systemPrompt: 'You are a task decomposer. Break down complex tasks into smaller steps.',
+          tools: ['search_memory', 'store_memory'],
+        },
+      ];
+
+      const response = await fetch(`${API_BASE}/api/agent/initialize-multiple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agents: testAgents }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        let errorMessage = 'Failed to initialize multiple agents';
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          errorMessage = errorText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      
+      if (data.successful > 0) {
+        addEvent('multiple_agents_initialized', { 
+          total: data.total, 
+          successful: data.successful 
+        });
+        alert(`Successfully initialized ${data.successful} out of ${data.total} agents!\n\nYou can now chat with them using the Messages widget (💬 button).`);
+      } else {
+        throw new Error('Failed to initialize any agents');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      addEvent('agent_error', { error: errorMessage });
+      alert(`Failed to initialize multiple agents: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -465,9 +543,37 @@ export function AgentPlayground() {
     addEvent('agent_stopped', {});
   };
 
+  // Verify agent instance is still valid
+  const verifyAgentInstance = async (instanceId: string): Promise<boolean> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/${instanceId}/status`);
+      return response.ok;
+    } catch {
+      return false;
+    }
+  };
+
   // Send message to agent
   const sendMessage = async () => {
-    if (!userInput.trim() || !agentInstance) return;
+    if (!userInput.trim()) return;
+    
+    if (!agentInstance) {
+      alert('Please initialize the agent first before sending messages.');
+      return;
+    }
+    
+    if (!agentInstance.instanceId) {
+      alert('Invalid agent instance. Please re-initialize the agent.');
+      return;
+    }
+    
+    // Verify instance is still valid
+    const isValid = await verifyAgentInstance(agentInstance.instanceId);
+    if (!isValid) {
+      alert('Agent instance is no longer valid. Please re-initialize the agent.');
+      setAgentInstance(null);
+      return;
+    }
 
     const userMessage: ConversationMessage = {
       id: `msg-${Date.now()}`,
@@ -508,7 +614,24 @@ export function AgentPlayground() {
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to invoke agent');
+      if (!response.ok) {
+        let errorMessage = 'Failed to invoke agent';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.message || errorMessage;
+        } catch {
+          const errorText = await response.text();
+          errorMessage = errorText || errorMessage;
+        }
+        
+        if (response.status === 404) {
+          errorMessage = `Agent instance not found. Please re-initialize the agent. (${errorMessage})`;
+          // Clear invalid instance
+          setAgentInstance(null);
+        }
+        
+        throw new Error(errorMessage);
+      }
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -536,6 +659,41 @@ export function AgentPlayground() {
                   }
                   return updated;
                 });
+              } else if (data.type === 'error') {
+                // Handle error messages from the stream
+                const errorContent = data.content || 'An error occurred while processing your request.';
+                fullContent = errorContent;
+                setConversation(prev => {
+                  const updated = [...prev];
+                  const lastIdx = updated.length - 1;
+                  if (updated[lastIdx]?.streaming) {
+                    updated[lastIdx] = { 
+                      ...updated[lastIdx], 
+                      content: errorContent,
+                      streaming: false,
+                      isError: true,
+                    };
+                  }
+                  return updated;
+                });
+                addEvent('agent_error', { error: errorContent });
+                // Break on error to stop processing
+                break;
+              } else if (data.type === 'warning') {
+                // Handle warning messages
+                const warningContent = data.content || '';
+                if (warningContent) {
+                  fullContent += `\n[Warning: ${warningContent}]`;
+                  setConversation(prev => {
+                    const updated = [...prev];
+                    const lastIdx = updated.length - 1;
+                    if (updated[lastIdx]?.streaming) {
+                      updated[lastIdx] = { ...updated[lastIdx], content: fullContent };
+                    }
+                    return updated;
+                  });
+                  addEvent('agent_warning', { warning: warningContent });
+                }
               } else if (data.type === 'tool_call') {
                 const toolCall: ToolCall = {
                   toolId: `tool-${Date.now()}`,
@@ -554,6 +712,9 @@ export function AgentPlayground() {
                   )
                 );
                 addEvent('tool_completed', { tool: data.tool });
+              } else if (data.type === 'done') {
+                // Stream completed successfully
+                addEvent('stream_done', { total_tokens: data.total_tokens });
               }
             } catch {
               // Non-JSON line, treat as token
@@ -563,14 +724,17 @@ export function AgentPlayground() {
         }
       }
 
-      // Finalize the message
+      // Finalize the message (only if not already finalized by error handler)
       setConversation(prev => {
         const updated = [...prev];
         const lastIdx = updated.length - 1;
         if (updated[lastIdx]?.streaming) {
+          // Only set fallback message if we have no content and it's not an error
+          const finalContent = fullContent || 
+            (updated[lastIdx]?.isError ? updated[lastIdx].content : 'I apologize, but I encountered an issue processing your request.');
           updated[lastIdx] = { 
             ...updated[lastIdx], 
-            content: fullContent || 'I apologize, but I encountered an issue processing your request.',
+            content: finalContent,
             streaming: false,
             toolCalls: liveToolCalls,
           };
@@ -594,7 +758,8 @@ export function AgentPlayground() {
       } : null);
 
     } catch (error) {
-      addEvent('agent_error', { error: String(error) });
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      addEvent('agent_error', { error: errorMessage });
       
       // Update conversation with error message
       setConversation(prev => {
@@ -603,8 +768,9 @@ export function AgentPlayground() {
         if (updated[lastIdx]?.streaming) {
           updated[lastIdx] = {
             ...updated[lastIdx],
-            content: `Error: ${error}. This may be due to the agent not being fully configured or Ollama not being available.`,
+            content: `Error: ${errorMessage}`,
             streaming: false,
+            isError: true,
           };
         }
         return updated;
@@ -766,13 +932,22 @@ export function AgentPlayground() {
         </div>
       </div>
 
-      <button 
-        className="btn-primary btn-large"
-        onClick={initializeAgent}
-        disabled={isLoading || ollamaStatus === 'checking'}
-      >
-        {isLoading ? <><FaSpinner className="spin" /> Initializing...</> : <><FaPlay /> Initialize Agent</>}
-      </button>
+      <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+        <button 
+          className="btn-primary btn-large"
+          onClick={initializeAgent}
+          disabled={isLoading || ollamaStatus === 'checking'}
+        >
+          {isLoading ? <><FaSpinner className="spin" /> Initializing...</> : <><FaPlay /> Initialize Agent</>}
+        </button>
+        <button 
+          className="btn-secondary btn-large"
+          onClick={initializeMultipleAgents}
+          disabled={isLoading || ollamaStatus === 'checking'}
+        >
+          <FaNetworkWired /> Initialize Multiple Test Agents
+        </button>
+      </div>
     </div>
   );
 
