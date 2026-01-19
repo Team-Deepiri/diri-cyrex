@@ -98,8 +98,8 @@ class AgentFactory:
             session_id=session_id,
         )
         
-        # Register tools
-        await AgentFactory._register_agent_tools(agent)
+        # Register tools (pass session_id as instance_id for spreadsheet tools)
+        await AgentFactory._register_agent_tools(agent, instance_id=session_id)
         
         logger.info(f"Agent created: {agent.agent_id}", role=role.value, model=model_name)
         return agent
@@ -131,15 +131,17 @@ class AgentFactory:
         return agent_class
     
     @staticmethod
-    async def _register_agent_tools(agent: BaseAgent):
+    async def _register_agent_tools(agent: BaseAgent, instance_id: Optional[str] = None):
         """Register tools with agent"""
         from .tools.api_tools import register_api_tools
         from .tools.memory_tools import register_memory_tools
         from .tools.utility_tools import register_utility_tools
+        from .tools.spreadsheet_tools import register_spreadsheet_tools
         
         await register_memory_tools(agent)
         await register_api_tools(agent)
         await register_utility_tools(agent)
+        await register_spreadsheet_tools(agent, instance_id)
 
 
 # Convenience function wrapper for easier imports

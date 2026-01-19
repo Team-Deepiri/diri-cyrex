@@ -4,12 +4,13 @@ API endpoints for the Agent Playground UI
 """
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import asyncio
 import json
 import uuid
+from typing import Optional
 
 from ..core.prompt_templates import get_prompt_template_manager, PromptCategory
 from ..core.queue_system import get_queue_producer, create_queue_consumer, QueuePriority
@@ -26,6 +27,7 @@ from ..agents.tools.comprehensive_api_tools import ComprehensiveAPITools
 from ..database.agent_tables import initialize_agent_database
 from ..database.postgres import get_postgres_manager
 from ..logging_config import get_logger
+from ..services.document_parser_service import get_document_parser_service
 
 logger = get_logger("cyrex.routes.agent_playground")
 
@@ -68,6 +70,8 @@ Guidelines:
 - Be professional but friendly in your tone
 - Focus on being helpful and solving the user's problem
 - If asked to do something you cannot do, explain what you can do instead
+- When working with spreadsheets, use the available spreadsheet tools (spreadsheet_get_cell, spreadsheet_set_cell, etc.)
+- Cell references like "J7 through J22" mean column J, rows 7 to 22
 
 Remember: Quality over quantity. Better to give a short, accurate answer than a long, rambling one."""
     tools: List[str] = Field(default_factory=list)
@@ -198,6 +202,44 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
             logger.warning(f"Ollama not healthy: {health}")
             # Continue anyway for testing
         
+        # Map agent_type to prompt template if provided
+        final_config = config.model_dump()
+        if config.agent_type and config.agent_type != "conversational":
+            template_manager = get_prompt_template_manager()
+            
+            # Map agent_type to template key
+            type_to_template = {
+                "task_decomposer": "task_decomposition",
+                "code_generator": "code_generation",
+                "data_analyst": "data_analysis",
+                "vendor_fraud": "vendor_fraud",
+                "document_processing": "document_processing",
+                "automation": "automation",
+                "tool_use": "tool_use",
+                "rag_query": "rag_query",
+            }
+            
+            template_key = type_to_template.get(config.agent_type)
+            if template_key:
+                template = template_manager.get_template(template_key)
+                if template:
+                    # Use template's system prompt and settings
+                    # Render with default variables (empty dict for now, can be customized)
+                    rendered = template.render({})
+                    final_config["system_prompt"] = rendered["system"]
+                    
+                    # Use template's temperature and max_tokens if not overridden
+                    if config.temperature == 0.7:  # Default value
+                        final_config["temperature"] = template.temperature
+                    if config.max_tokens == 2000:  # Default value
+                        final_config["max_tokens"] = template.max_tokens
+                    
+                    # Add tools from template if not already specified
+                    if not config.tools and template.tools:
+                        final_config["tools"] = [tool.name for tool in template.tools]
+                    
+                    logger.info(f"Using prompt template '{template_key}' for agent type '{config.agent_type}'")
+        
         # Load existing conversation history from database
         conversation_history = await load_conversation_history(instance_id)
         
@@ -205,7 +247,7 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
         _active_agents[instance_id] = {
             "instance_id": instance_id,
             "agent_id": agent_id,
-            "config": config.model_dump(),
+            "config": final_config,
             "status": "idle",
             "started_at": datetime.utcnow().isoformat(),
             "conversation": conversation_history,
@@ -222,19 +264,21 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
             await broker.publish(
                 f"agent:{instance_id}",
                 StreamEventType.AGENT_STARTED,
-                {"agent_id": agent_id, "config": config.model_dump()},
+                {"agent_id": agent_id, "config": final_config},
             )
         except Exception as e:
             logger.warning(f"Failed to publish event: {e}")
         
-        logger.info(f"Initialized agent instance: {instance_id}")
+        logger.info(f"Initialized agent instance: {instance_id} (type: {config.agent_type})")
         
         return {
             "instance_id": instance_id,
             "agent_id": agent_id,
             "status": "idle",
-            "model": config.model,
-            "tools": config.tools,
+            "model": final_config["model"],
+            "tools": final_config["tools"],
+            "agent_type": config.agent_type,
+            "name": final_config.get("name", "Test Agent"),
             "started_at": _active_agents[instance_id]["started_at"],
         }
     
@@ -271,6 +315,41 @@ async def initialize_multiple_agents(request: MultipleAgentsRequest) -> Dict[str
                     logger.warning(f"Ollama not healthy: {health}")
                     # Continue anyway for testing
             
+            # Map agent_type to prompt template if provided
+            final_config = agent_config.model_dump()
+            if agent_config.agent_type and agent_config.agent_type != "conversational":
+                template_manager = get_prompt_template_manager()
+                
+                # Map agent_type to template key
+                type_to_template = {
+                    "task_decomposer": "task_decomposition",
+                    "code_generator": "code_generation",
+                    "data_analyst": "data_analysis",
+                    "vendor_fraud": "vendor_fraud",
+                    "document_processing": "document_processing",
+                    "automation": "automation",
+                    "tool_use": "tool_use",
+                    "rag_query": "rag_query",
+                }
+                
+                template_key = type_to_template.get(agent_config.agent_type)
+                if template_key:
+                    template = template_manager.get_template(template_key)
+                    if template:
+                        # Use template's system prompt and settings
+                        rendered = template.render({})
+                        final_config["system_prompt"] = rendered["system"]
+                        
+                        # Use template's temperature and max_tokens if not overridden
+                        if agent_config.temperature == 0.7:  # Default value
+                            final_config["temperature"] = template.temperature
+                        if agent_config.max_tokens == 2000:  # Default value
+                            final_config["max_tokens"] = template.max_tokens
+                        
+                        # Add tools from template if not already specified
+                        if not agent_config.tools and template.tools:
+                            final_config["tools"] = [tool.name for tool in template.tools]
+            
             # Load existing conversation history from database
             conversation_history = await load_conversation_history(instance_id)
             
@@ -278,7 +357,7 @@ async def initialize_multiple_agents(request: MultipleAgentsRequest) -> Dict[str
             _active_agents[instance_id] = {
                 "instance_id": instance_id,
                 "agent_id": agent_id,
-                "config": agent_config.model_dump(),
+                "config": final_config,
                 "status": "idle",
                 "started_at": datetime.utcnow().isoformat(),
                 "conversation": conversation_history,
@@ -482,21 +561,32 @@ async def stream_agent_response(
             )
             
             token_count = 0
-        
-        try:
-            logger.info(f"Starting stream for model: {config.model}, input length: {len(user_input)}")
-            async for token in ollama.chat_stream(messages, model=config.model, options=options):
-                token_count += 1
-                full_response += token
-                yield json.dumps({"type": "token", "content": token}) + "\n"
-                await asyncio.sleep(0.01)  # Small delay for smooth streaming
             
-            logger.info(f"Stream completed: {token_count} tokens, {len(full_response)} chars")
-            
-            # If no tokens were received, this is an error
-            if token_count == 0:
-                error_msg = f"No response generated from model '{config.model}'. The model may not be available or may have encountered an error."
-                logger.warning(error_msg)
+            try:
+                logger.info(f"Starting stream for model: {config.model}, input length: {len(user_input)}")
+                async for token in ollama.chat_stream(messages, model=config.model, options=options):
+                    token_count += 1
+                    full_response += token
+                    yield json.dumps({"type": "token", "content": token}) + "\n"
+                    await asyncio.sleep(0.01)  # Small delay for smooth streaming
+                
+                logger.info(f"Stream completed: {token_count} tokens, {len(full_response)} chars")
+                
+                # If no tokens were received, this is an error
+                if token_count == 0:
+                    error_msg = f"No response generated from model '{config.model}'. The model may not be available or may have encountered an error."
+                    logger.warning(error_msg)
+                    yield json.dumps({
+                        "type": "error",
+                        "content": error_msg,
+                    }) + "\n"
+                    if instance_id in _active_agents:
+                        _active_agents[instance_id]["status"] = "error"
+                    return
+                
+            except Exception as stream_error:
+                error_msg = f"Streaming failed: {str(stream_error)}"
+                logger.error(f"Streaming error during token generation: {stream_error}", exc_info=True)
                 yield json.dumps({
                     "type": "error",
                     "content": error_msg,
@@ -504,17 +594,6 @@ async def stream_agent_response(
                 if instance_id in _active_agents:
                     _active_agents[instance_id]["status"] = "error"
                 return
-            
-        except Exception as stream_error:
-            error_msg = f"Streaming failed: {str(stream_error)}"
-            logger.error(f"Streaming error during token generation: {stream_error}", exc_info=True)
-            yield json.dumps({
-                "type": "error",
-                "content": error_msg,
-            }) + "\n"
-            if instance_id in _active_agents:
-                _active_agents[instance_id]["status"] = "error"
-            return
         
         # Add assistant response to history
         assistant_message = {
@@ -703,8 +782,11 @@ async def list_agent_instances() -> List[Dict[str, Any]]:
         {
             "instance_id": data["instance_id"],
             "agent_id": data["agent_id"],
+            "name": data["config"].get("name", "Agent"),
             "status": data["status"],
             "model": data["config"]["model"],
+            "agent_type": data["config"].get("agent_type", "conversational"),
+            "tools": data["config"].get("tools", []),
             "started_at": data["started_at"],
         }
         for data in _active_agents.values()
@@ -729,6 +811,83 @@ async def list_prompt_templates(category: Optional[str] = None) -> List[Dict[str
         }
         for t in templates
     ]
+
+
+@router.get("/agent-types")
+async def list_agent_types() -> Dict[str, Any]:
+    """List available agent types with their prompt templates"""
+    manager = get_prompt_template_manager()
+    
+    # Map agent types to template keys
+    agent_types = [
+        {
+            "id": "conversational",
+            "name": "Conversational Agent",
+            "description": "General conversation and assistance",
+            "template_key": "conversation",
+        },
+        {
+            "id": "task_decomposer",
+            "name": "Task Decomposer",
+            "description": "Break down complex tasks into manageable subtasks",
+            "template_key": "task_decomposition",
+        },
+        {
+            "id": "code_generator",
+            "name": "Code Generator",
+            "description": "Generate code based on requirements",
+            "template_key": "code_generation",
+        },
+        {
+            "id": "data_analyst",
+            "name": "Data Analyst",
+            "description": "Analyze data and provide insights",
+            "template_key": "data_analysis",
+        },
+        {
+            "id": "vendor_fraud",
+            "name": "Vendor Fraud Detector",
+            "description": "Analyze invoices and detect potential fraud",
+            "template_key": "vendor_fraud",
+        },
+        {
+            "id": "document_processing",
+            "name": "Document Processor",
+            "description": "Extract and structure information from documents",
+            "template_key": "document_processing",
+        },
+        {
+            "id": "automation",
+            "name": "Automation Agent",
+            "description": "Plan and execute automation workflows",
+            "template_key": "automation",
+        },
+        {
+            "id": "tool_use",
+            "name": "Tool Use Agent",
+            "description": "Agent that can use tools to accomplish tasks",
+            "template_key": "tool_use",
+        },
+        {
+            "id": "rag_query",
+            "name": "RAG Query Agent",
+            "description": "Answer questions using retrieved context",
+            "template_key": "rag_query",
+        },
+    ]
+    
+    # Enrich with template information
+    for agent_type in agent_types:
+        template = manager.get_template(agent_type["template_key"])
+        if template:
+            agent_type["temperature"] = template.temperature
+            agent_type["max_tokens"] = template.max_tokens
+            agent_type["tools"] = [tool.name for tool in template.tools] if template.tools else []
+            agent_type["template_id"] = template.template_id
+    
+    return {
+        "agent_types": agent_types,
+    }
 
 
 @router.get("/tools")
@@ -872,4 +1031,477 @@ async def evaluate_agent_response(
         evaluation["similarity"] = overlap / total if total > 0 else 0
     
     return evaluation
+
+
+@router.post("/spreadsheet/{instance_id}/set-cell")
+async def spreadsheet_set_cell(instance_id: str, cell_id: str, value: str):
+    """Set a cell value in the spreadsheet"""
+    try:
+        from ..agents.tools.spreadsheet_tools import _spreadsheet_states
+        if instance_id not in _spreadsheet_states:
+            _spreadsheet_states[instance_id] = {}
+        
+        state = _spreadsheet_states[instance_id]
+        state[cell_id] = {
+            "value": value,
+            "formula": value[1:] if value.startswith("=") else None,
+        }
+        
+        return {
+            "success": True,
+            "cell_id": cell_id,
+            "value": value,
+        }
+    except Exception as e:
+        logger.error(f"Failed to set cell: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/spreadsheet/{instance_id}/get-cell")
+async def spreadsheet_get_cell(instance_id: str, cell_id: str):
+    """Get a cell value from the spreadsheet"""
+    try:
+        from ..agents.tools.spreadsheet_tools import _spreadsheet_states
+        state = _spreadsheet_states.get(instance_id, {})
+        cell = state.get(cell_id, {})
+        
+        return {
+            "success": True,
+            "cell_id": cell_id,
+            "value": cell.get("value", ""),
+            "formula": cell.get("formula"),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cell: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/spreadsheet/{instance_id}/state")
+async def spreadsheet_get_state(instance_id: str):
+    """Get entire spreadsheet state"""
+    try:
+        from ..agents.tools.spreadsheet_tools import get_spreadsheet_state
+        state = get_spreadsheet_state(instance_id)
+        return {
+            "success": True,
+            "state": state,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get spreadsheet state: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Spreadsheet Data Storage (PostgreSQL with user_id)
+# ============================================================================
+
+class SpreadsheetSaveRequest(BaseModel):
+    """Request to save spreadsheet data"""
+    user_id: str = Field(default="admin", description="User ID (defaults to 'admin' for testing)")
+    instance_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    columns: List[str]
+    row_count: int
+    data: Dict[str, Any]
+
+
+class SpreadsheetLoadRequest(BaseModel):
+    """Request to load spreadsheet data"""
+    user_id: str = Field(default="admin", description="User ID (defaults to 'admin' for testing)")
+    instance_id: Optional[str] = None
+
+
+@router.post("/spreadsheet/save")
+async def save_spreadsheet_data(request: SpreadsheetSaveRequest):
+    """Save spreadsheet data to PostgreSQL with user_id"""
+    try:
+        await ensure_database_initialized()
+        postgres = await get_postgres_manager()
+        
+        # Generate spreadsheet_id from user_id and instance_id
+        spreadsheet_id = f"{request.user_id}_{request.instance_id or 'default'}"
+        
+        # Save or update spreadsheet data
+        await postgres.execute("""
+            INSERT INTO cyrex.spreadsheet_data 
+            (spreadsheet_id, user_id, instance_id, agent_name, columns, row_count, data, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+            ON CONFLICT (spreadsheet_id) DO UPDATE SET
+                columns = EXCLUDED.columns,
+                row_count = EXCLUDED.row_count,
+                data = EXCLUDED.data,
+                agent_name = EXCLUDED.agent_name,
+                updated_at = NOW()
+        """,
+            spreadsheet_id,
+            request.user_id,
+            request.instance_id,
+            request.agent_name,
+            json.dumps(request.columns),
+            request.row_count,
+            json.dumps(request.data),
+        )
+        
+        logger.info(f"Saved spreadsheet data for user {request.user_id}, instance {request.instance_id}")
+        return {
+            "success": True,
+            "spreadsheet_id": spreadsheet_id,
+            "message": "Spreadsheet data saved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to save spreadsheet data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/spreadsheet/load")
+async def load_spreadsheet_data(request: SpreadsheetLoadRequest):
+    """Load spreadsheet data from PostgreSQL by user_id"""
+    try:
+        await ensure_database_initialized()
+        postgres = await get_postgres_manager()
+        
+        # Generate spreadsheet_id from user_id and instance_id
+        spreadsheet_id = f"{request.user_id}_{request.instance_id or 'default'}"
+        
+        # Load spreadsheet data
+        row = await postgres.fetchrow("""
+            SELECT columns, row_count, data, agent_name, instance_id
+            FROM cyrex.spreadsheet_data
+            WHERE spreadsheet_id = $1
+        """, spreadsheet_id)
+        
+        if not row:
+            # Return empty spreadsheet if not found
+            return {
+                "success": True,
+                "found": False,
+                "columns": ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
+                "row_count": 20,
+                "data": {},
+                "agent_name": request.agent_name,
+                "instance_id": request.instance_id
+            }
+        
+        return {
+            "success": True,
+            "found": True,
+            "columns": json.loads(row['columns']) if isinstance(row['columns'], str) else row['columns'],
+            "row_count": row['row_count'],
+            "data": json.loads(row['data']) if isinstance(row['data'], str) else row['data'],
+            "agent_name": row['agent_name'],
+            "instance_id": row['instance_id']
+        }
+    except Exception as e:
+        logger.error(f"Failed to load spreadsheet data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/spreadsheet/list/{user_id}")
+async def list_user_spreadsheets(user_id: str):
+    """List all spreadsheets for a user"""
+    try:
+        await ensure_database_initialized()
+        postgres = await get_postgres_manager()
+        
+        rows = await postgres.fetch("""
+            SELECT spreadsheet_id, instance_id, agent_name, row_count, updated_at
+            FROM cyrex.spreadsheet_data
+            WHERE user_id = $1
+            ORDER BY updated_at DESC
+        """, user_id)
+        
+        return {
+            "success": True,
+            "spreadsheets": [
+                {
+                    "spreadsheet_id": row['spreadsheet_id'],
+                    "instance_id": row['instance_id'],
+                    "agent_name": row['agent_name'],
+                    "row_count": row['row_count'],
+                    "updated_at": row['updated_at'].isoformat() if row['updated_at'] else None
+                }
+                for row in rows
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Failed to list spreadsheets: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/spreadsheet/parse-document")
+async def parse_document_for_spreadsheet(
+    file: UploadFile = File(...),
+    instance_id: Optional[str] = Form(None),
+    user_id: str = Form("admin"),
+    use_ocr: bool = Form(True),
+    extract_tables: bool = Form(True),
+    detect_layout: bool = Form(True),  # Enable advanced analysis by default
+    ocr_language: Optional[str] = Form(None),  # e.g., 'eng', 'spa', 'eng+spa'
+    use_doclaynet: bool = Form(False),  # Use DocLayNet for advanced layout
+    start_cell: str = Form("A1"),
+):
+    """
+    Parse a document and extract data for spreadsheet import
+    
+    Supports: PDF, DOCX, XLSX, CSV, TXT, MD, PNG, JPG, TIFF, HTML
+    
+    Args:
+        file: Uploaded document file
+        instance_id: Optional spreadsheet instance ID
+        use_ocr: Whether to use OCR for images/scanned PDFs
+        extract_tables: Whether to extract tables from documents
+        detect_layout: Whether to perform layout analysis and ML-based classification (enabled by default)
+        start_cell: Starting cell for data insertion (e.g., "A1")
+    
+    Returns:
+        Parsed document data ready for spreadsheet import
+    """
+    try:
+        # Read file content
+        file_content = await file.read()
+        filename = file.filename or "unknown"
+        
+        # Validate file size (max 50MB)
+        max_size = 50 * 1024 * 1024  # 50MB
+        if len(file_content) > max_size:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum size is 50MB, got {len(file_content) / 1024 / 1024:.2f}MB"
+            )
+        
+        # Get learned template if available
+        from ..services.template_learning_service import get_template_learning_service
+        learning_service = get_template_learning_service()
+        template = await learning_service.get_template(user_id, "general")  # Will be updated after classification
+        
+        # Parse document
+        parser_service = get_document_parser_service()
+        parsed = await parser_service.parse_document(
+            file_content=file_content,
+            filename=filename,
+            use_ocr=use_ocr,
+            extract_tables=extract_tables,
+            detect_layout=detect_layout,
+            ocr_language=ocr_language,
+            use_doclaynet=use_doclaynet,
+        )
+        
+        # Apply learned template if available and category matches
+        if parsed.document_category and template:
+            category_template = await learning_service.get_template(user_id, parsed.document_category)
+            if category_template:
+                # Apply learned field mappings
+                if category_template['field_mappings']:
+                    for field, mapping in category_template['field_mappings'].items():
+                        if field in parsed.key_value_pairs:
+                            # Apply learned correction patterns
+                            pass  # Could apply corrections here
+                
+                # Apply learned column mappings
+                if category_template['column_mappings']:
+                    if parsed.column_mapping:
+                        parsed.column_mapping.update(category_template['column_mappings'])
+                    else:
+                        parsed.column_mapping = category_template['column_mappings'].copy()
+        
+        # Mark template success if extraction looks good
+        if parsed.document_category and parsed.confidence_scores.get('overall', 0) > 0.7:
+            category_template = await learning_service.get_template(user_id, parsed.document_category)
+            if category_template:
+                await learning_service.mark_success(category_template['template_id'])
+        
+        # Convert to spreadsheet format
+        spreadsheet_data = parser_service.to_spreadsheet_format(parsed, start_cell=start_cell)
+        
+        # Prepare response
+        response = {
+            "success": True,
+            "document_type": parsed.document_type.value if parsed.document_type else "unknown",
+            "document_category": parsed.document_category,  # ML-classified category
+            "filename": filename,
+            "parsed_data": {
+                "tables": parsed.tables,
+                "text_sections": parsed.text_sections,
+                "key_value_pairs": parsed.key_value_pairs,
+                "raw_text_preview": parsed.raw_text[:500] if parsed.raw_text else "",  # Preview only
+                "layout_elements": parsed.layout_elements,  # Layout structure
+            },
+            "spreadsheet_mapping": spreadsheet_data,
+            "column_mapping": parsed.column_mapping,  # Smart column suggestions
+            "confidence_scores": parsed.confidence_scores,
+            "metadata": parsed.metadata,
+            "warnings": [],
+        }
+        
+        # Add warnings if needed
+        if parsed.confidence_scores.get('overall', 0) < 0.5:
+            response["warnings"].append("Low confidence in extraction. Please review the data.")
+        if parsed.metadata.get('ocr_used'):
+            response["warnings"].append("OCR was used. Accuracy may be lower than text-based extraction.")
+        
+        logger.info(f"Successfully parsed document: {filename}, type: {parsed.document_type.value}")
+        return response
+        
+    except ValueError as e:
+        logger.error(f"Invalid document format: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except ImportError as e:
+        logger.error(f"Missing dependency: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing required dependency. Please install: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error parsing document: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse document: {str(e)}")
+
+
+@router.post("/spreadsheet/parse-document-batch")
+async def parse_documents_batch(
+    files: List[UploadFile] = File(...),
+    instance_id: Optional[str] = Form(None),
+    user_id: str = Form("admin"),
+    use_ocr: bool = Form(True),
+    extract_tables: bool = Form(True),
+    detect_layout: bool = Form(True),
+    ocr_language: Optional[str] = Form(None),
+    use_doclaynet: bool = Form(False),
+    start_cell: str = Form("A1"),
+):
+    """
+    Parse multiple documents in batch
+    
+    Args:
+        files: List of uploaded document files
+        instance_id: Optional spreadsheet instance ID
+        user_id: User ID for template learning
+        use_ocr: Whether to use OCR
+        extract_tables: Whether to extract tables
+        detect_layout: Whether to perform layout analysis
+        ocr_language: OCR language code
+        use_doclaynet: Use DocLayNet for layout
+        start_cell: Starting cell for data insertion
+    
+    Returns:
+        List of parsed documents with results
+    """
+    try:
+        if len(files) > 10:  # Limit batch size
+            raise HTTPException(status_code=400, detail="Maximum 10 files per batch")
+        
+        results = []
+        parser_service = get_document_parser_service()
+        
+        for idx, file in enumerate(files):
+            try:
+                file_content = await file.read()
+                filename = file.filename or f"document_{idx + 1}"
+                
+                # Validate file size
+                max_size = 50 * 1024 * 1024  # 50MB
+                if len(file_content) > max_size:
+                    results.append({
+                        "filename": filename,
+                        "success": False,
+                        "error": f"File too large: {len(file_content) / 1024 / 1024:.2f}MB",
+                    })
+                    continue
+                
+                # Parse document
+                parsed = await parser_service.parse_document(
+                    file_content=file_content,
+                    filename=filename,
+                    use_ocr=use_ocr,
+                    extract_tables=extract_tables,
+                    detect_layout=detect_layout,
+                    ocr_language=ocr_language,
+                    use_doclaynet=use_doclaynet,
+                )
+                
+                # Convert to spreadsheet format
+                spreadsheet_data = parser_service.to_spreadsheet_format(parsed, start_cell=start_cell)
+                
+                results.append({
+                    "filename": filename,
+                    "success": True,
+                    "document_type": parsed.document_type.value if parsed.document_type else "unknown",
+                    "document_category": parsed.document_category,
+                    "spreadsheet_mapping": spreadsheet_data,
+                    "confidence_scores": parsed.confidence_scores,
+                    "metadata": parsed.metadata,
+                })
+                
+            except Exception as e:
+                logger.error(f"Error parsing file {filename}: {e}", exc_info=True)
+                results.append({
+                    "filename": filename,
+                    "success": False,
+                    "error": str(e),
+                })
+        
+        return {
+            "success": True,
+            "total_files": len(files),
+            "successful": sum(1 for r in results if r.get("success")),
+            "failed": sum(1 for r in results if not r.get("success")),
+            "results": results,
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in batch parsing: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to parse documents: {str(e)}")
+
+
+@router.post("/spreadsheet/save-correction")
+async def save_document_correction(
+    user_id: str,
+    document_category: str,
+    original_extraction: Dict[str, Any],
+    corrected_data: Dict[str, Any],
+    correction_type: str = "field_mapping",
+    correction_details: Optional[Dict[str, Any]] = None,
+):
+    """
+    Save a user correction for template learning
+    
+    Args:
+        user_id: User ID
+        document_category: Document category (invoice, receipt, etc.)
+        original_extraction: Original extracted data
+        corrected_data: User-corrected data
+        correction_type: Type of correction
+        correction_details: Additional correction details
+    
+    Returns:
+        Correction ID and learning status
+    """
+    try:
+        from ..services.template_learning_service import get_template_learning_service
+        
+        learning_service = get_template_learning_service()
+        correction_id = await learning_service.save_correction(
+            user_id=user_id,
+            document_category=document_category,
+            original_extraction=original_extraction,
+            corrected_data=corrected_data,
+            correction_type=correction_type,
+            correction_details=correction_details,
+        )
+        
+        # Learn from corrections
+        learned_patterns = await learning_service.learn_from_corrections(
+            user_id=user_id,
+            document_category=document_category,
+        )
+        
+        return {
+            "success": True,
+            "correction_id": correction_id,
+            "learned_patterns": learned_patterns,
+            "message": "Correction saved and patterns learned",
+        }
+        
+    except Exception as e:
+        logger.error(f"Error saving correction: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save correction: {str(e)}")
 

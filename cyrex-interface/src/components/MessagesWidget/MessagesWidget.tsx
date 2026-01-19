@@ -3,7 +3,7 @@
  * Can be opened from anywhere in the interface
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FaComments, FaTimes, FaPlus, FaUsers, FaRobot, FaChevronDown, FaChevronUp } from 'react-icons/fa';
 import './MessagesWidget.css';
 
@@ -31,6 +31,16 @@ interface MessagesWidgetProps {
   onClose: () => void;
 }
 
+interface AgentType {
+  id: string;
+  name: string;
+  description: string;
+  template_key: string;
+  temperature?: number;
+  max_tokens?: number;
+  tools?: string[];
+}
+
 export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   const [activeView, setActiveView] = useState<'list' | 'chat' | 'group-chat'>('list');
   const [agentChats, setAgentChats] = useState<AgentChat[]>([]);
@@ -40,6 +50,12 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   const [messages, setMessages] = useState<any[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [agentTypes, setAgentTypes] = useState<AgentType[]>([]);
+  const [selectedAgentType, setSelectedAgentType] = useState<string>('conversational');
+  const [newAgentName, setNewAgentName] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('llama3:8b');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch agent chats
@@ -47,8 +63,37 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     if (isOpen && activeView === 'list') {
       fetchAgentChats();
       fetchGroupChats();
+      fetchAgentTypes();
+      fetchModels();
     }
   }, [isOpen, activeView]);
+
+  const fetchAgentTypes = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/agent-types`);
+      if (response.ok) {
+        const data = await response.json();
+        setAgentTypes(data.agent_types || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch agent types:', error);
+    }
+  };
+
+  const fetchModels = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/models`);
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableModels(data.model_names || ['llama3:8b']);
+        if (data.model_names && data.model_names.length > 0) {
+          setSelectedModel(data.model_names[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch models:', error);
+    }
+  };
 
   const fetchAgentChats = async () => {
     try {
@@ -79,11 +124,36 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     }
   };
 
-  const openChat = (chat: AgentChat) => {
+  const openChat = async (chat: AgentChat) => {
     setSelectedChat(chat);
     setSelectedGroupChat(null);
     setActiveView('chat');
-    setMessages([]);
+    // Don't clear messages immediately - load history first to avoid flicker
+    
+    // Load conversation history
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/${chat.instanceId}/conversation`);
+      if (response.ok) {
+        const data = await response.json();
+        const history = data.messages || [];
+        // Map history messages properly, ensuring content is a string
+        const mappedMessages = history.map((msg: any, index: number) => ({
+          id: msg.message_id || `msg-hist-${index}-${Date.now()}`,
+          role: msg.role || 'user',
+          content: String(msg.content || ''),
+          timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+          streaming: false,
+        }));
+        setMessages(mappedMessages);
+      } else {
+        // If no history, start with empty array
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Failed to load conversation history:', error);
+      // On error, start with empty array
+      setMessages([]);
+    }
   };
 
   const openGroupChat = (groupChat: GroupChat) => {
@@ -91,6 +161,53 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     setSelectedChat(null);
     setActiveView('group-chat');
     setMessages([]);
+  };
+
+  const createAgent = async () => {
+    if (!newAgentName.trim()) {
+      alert('Please enter an agent name');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const agentType = agentTypes.find(t => t.id === selectedAgentType);
+      const response = await fetch(`${API_BASE}/api/agent/initialize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newAgentName,
+          agent_type: selectedAgentType,
+          model: selectedModel,
+          temperature: agentType?.temperature || 0.7,
+          max_tokens: agentType?.max_tokens || 2000,
+          tools: agentType?.tools || [],
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Refresh agent chats
+        await fetchAgentChats();
+        // Close dialog and open the new chat
+        setShowCreateDialog(false);
+        setNewAgentName('');
+        const newChat: AgentChat = {
+          instanceId: data.instance_id,
+          agentId: data.agent_id,
+          name: data.name || newAgentName,
+        };
+        await openChat(newChat);
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to create agent: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to create agent:', error);
+      alert('Failed to create agent. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const sendMessage = async () => {
@@ -123,10 +240,11 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
         if (response.ok) {
           const reader = response.body?.getReader();
           const decoder = new TextDecoder();
-          let fullContent = '';
+          const messageId = `msg-${Date.now()}-response`;
+          const contentRef = { current: '' }; // Use ref to track content across closures
 
           const assistantMessage = {
-            id: `msg-${Date.now()}-response`,
+            id: messageId,
             role: 'assistant',
             content: '',
             timestamp: new Date().toISOString(),
@@ -139,28 +257,83 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
               const { done, value } = await reader.read();
               if (done) break;
 
-              const chunk = decoder.decode(value);
+              // Decode chunk - handle incomplete UTF-8 sequences
+              let chunk = '';
+              try {
+                chunk = decoder.decode(value, { stream: true });
+              } catch (e) {
+                console.warn('Decode error, trying with flush:', e);
+                chunk = decoder.decode(value, { stream: false });
+              }
+              
               const lines = chunk.split('\n').filter(line => line.trim());
 
               for (const line of lines) {
                 try {
                   const data = JSON.parse(line);
-                  if (data.type === 'token') {
-                    fullContent += data.content;
+                  if (data.type === 'token' && data.content) {
+                    // Accumulate content in ref
+                    contentRef.current += data.content;
+                    // Use functional update with message ID to ensure we update the correct message
                     setMessages(prev => {
-                      const updated = [...prev];
-                      const lastIdx = updated.length - 1;
-                      if (updated[lastIdx]?.streaming) {
-                        updated[lastIdx] = { ...updated[lastIdx], content: fullContent, streaming: false };
-                      }
+                      const updated = prev.map(msg => {
+                        if (msg.id === messageId) {
+                          return { 
+                            ...msg, 
+                            content: contentRef.current,
+                            streaming: true // Keep streaming true until done
+                          };
+                        }
+                        return msg;
+                      });
+                      return updated;
+                    });
+                  } else if (data.type === 'done') {
+                    // Mark streaming as complete
+                    setMessages(prev => {
+                      const updated = prev.map(msg => {
+                        if (msg.id === messageId) {
+                          return { ...msg, streaming: false };
+                        }
+                        return msg;
+                      });
+                      return updated;
+                    });
+                  } else if (data.type === 'error') {
+                    setMessages(prev => {
+                      const updated = prev.map(msg => {
+                        if (msg.id === messageId) {
+                          return { ...msg, content: data.content || 'Error occurred', streaming: false, isError: true };
+                        }
+                        return msg;
+                      });
                       return updated;
                     });
                   }
-                } catch {
+                } catch (e) {
                   // Non-JSON line, ignore
+                  console.debug('Failed to parse line:', line.substring(0, 100), e);
                 }
               }
             }
+            
+            // Flush decoder and ensure streaming is marked as complete
+            try {
+              decoder.decode(new Uint8Array(), { stream: false });
+            } catch (e) {
+              // Ignore flush errors
+            }
+            
+            // Final update to ensure streaming is marked as complete
+            setMessages(prev => {
+              const updated = prev.map(msg => {
+                if (msg.id === messageId) {
+                  return { ...msg, content: contentRef.current, streaming: false };
+                }
+                return msg;
+              });
+              return updated;
+            });
           }
         }
       } else if (selectedGroupChat) {
@@ -263,12 +436,8 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
         {activeView === 'list' && (
           <div className="messages-widget-content">
             <div className="messages-widget-actions">
-              <button className="btn-primary btn-small" onClick={() => {
-                // Open agent playground or create new chat
-                window.location.hash = '#agent-playground';
-                onClose();
-              }}>
-                <FaPlus /> New Chat
+              <button className="btn-primary btn-small" onClick={() => setShowCreateDialog(true)}>
+                <FaPlus /> New Agent
               </button>
               <button className="btn-secondary btn-small" onClick={() => {
                 // Create group chat
@@ -281,6 +450,85 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
                 <FaUsers /> New Group
               </button>
             </div>
+
+            {showCreateDialog && (
+              <div className="modal-overlay" onClick={() => setShowCreateDialog(false)}>
+                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3>Create New Agent</h3>
+                    <button className="btn-icon" onClick={() => setShowCreateDialog(false)}>
+                      <FaTimes />
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="form-group">
+                      <label>Agent Name</label>
+                      <input
+                        type="text"
+                        value={newAgentName}
+                        onChange={(e) => setNewAgentName(e.target.value)}
+                        placeholder="Enter agent name..."
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Agent Type</label>
+                      <select
+                        value={selectedAgentType}
+                        onChange={(e) => setSelectedAgentType(e.target.value)}
+                        className="form-select"
+                      >
+                        {agentTypes.map(type => (
+                          <option key={type.id} value={type.id}>
+                            {type.name} - {type.description}
+                          </option>
+                        ))}
+                      </select>
+                      {agentTypes.find(t => t.id === selectedAgentType) && (
+                        <p className="form-help">
+                          {agentTypes.find(t => t.id === selectedAgentType)?.description}
+                        </p>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label>Model</label>
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="form-select"
+                      >
+                        {availableModels.map(model => (
+                          <option key={model} value={model}>{model}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {agentTypes.find(t => t.id === selectedAgentType)?.tools && 
+                     agentTypes.find(t => t.id === selectedAgentType)!.tools!.length > 0 && (
+                      <div className="form-group">
+                        <label>Available Tools</label>
+                        <div className="tools-list">
+                          {agentTypes.find(t => t.id === selectedAgentType)!.tools!.map(tool => (
+                            <span key={tool} className="tool-badge">{tool}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button className="btn-secondary" onClick={() => setShowCreateDialog(false)}>
+                      Cancel
+                    </button>
+                    <button 
+                      className="btn-primary" 
+                      onClick={createAgent}
+                      disabled={isLoading || !newAgentName.trim()}
+                    >
+                      {isLoading ? 'Creating...' : 'Create Agent'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="messages-list">
               <h4><FaRobot /> Agent Chats</h4>
@@ -391,4 +639,5 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     </div>
   );
 }
+
 

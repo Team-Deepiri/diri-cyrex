@@ -14,6 +14,230 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Function to detect system RAM
+detect_system_ram() {
+    if [ "$OS_TYPE" = "macos" ]; then
+        # macOS: Get total physical memory in GB
+        RAM_BYTES=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
+        SYSTEM_RAM_GB=$((RAM_BYTES / 1024 / 1024 / 1024))
+    elif [ "$OS_TYPE" = "linux" ]; then
+        # Linux: Get total memory in GB
+        RAM_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}' || echo "0")
+        SYSTEM_RAM_GB=$((RAM_KB / 1024 / 1024))
+    else
+        SYSTEM_RAM_GB=0
+    fi
+    
+    # Round to nearest integer
+    if [ "$SYSTEM_RAM_GB" -lt 1 ]; then
+        SYSTEM_RAM_GB=0
+    fi
+}
+
+# Function to detect GPU VRAM
+detect_gpu_vram() {
+    GPU_VRAM_GB=0
+    
+    if [ "$HAS_NVIDIA_GPU" = true ] && command_exists nvidia-smi; then
+        # Get VRAM in MB from first GPU, convert to GB
+        # Handle both single and multiple GPU outputs
+        VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -n 1 | awk '{print $1}' | tr -d ' ' || echo "0")
+        if [ -n "$VRAM_MB" ] && [ "$VRAM_MB" != "0" ] && [ "$VRAM_MB" != "" ]; then
+            # Convert MB to GB (round down for safety)
+            GPU_VRAM_GB=$((VRAM_MB / 1024))
+        fi
+    elif [ "$HAS_APPLE_SILICON" = true ]; then
+        # Apple Silicon: Use unified memory (same as system RAM)
+        # For Apple Silicon, the GPU shares system RAM, so we use system RAM as VRAM estimate
+        GPU_VRAM_GB=$SYSTEM_RAM_GB
+    fi
+    
+    # Ensure we have a reasonable value
+    if [ "$GPU_VRAM_GB" -lt 1 ]; then
+        GPU_VRAM_GB=0
+    fi
+}
+
+# Function to categorize model based on hardware
+# Returns: "recommended", "usable", "marginal", or "no"
+# Based on exact setup requirements provided
+categorize_model() {
+    local model_name=$1
+    local ram_gb=$2
+    local vram_gb=$3
+    
+    # Determine setup category
+    # Handle edge cases: 15GB VRAM is close to 16GB, treat as Setup 5
+    # Also handle cases where RAM is close to 32GB (e.g., 30GB+)
+    local setup="unknown"
+    if ([ "$ram_gb" -ge 32 ] || [ "$ram_gb" -ge 30 ]) && ([ "$vram_gb" -ge 16 ] || [ "$vram_gb" -ge 15 ]); then
+        setup="setup5"  # 32GB+ RAM + 15GB+ VRAM (best experience)
+    elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 10 ]; then
+        setup="setup4"  # 32GB RAM + 10GB+ VRAM
+    elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 8 ]; then
+        setup="setup3"  # 32GB RAM + 8GB+ VRAM
+    elif [ "$ram_gb" -ge 16 ] && [ "$vram_gb" -ge 10 ]; then
+        setup="setup2"  # 16GB RAM + 10GB+ VRAM
+    elif [ "$ram_gb" -ge 16 ] && [ "$vram_gb" -ge 8 ]; then
+        setup="setup1"  # 16GB RAM + 8GB+ VRAM
+    elif [ "$ram_gb" -ge 16 ] || [ "$vram_gb" -ge 8 ]; then
+        setup="basic"   # At least 16GB RAM or 8GB VRAM
+    else
+        setup="minimal" # Less than 16GB RAM and 8GB VRAM
+    fi
+    
+    # Categorize based on model name and setup
+    case "$model_name" in
+        # Small models (1-3B) - Safe on all setups
+        "llama3.2:1b"|"llama3.2:3b"|"gemma2:2b"|"phi3:mini")
+            if [ "$ram_gb" -ge 8 ]; then
+                echo "recommended"
+            else
+                echo "usable"
+            fi
+            ;;
+        
+        # 7B models - Safe on Setup 1+
+        "mistral:7b"|"neural-chat:7b"|"qwen2.5:7b"|"gemma:7b"|"yi:6b"|"openchat:7b"|"zephyr:7b"|"nous-hermes:7b"|"mythomax:7b"|"dolphin-mistral:7b"|"orca-mini:7b")
+            if [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+                echo "recommended"
+            elif [ "$ram_gb" -ge 16 ]; then
+                echo "usable"
+            elif [ "$ram_gb" -ge 8 ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # 8B models
+        "llama3:8b"|"llama3.1:8b")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
+                echo "recommended"
+            elif [ "$setup" = "setup1" ]; then
+                echo "usable"
+            elif [ "$ram_gb" -ge 16 ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # 9B models
+        "gemma2:9b"|"yi:9b")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
+                echo "recommended"
+            elif [ "$setup" = "setup1" ]; then
+                echo "usable"
+            elif [ "$ram_gb" -ge 32 ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # 11-12B models
+        "mistral-nemo:12b"|"falcon:11b")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
+                echo "recommended"
+            elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 8 ]; then
+                echo "usable"
+            else
+                echo "marginal"
+            fi
+            ;;
+        
+        # 13B models
+        "vicuna:13b"|"openhermes:13b")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ]; then
+                echo "recommended"
+            elif [ "$ram_gb" -ge 32 ]; then
+                echo "usable"
+            else
+                echo "marginal"
+            fi
+            ;;
+        
+        # 27B models
+        "gemma2:27b")
+            if [ "$setup" = "setup5" ]; then
+                echo "recommended"
+            elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 10 ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # Mixture of experts
+        "mixtral:8x7b")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # 70B models - only for 48GB+ VRAM
+        "llama3.1:70b")
+            if [ "$vram_gb" -ge 48 ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # Coding models - 7B
+        "codellama:7b"|"deepseek-coder:6.7b"|"qwen2.5-coder:7b"|"starcoder2:7b"|"wizardcoder:7b")
+            if [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+                echo "recommended"
+            elif [ "$ram_gb" -ge 16 ]; then
+                echo "usable"
+            else
+                echo "marginal"
+            fi
+            ;;
+        
+        # Coding models - 13B
+        "codellama:13b"|"wizardcoder:13b")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
+                echo "recommended"
+            elif [ "$ram_gb" -ge 32 ]; then
+                echo "usable"
+            else
+                echo "marginal"
+            fi
+            ;;
+        
+        # Phi3 medium
+        "phi3:medium")
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
+                echo "usable"
+            elif [ "$setup" = "setup1" ]; then
+                echo "usable"
+            elif [ "$ram_gb" -ge 32 ]; then
+                echo "marginal"
+            else
+                echo "no"
+            fi
+            ;;
+        
+        # Default for unknown models
+        *)
+            # Conservative default based on resources
+            if [ "$setup" = "setup5" ]; then
+                echo "recommended"
+            elif [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ]; then
+                echo "usable"
+            elif [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+                echo "usable"
+            else
+                echo "marginal"
+            fi
+            ;;
+    esac
+}
+
 # Detect operating system
 OS_TYPE="unknown"
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -25,7 +249,15 @@ fi
 # Detection flags
 HAS_NVIDIA_GPU=false
 HAS_APPLE_SILICON=false
+HAS_AMD_GPU=false
+# TODO: ROCm detection for AMD GPUs
+# AMD GPU support via ROCm is not yet implemented
+# Future enhancement: Detect AMD GPUs and ROCm installation
 HAS_CPU_ONLY=false
+
+# Hardware specs (will be detected)
+GPU_VRAM_GB=0
+SYSTEM_RAM_GB=0
 
 # Path 1: Check for Mac/Apple Silicon
 if [ "$OS_TYPE" = "macos" ]; then
@@ -119,6 +351,9 @@ if [ "$OS_TYPE" = "macos" ]; then
         echo ""
         echo "ℹ️  Apple Silicon (Metal) acceleration is automatically used by Ollama"
         echo "   No additional driver installation needed for macOS"
+        echo ""
+        echo "ℹ️  Note: Unified memory is shared between CPU and GPU"
+        echo "   Performance depends on system load; memory pressure + swap can hurt performance"
         echo ""
     else
         echo "⚠️  Intel Mac detected (not Apple Silicon)"
@@ -394,16 +629,59 @@ if [ "$DRIVERS_INSTALLED" = true ] && [ "$OS_TYPE" = "linux" ]; then
     echo ""
 fi
 
+# Detect hardware specs
+detect_system_ram
+detect_gpu_vram
+
 # Summary of detection
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📊 Detection Summary:"
 if [ "$HAS_NVIDIA_GPU" = true ] && [ "$DRIVERS_INSTALLED" = true ]; then
     echo "   ✅ NVIDIA GPU detected and configured"
+    if [ "$GPU_VRAM_GB" -gt 0 ]; then
+        echo "   💾 GPU VRAM: ${GPU_VRAM_GB} GB"
+    fi
 elif [ "$HAS_APPLE_SILICON" = true ]; then
     echo "   ✅ Apple Silicon (M1/M2/M3/M4) detected"
+    if [ "$GPU_VRAM_GB" -gt 0 ]; then
+        echo "   💾 Unified Memory (VRAM): ${GPU_VRAM_GB} GB"
+    fi
 elif [ "$HAS_CPU_ONLY" = true ]; then
     echo "   ℹ️  CPU-only mode (no GPU acceleration)"
+    echo "   💡 Note: AMD GPU (ROCm) support is planned for future versions"
 fi
+
+if [ "$SYSTEM_RAM_GB" -gt 0 ]; then
+    echo "   💾 System RAM: ${SYSTEM_RAM_GB} GB"
+fi
+
+# Determine setup category
+SETUP_CATEGORY="unknown"
+# Handle edge cases: 15GB VRAM is close to 16GB, treat as Setup 5
+# Also handle cases where RAM is close to 32GB (e.g., 30GB+)
+if ([ "$SYSTEM_RAM_GB" -ge 32 ] || [ "$SYSTEM_RAM_GB" -ge 30 ]) && ([ "$GPU_VRAM_GB" -ge 16 ] || [ "$GPU_VRAM_GB" -ge 15 ]); then
+    SETUP_CATEGORY="setup5"
+    echo "   🎯 Setup: ${SYSTEM_RAM_GB}GB RAM + ${GPU_VRAM_GB}GB VRAM (Best Experience - Setup 5 equivalent)"
+elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
+    SETUP_CATEGORY="setup4"
+    echo "   🎯 Setup: 32GB RAM + 10GB VRAM"
+elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 8 ]; then
+    SETUP_CATEGORY="setup3"
+    echo "   🎯 Setup: 32GB RAM + 8GB VRAM"
+elif [ "$SYSTEM_RAM_GB" -ge 16 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
+    SETUP_CATEGORY="setup2"
+    echo "   🎯 Setup: 16GB RAM + 10GB VRAM"
+elif [ "$SYSTEM_RAM_GB" -ge 16 ] && [ "$GPU_VRAM_GB" -ge 8 ]; then
+    SETUP_CATEGORY="setup1"
+    echo "   🎯 Setup: 16GB RAM + 8GB VRAM"
+elif [ "$SYSTEM_RAM_GB" -ge 16 ] || [ "$GPU_VRAM_GB" -ge 8 ]; then
+    SETUP_CATEGORY="basic"
+    echo "   🎯 Setup: Basic (${SYSTEM_RAM_GB}GB RAM, ${GPU_VRAM_GB}GB VRAM)"
+else
+    SETUP_CATEGORY="minimal"
+    echo "   🎯 Setup: Minimal (${SYSTEM_RAM_GB}GB RAM, ${GPU_VRAM_GB}GB VRAM)"
+fi
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -430,6 +708,12 @@ fi
 echo "📦 Using container: $CONTAINER_NAME"
 echo ""
 
+# Function to check if a model is installed
+is_model_installed() {
+    local model_name=$1
+    echo "$MODELS" | grep -q "^${model_name}[[:space:]]" || echo "$MODELS" | grep -q "^${model_name}$"
+}
+
 # List models in the container
 echo "📋 Checking for installed models..."
 MODELS=$(docker exec "$CONTAINER_NAME" ollama list 2>/dev/null || echo "")
@@ -437,102 +721,442 @@ MODELS=$(docker exec "$CONTAINER_NAME" ollama list 2>/dev/null || echo "")
 # Check if there are any models (ollama list outputs header + models, so we check for more than 1 line)
 MODEL_COUNT=$(echo "$MODELS" | grep -v "^NAME" | grep -v "^$" | wc -l | tr -d ' ')
 
+# Extract installed model names (for comparison)
+INSTALLED_MODEL_NAMES=()
+if [ "$MODEL_COUNT" -gt 0 ]; then
+    echo "✅ Found $MODEL_COUNT model(s) in Ollama container:"
+    echo ""
+    echo "$MODELS"
+    echo ""
+    
+    # Extract model names (first column, skip header)
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^[[:space:]]*([^[:space:]]+) ]]; then
+            model_name="${BASH_REMATCH[1]}"
+            if [ "$model_name" != "NAME" ]; then
+                INSTALLED_MODEL_NAMES+=("$model_name")
+            fi
+        fi
+    done <<< "$MODELS"
+fi
+
+# Always show the menu, regardless of whether models exist
 if [ "$MODEL_COUNT" -eq 0 ]; then
     echo "⚠️  No models found in Ollama container"
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "⚠️  IMPORTANT: This project uses llama3:8b as the DEFAULT model"
-    echo "   It is recommended to install llama3:8b for compatibility with this project"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-    echo "Available models to install:"
-    echo ""
-    echo "  📌 RECOMMENDED (Project Default):"
-    echo "    1) llama3:8b (4.7GB) - ⭐ DEFAULT - Used by this project"
-    echo ""
-    echo "  🦙 Llama Models:"
-    echo "    2) llama3.2:1b (1.3GB) - Small, fast"
-    echo "    3) llama3.2:3b (2.0GB) - Balanced"
-    echo "    4) llama3.1:8b (4.7GB) - Latest Llama 3.1"
-    echo "    5) llama3.1:70b (40GB) - Large, powerful"
-    echo ""
-    echo "  🌟 Mistral Models:"
-    echo "    6) mistral:7b (4.1GB) - Efficient, high quality"
-    echo "    7) mistral-nemo:12b (7.0GB) - Enhanced Mistral"
-    echo ""
-    echo "  💎 Gemma Models:"
-    echo "    8) gemma2:2b (1.4GB) - Small, efficient"
-    echo "    9) gemma2:9b (5.4GB) - Balanced"
-    echo "   10) gemma2:27b (16GB) - Large, powerful"
-    echo ""
-    echo "  🧠 Phi Models:"
-    echo "   11) phi3:mini (2.3GB) - Small, fast"
-    echo "   12) phi3:medium (7.0GB) - Balanced"
-    echo ""
-    echo "  💻 Code Models:"
-    echo "   13) codellama:7b (3.8GB) - Code generation"
-    echo "   14) codellama:13b (7.3GB) - Larger code model"
-    echo "   15) deepseek-coder:6.7b (4.1GB) - Advanced coding"
-    echo ""
-    echo "  🌟 Other Models:"
-    echo "   16) qwen2.5:7b (4.4GB) - Alibaba's model"
-    echo "   17) neural-chat:7b (4.1GB) - Conversational AI"
-    echo ""
-    echo "  🔧 Custom:"
-    echo "   18) Enter custom model name"
-    echo ""
-    echo "Enter model number(s) to install (comma-separated, e.g., 1,6,13):"
-    read -r selection
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "⚠️  IMPORTANT: This project uses llama3:8b as the DEFAULT model"
+echo "   It is recommended to install llama3:8b for compatibility with this project"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+# Define all models with their details
+# Using | as delimiter since model names contain colons
+#
+# NOTE: Model list is curated & conservative
+# Update periodically as Ollama registry evolves
+# - New models are added regularly
+# - Some tags may be deprecated or renamed
+# - Check Ollama's model library for latest: https://ollama.com/library
+#
+declare -a MODEL_LIST=(
+    "llama3:8b|4.7GB|⭐ DEFAULT - Used by this project"
+    "llama3.2:1b|1.3GB|Small, fast"
+    "llama3.2:3b|2.0GB|Balanced"
+    "llama3.1:8b|4.7GB|Latest Llama 3.1"
+    "llama3.1:70b|40GB|Large, powerful (requires 48GB+ VRAM)"
+    "mistral:7b|4.1GB|Efficient, high quality"
+    "mistral-nemo:12b|7.0GB|Enhanced Mistral"
+    "mixtral:8x7b|26GB|Mixture of experts"
+    "gemma2:2b|1.4GB|Small, efficient"
+    "gemma2:9b|5.4GB|Balanced"
+    "gemma2:27b|16GB|Large, powerful"
+    "gemma:7b|4.6GB|Google's Gemma"
+    "phi3:mini|2.3GB|Small, fast"
+    "phi3:medium|7.0GB|Balanced"
+    "codellama:7b|3.8GB|Code generation"
+    "codellama:13b|7.3GB|Larger code model"
+    "deepseek-coder:6.7b|4.1GB|Advanced coding"
+    "qwen2.5:7b|4.4GB|Alibaba's model"
+    "qwen2.5-coder:7b|4.4GB|Alibaba's coding model"
+    "neural-chat:7b|4.1GB|Conversational AI"
+    "yi:6b|3.8GB|Yi model 6B"
+    "yi:9b|5.4GB|Yi model 9B"
+    "openchat:7b|4.1GB|OpenChat model"
+    "zephyr:7b|4.1GB|Zephyr model"
+    "nous-hermes:7b|4.1GB|Nous Hermes"
+    "mythomax:7b|4.1GB|MythoMax"
+    "dolphin-mistral:7b|4.1GB|Dolphin Mistral"
+    "orca-mini:7b|4.1GB|Orca Mini"
+    "vicuna:13b|7.3GB|Vicuna 13B"
+    "falcon:11b|6.0GB|Falcon 11B"
+    "openhermes:13b|7.3GB|OpenHermes"
+    "starcoder2:7b|4.1GB|StarCoder2"
+    "wizardcoder:7b|4.1GB|WizardCoder 7B"
+    "wizardcoder:13b|7.3GB|WizardCoder 13B"
+)
+
+# Calculate option numbers for special actions
+TOTAL_MODELS=${#MODEL_LIST[@]}
+CUSTOM_OPTION=$((TOTAL_MODELS + 1))
+REMOVE_OPTION=$((TOTAL_MODELS + 2))
+RECHECK_OPTION=$((TOTAL_MODELS + 3))
+
+# Categorize models
+declare -a RECOMMENDED_MODELS=()
+declare -a USABLE_MODELS=()
+declare -a MARGINAL_MODELS=()
+declare -a NO_MODELS=()
+
+MODEL_INDEX=1
+for model_info in "${MODEL_LIST[@]}"; do
+    IFS='|' read -r model_name model_size model_desc <<< "$model_info"
+    category=$(categorize_model "$model_name" "$SYSTEM_RAM_GB" "$GPU_VRAM_GB")
     
-    # Parse comma-separated selection
-    IFS=',' read -ra SELECTED <<< "$selection"
-    
-    # Model mapping
-    declare -A MODEL_MAP=(
-        ["1"]="llama3:8b"
-        ["2"]="llama3.2:1b"
-        ["3"]="llama3.2:3b"
-        ["4"]="llama3.1:8b"
-        ["5"]="llama3.1:70b"
-        ["6"]="mistral:7b"
-        ["7"]="mistral-nemo:12b"
-        ["8"]="gemma2:2b"
-        ["9"]="gemma2:9b"
-        ["10"]="gemma2:27b"
-        ["11"]="phi3:mini"
-        ["12"]="phi3:medium"
-        ["13"]="codellama:7b"
-        ["14"]="codellama:13b"
-        ["15"]="deepseek-coder:6.7b"
-        ["16"]="qwen2.5:7b"
-        ["17"]="neural-chat:7b"
-    )
-    
-    MODELS_TO_PULL=()
-    
-    for num in "${SELECTED[@]}"; do
-        num=$(echo "$num" | tr -d ' ') # Remove whitespace
-        
-        if [ "$num" == "18" ]; then
-            echo ""
-            echo "Enter custom model name (e.g., llama3:8b, mistral:7b):"
-            read -r custom_model
-            if [ -n "$custom_model" ]; then
-                MODELS_TO_PULL+=("$custom_model")
-            fi
-        elif [ -n "${MODEL_MAP[$num]}" ]; then
-            MODELS_TO_PULL+=("${MODEL_MAP[$num]}")
-        else
-            echo "⚠️  Invalid selection: $num (skipping)"
+    # Check if model is already installed
+    INSTALLED_MARKER=""
+    for installed_name in "${INSTALLED_MODEL_NAMES[@]}"; do
+        if [ "$installed_name" = "$model_name" ]; then
+            INSTALLED_MARKER=" [INSTALLED]"
+            break
         fi
     done
     
-    if [ ${#MODELS_TO_PULL[@]} -eq 0 ]; then
-        echo ""
-        echo "❌ No valid models selected. Exiting."
-        exit 0
+    case "$category" in
+        "recommended")
+            RECOMMENDED_MODELS+=("$MODEL_INDEX|$model_name|$model_size|$model_desc|$INSTALLED_MARKER")
+            ;;
+        "usable")
+            USABLE_MODELS+=("$MODEL_INDEX|$model_name|$model_size|$model_desc|$INSTALLED_MARKER")
+            ;;
+        "marginal")
+            MARGINAL_MODELS+=("$MODEL_INDEX|$model_name|$model_size|$model_desc|$INSTALLED_MARKER")
+            ;;
+        "no")
+            NO_MODELS+=("$MODEL_INDEX|$model_name|$model_size|$model_desc|$INSTALLED_MARKER")
+            ;;
+    esac
+    MODEL_INDEX=$((MODEL_INDEX + 1))
+done
+
+echo "Available models to install (filtered for your hardware):"
+echo ""
+
+# Display recommended models
+if [ ${#RECOMMENDED_MODELS[@]} -gt 0 ]; then
+    echo "  ✅ RECOMMENDED (Best for your hardware):"
+    for model_entry in "${RECOMMENDED_MODELS[@]}"; do
+        IFS='|' read -r idx name size desc installed <<< "$model_entry"
+        echo "    $idx) $name ($size) - $desc$installed"
+    done
+    echo ""
+fi
+
+# Display usable models
+if [ ${#USABLE_MODELS[@]} -gt 0 ]; then
+    echo "  ⚠️  USABLE (Will work but may be tight):"
+    for model_entry in "${USABLE_MODELS[@]}"; do
+        IFS='|' read -r idx name size desc installed <<< "$model_entry"
+        echo "    $idx) $name ($size) - $desc$installed"
+    done
+    echo ""
+fi
+
+# Display marginal models
+if [ ${#MARGINAL_MODELS[@]} -gt 0 ]; then
+    echo "  ⚠️  MARGINAL (May be slow or unstable):"
+    for model_entry in "${MARGINAL_MODELS[@]}"; do
+        IFS='|' read -r idx name size desc installed <<< "$model_entry"
+        echo "    $idx) $name ($size) - $desc$installed"
+    done
+    echo ""
+fi
+
+# Display not recommended models
+if [ ${#NO_MODELS[@]} -gt 0 ]; then
+    echo "  ❌ NOT RECOMMENDED (Insufficient hardware):"
+    for model_entry in "${NO_MODELS[@]}"; do
+        IFS='|' read -r idx name size desc installed <<< "$model_entry"
+        echo "    $idx) $name ($size) - $desc$installed"
+    done
+    echo ""
+fi
+
+    echo "  🔧 Custom:"
+    TOTAL_MODELS=${#MODEL_LIST[@]}
+    CUSTOM_OPTION=$((TOTAL_MODELS + 1))
+    REMOVE_OPTION=$((TOTAL_MODELS + 2))
+    RECHECK_OPTION=$((TOTAL_MODELS + 3))
+    echo "    $CUSTOM_OPTION) Enter custom model name"
+    echo ""
+    echo "  🗑️  Management:"
+    echo "    $REMOVE_OPTION) Remove existing model(s)"
+    echo "    $RECHECK_OPTION) Re-check hardware detection"
+    echo ""
+
+# Show best recommendation
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+if [ ${#RECOMMENDED_MODELS[@]} -gt 0 ]; then
+    FIRST_REC=$(echo "${RECOMMENDED_MODELS[0]}" | cut -d'|' -f1)
+    FIRST_REC_NAME=$(echo "${RECOMMENDED_MODELS[0]}" | cut -d'|' -f2)
+    echo "💡 Best recommendation for your setup: Model #$FIRST_REC ($FIRST_REC_NAME)"
+    
+    # Find highest model in recommended or usable categories
+    HIGHEST_MODEL=""
+    HIGHEST_MODEL_CAT=""
+    if [ ${#USABLE_MODELS[@]} -gt 0 ]; then
+        # Get the last usable model (likely the largest)
+        for model_entry in "${USABLE_MODELS[@]}"; do
+            IFS='|' read -r idx name size desc installed <<< "$model_entry"
+            HIGHEST_MODEL="$name"
+            HIGHEST_MODEL_CAT="usable"
+        done
     fi
     
+    if [ -n "$HIGHEST_MODEL" ]; then
+        echo "🎯 Highest model you can run: $HIGHEST_MODEL (see 'USABLE' section above)"
+    fi
+else
+    echo "⚠️  No models are recommended for your current hardware"
+    if [ ${#USABLE_MODELS[@]} -gt 0 ]; then
+        FIRST_USABLE=$(echo "${USABLE_MODELS[0]}" | cut -d'|' -f2)
+        echo "💡 Consider: $FIRST_USABLE (see 'USABLE' section above)"
+    fi
+fi
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+echo "Enter option number(s) to install (comma-separated, e.g., 1,6,13) or management option ($REMOVE_OPTION,$RECHECK_OPTION):"
+read -r selection
+    
+# Parse comma-separated selection
+IFS=',' read -ra SELECTED <<< "$selection"
+
+# Check for special management options first
+HANDLE_REMOVE=false
+HANDLE_RECHECK=false
+MODELS_TO_PULL=()
+
+for num in "${SELECTED[@]}"; do
+    num=$(echo "$num" | tr -d ' ') # Remove whitespace
+    
+    if [ "$num" == "$REMOVE_OPTION" ]; then
+        HANDLE_REMOVE=true
+    elif [ "$num" == "$RECHECK_OPTION" ]; then
+        HANDLE_RECHECK=true
+    fi
+done
+
+# Handle re-check hardware
+if [ "$HANDLE_RECHECK" = true ]; then
+    echo ""
+    echo "🔄 Re-checking hardware detection..."
+    echo ""
+    detect_system_ram
+    detect_gpu_vram
+    
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 Updated Detection Summary:"
+    if [ "$HAS_NVIDIA_GPU" = true ] && [ "$DRIVERS_INSTALLED" = true ]; then
+        echo "   ✅ NVIDIA GPU detected and configured"
+        if [ "$GPU_VRAM_GB" -gt 0 ]; then
+            echo "   💾 GPU VRAM: ${GPU_VRAM_GB} GB"
+        fi
+    elif [ "$HAS_APPLE_SILICON" = true ]; then
+        echo "   ✅ Apple Silicon (M1/M2/M3/M4) detected"
+        if [ "$GPU_VRAM_GB" -gt 0 ]; then
+            echo "   💾 Unified Memory (VRAM): ${GPU_VRAM_GB} GB"
+        fi
+    elif [ "$HAS_CPU_ONLY" = true ]; then
+        echo "   ℹ️  CPU-only mode (no GPU acceleration)"
+    fi
+    
+    if [ "$SYSTEM_RAM_GB" -gt 0 ]; then
+        echo "   💾 System RAM: ${SYSTEM_RAM_GB} GB"
+    fi
+    
+    # Determine setup category
+    SETUP_CATEGORY="unknown"
+    if [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 16 ]; then
+        SETUP_CATEGORY="setup5"
+        echo "   🎯 Setup: 32GB RAM + 16GB VRAM (Best Experience)"
+    elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
+        SETUP_CATEGORY="setup4"
+        echo "   🎯 Setup: 32GB RAM + 10GB VRAM"
+    elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 8 ]; then
+        SETUP_CATEGORY="setup3"
+        echo "   🎯 Setup: 32GB RAM + 8GB VRAM"
+    elif [ "$SYSTEM_RAM_GB" -ge 16 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
+        SETUP_CATEGORY="setup2"
+        echo "   🎯 Setup: 16GB RAM + 10GB VRAM"
+    elif [ "$SYSTEM_RAM_GB" -ge 16 ] && [ "$GPU_VRAM_GB" -ge 8 ]; then
+        SETUP_CATEGORY="setup1"
+        echo "   🎯 Setup: 16GB RAM + 8GB VRAM"
+    elif [ "$SYSTEM_RAM_GB" -ge 16 ] || [ "$GPU_VRAM_GB" -ge 8 ]; then
+        SETUP_CATEGORY="basic"
+        echo "   🎯 Setup: Basic (${SYSTEM_RAM_GB}GB RAM, ${GPU_VRAM_GB}GB VRAM)"
+    else
+        SETUP_CATEGORY="minimal"
+        echo "   🎯 Setup: Minimal (${SYSTEM_RAM_GB}GB RAM, ${GPU_VRAM_GB}GB VRAM)"
+    fi
+    
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    # If only re-check was selected, exit
+    if [ "$HANDLE_REMOVE" = false ] && [ ${#SELECTED[@]} -eq 1 ]; then
+        echo "✅ Hardware detection complete. Run the script again to see updated recommendations."
+        exit 0
+    fi
+fi
+
+# Handle remove models
+if [ "$HANDLE_REMOVE" = true ]; then
+    echo ""
+    echo "🗑️  Remove Existing Models"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    
+    if [ ${#INSTALLED_MODEL_NAMES[@]} -eq 0 ]; then
+        echo "ℹ️  No models installed to remove."
+    else
+        echo "Installed models:"
+        REMOVE_INDEX=1
+        declare -A REMOVE_MAP=()
+        for installed_name in "${INSTALLED_MODEL_NAMES[@]}"; do
+            echo "  $REMOVE_INDEX) $installed_name"
+            REMOVE_MAP["$REMOVE_INDEX"]="$installed_name"
+            REMOVE_INDEX=$((REMOVE_INDEX + 1))
+        done
+        echo ""
+        echo "Enter model number(s) to remove (comma-separated, e.g., 1,2):"
+        read -r remove_selection
+        
+        IFS=',' read -ra REMOVE_SELECTED <<< "$remove_selection"
+        MODELS_TO_REMOVE=()
+        
+        for num in "${REMOVE_SELECTED[@]}"; do
+            num=$(echo "$num" | tr -d ' ')
+            if [ -n "${REMOVE_MAP[$num]}" ]; then
+                MODELS_TO_REMOVE+=("${REMOVE_MAP[$num]}")
+            else
+                echo "⚠️  Invalid selection: $num (skipping)"
+            fi
+        done
+        
+        if [ ${#MODELS_TO_REMOVE[@]} -gt 0 ]; then
+            echo ""
+            echo "⚠️  You are about to remove ${#MODELS_TO_REMOVE[@]} model(s):"
+            for model in "${MODELS_TO_REMOVE[@]}"; do
+                echo "   • $model"
+            done
+            echo ""
+            echo "Continue? (y/n)"
+            read -r confirm_remove
+            
+            if [[ "$confirm_remove" =~ ^[Yy]$ ]]; then
+                REMOVED_COUNT=0
+                for model in "${MODELS_TO_REMOVE[@]}"; do
+                    echo "🗑️  Removing: $model"
+                    if docker exec "$CONTAINER_NAME" ollama rm "$model" 2>/dev/null; then
+                        echo "   ✅ Removed: $model"
+                        REMOVED_COUNT=$((REMOVED_COUNT + 1))
+                    else
+                        echo "   ❌ Failed to remove: $model"
+                    fi
+                done
+                echo ""
+                echo "✅ Removed $REMOVED_COUNT model(s)"
+                echo ""
+                echo "📋 Current models in container:"
+                docker exec "$CONTAINER_NAME" ollama list
+                echo ""
+            else
+                echo "Cancelled."
+            fi
+        fi
+    fi
+    
+    # If only remove was selected, exit
+    if [ ${#SELECTED[@]} -eq 1 ]; then
+        exit 0
+    fi
+fi
+
+# Model mapping - build dynamically from MODEL_LIST
+declare -A MODEL_MAP=()
+MAP_INDEX=1
+for model_info in "${MODEL_LIST[@]}"; do
+    IFS='|' read -r model_name model_size model_desc <<< "$model_info"
+    MODEL_MAP["$MAP_INDEX"]="$model_name"
+    MAP_INDEX=$((MAP_INDEX + 1))
+done
+
+WARNINGS=()
+
+for num in "${SELECTED[@]}"; do
+    num=$(echo "$num" | tr -d ' ') # Remove whitespace
+    
+    # Skip management options (already handled)
+    if [ "$num" == "$REMOVE_OPTION" ] || [ "$num" == "$RECHECK_OPTION" ]; then
+        continue
+    fi
+    
+    if [ "$num" == "$CUSTOM_OPTION" ]; then
+        echo ""
+        echo "Enter custom model name (e.g., llama3:8b, mistral:7b):"
+        read -r custom_model
+        if [ -n "$custom_model" ]; then
+            MODELS_TO_PULL+=("$custom_model")
+            # Check custom model compatibility
+            custom_category=$(categorize_model "$custom_model" "$SYSTEM_RAM_GB" "$GPU_VRAM_GB")
+            if [ "$custom_category" = "marginal" ]; then
+                WARNINGS+=("$custom_model may run slowly on your hardware")
+            elif [ "$custom_category" = "no" ]; then
+                WARNINGS+=("$custom_model is NOT recommended for your hardware (${SYSTEM_RAM_GB}GB RAM, ${GPU_VRAM_GB}GB VRAM)")
+            fi
+        fi
+    elif [ -n "${MODEL_MAP[$num]}" ]; then
+        model_name="${MODEL_MAP[$num]}"
+        MODELS_TO_PULL+=("$model_name")
+        
+        # Check compatibility and warn if needed
+        model_category=$(categorize_model "$model_name" "$SYSTEM_RAM_GB" "$GPU_VRAM_GB")
+        if [ "$model_category" = "usable" ]; then
+            WARNINGS+=("$model_name may be tight on your hardware")
+        elif [ "$model_category" = "marginal" ]; then
+            WARNINGS+=("$model_name may run slowly or be unstable on your hardware")
+        elif [ "$model_category" = "no" ]; then
+            WARNINGS+=("$model_name is NOT recommended for your hardware (${SYSTEM_RAM_GB}GB RAM, ${GPU_VRAM_GB}GB VRAM)")
+        fi
+    else
+        echo "⚠️  Invalid selection: $num (skipping)"
+    fi
+done
+
+# Show warnings if any
+if [ ${#WARNINGS[@]} -gt 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "⚠️  Compatibility Warnings:"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    for warning in "${WARNINGS[@]}"; do
+        echo "   • $warning"
+    done
+    echo ""
+    echo "Continue anyway? (y/n)"
+    read -r continue_anyway
+    if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+        echo "Cancelled. Please select models better suited for your hardware."
+        exit 0
+    fi
+    echo ""
+fi
+
+# Only proceed with pulling if there are models to pull
+if [ ${#MODELS_TO_PULL[@]} -gt 0 ]; then
     echo ""
     echo "📥 Pulling ${#MODELS_TO_PULL[@]} model(s)..."
     echo "   This may take several minutes depending on your internet connection and model sizes..."
@@ -574,14 +1198,10 @@ if [ "$MODEL_COUNT" -eq 0 ]; then
         echo "⚠️  Some models failed to install. You can try again later."
         exit 1
     fi
-else
-    echo "✅ Found $MODEL_COUNT model(s) in Ollama container:"
+elif [ "$HANDLE_REMOVE" = false ] && [ "$HANDLE_RECHECK" = false ]; then
+    # Only show this message if user didn't select any management options or models
     echo ""
-    echo "$MODELS"
-    echo ""
-    echo "ℹ️  To pull additional models, use:"
-    echo "   docker exec -it $CONTAINER_NAME ollama pull <model-name>"
-    echo ""
-    echo "   Or run this script again to see the model selection menu"
+    echo "ℹ️  No models selected for installation."
+    echo "   Select model numbers (1-17), custom model (18), remove models (19), or re-check hardware (20)"
 fi
 
