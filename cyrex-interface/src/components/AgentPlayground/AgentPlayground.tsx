@@ -23,7 +23,8 @@ import {
   FaChartLine,
   FaBrain,
   FaNetworkWired,
-  FaSyncAlt
+  FaSyncAlt,
+  FaTable
 } from 'react-icons/fa';
 import {
   TargetIcon,
@@ -34,6 +35,7 @@ import {
   GearIcon,
   TimerIcon
 } from './AgentIcons';
+import { LiveSpreadsheet, LiveSpreadsheetRef } from './LiveSpreadsheet';
 import './AgentPlayground.css';
 
 // Types
@@ -108,13 +110,19 @@ const AVAILABLE_TOOLS = [
   { id: 'db_query', name: 'Database Query', category: 'database' },
   { id: 'calculate', name: 'Calculator', category: 'math' },
   { id: 'search_documents', name: 'Search Documents', category: 'search' },
+  { id: 'spreadsheet_set_cell', name: 'Set Spreadsheet Cell', category: 'spreadsheet' },
+  { id: 'spreadsheet_get_cell', name: 'Get Spreadsheet Cell', category: 'spreadsheet' },
+  { id: 'spreadsheet_sum_range', name: 'Sum Spreadsheet Range', category: 'spreadsheet' },
+  { id: 'spreadsheet_avg_range', name: 'Average Spreadsheet Range', category: 'spreadsheet' },
+  { id: 'spreadsheet_add_row', name: 'Add Spreadsheet Row', category: 'spreadsheet' },
+  { id: 'spreadsheet_add_column', name: 'Add Spreadsheet Column', category: 'spreadsheet' },
 ];
 
 const API_BASE = import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
 
 export function AgentPlayground() {
   // State
-  const [activeTab, setActiveTab] = useState<'configure' | 'test' | 'monitor'>('configure');
+  const [activeTab, setActiveTab] = useState<'configure' | 'test' | 'monitor' | 'spreadsheet'>('configure');
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({
     agentId: '',
     agentType: 'conversational',
@@ -123,7 +131,7 @@ export function AgentPlayground() {
     temperature: 0.7,
     maxTokens: 2000,
     systemPrompt: 'You are a helpful AI assistant.',
-    tools: ['search_memory', 'store_memory'],
+    tools: ['search_memory', 'store_memory', 'spreadsheet_set_cell', 'spreadsheet_get_cell', 'spreadsheet_sum_range'],
   });
   const [agentInstance, setAgentInstance] = useState<AgentInstance | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -134,6 +142,7 @@ export function AgentPlayground() {
   const [ollamaStatus, setOllamaStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking');
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [liveToolCalls, setLiveToolCalls] = useState<ToolCall[]>([]);
+  const [spreadsheetMessageQueue, setSpreadsheetMessageQueue] = useState<string[]>([]);
   
   // Model info interface
   interface ModelInfo {
@@ -146,6 +155,7 @@ export function AgentPlayground() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const spreadsheetRef = useRef<LiveSpreadsheetRef>(null);
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -367,26 +377,6 @@ export function AgentPlayground() {
     }
   }, []);
 
-  // Check Ollama status and fetch models on mount and periodically
-  useEffect(() => {
-    // Initial check - run both in parallel
-    const initialCheck = async () => {
-      await Promise.all([
-        checkOllamaStatus(),
-        fetchAvailableModels()
-      ]);
-    };
-    initialCheck();
-    
-    // Set up periodic checks - every 30 seconds
-    const interval = setInterval(() => {
-      checkOllamaStatus();
-      fetchAvailableModels();
-    }, 30000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty deps - callbacks are stable now
-
   // Add event
   const addEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
     const event: AgentEvent = {
@@ -397,6 +387,39 @@ export function AgentPlayground() {
     };
     setEvents(prev => [...prev.slice(-49), event]); // Keep last 50 events
   }, []);
+
+  // Load conversation history from API
+  const loadConversationHistory = useCallback(async (instanceId: string) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/${instanceId}/conversation`);
+      if (response.ok) {
+        const data = await response.json();
+        const history = data.messages || [];
+        // Map history messages to ConversationMessage format
+        const mappedMessages: ConversationMessage[] = history.map((msg: any, index: number) => ({
+          id: msg.message_id || `msg-hist-${index}-${Date.now()}`,
+          role: msg.role || 'user',
+          content: String(msg.content || ''),
+          timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+          streaming: false,
+          isError: msg.is_error || false,
+          toolCalls: msg.tool_calls || undefined,
+        }));
+        setConversation(mappedMessages);
+        addEvent('conversation_loaded', { messageCount: mappedMessages.length });
+      }
+    } catch (error) {
+      console.error('Failed to load conversation history:', error);
+      // Don't show error to user, just log it
+    }
+  }, [addEvent]);
+
+  // Load conversation history when test tab is opened and agent instance exists
+  useEffect(() => {
+    if (activeTab === 'test' && agentInstance?.instanceId) {
+      loadConversationHistory(agentInstance.instanceId);
+    }
+  }, [activeTab, agentInstance?.instanceId, loadConversationHistory]);
 
   // Initialize agent
   const initializeAgent = async () => {
@@ -443,6 +466,12 @@ export function AgentPlayground() {
       setAgentInstance(instance);
       addEvent('agent_initialized', { instanceId: instance.instanceId });
       setActiveTab('test');
+      
+      // Load conversation history when agent is initialized
+      await loadConversationHistory(instance.instanceId);
+      
+      // Initialize spreadsheet when agent is initialized
+      // The spreadsheet tab will be available now
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       addEvent('agent_error', { error: errorMessage });
@@ -583,6 +612,23 @@ export function AgentPlayground() {
     };
 
     setConversation(prev => [...prev, userMessage]);
+    
+    // Check if message is for spreadsheet
+    const lowerInput = userInput.toLowerCase();
+    const spreadsheetKeywords = ['spreadsheet', 'table', 'cell', 'set', 'add', 'calculate', 'sum', 'avg'];
+    const isSpreadsheetMessage = spreadsheetKeywords.some(keyword => lowerInput.includes(keyword));
+    
+    if (isSpreadsheetMessage && spreadsheetRef.current) {
+      // Queue message for spreadsheet processing
+      setSpreadsheetMessageQueue(prev => [...prev, userInput]);
+      // Process immediately
+      setTimeout(() => {
+        if (spreadsheetRef.current) {
+          spreadsheetRef.current.processMessage(userInput);
+        }
+      }, 100);
+    }
+    
     setUserInput('');
     setIsStreaming(true);
     setLiveToolCalls([]);
@@ -703,6 +749,33 @@ export function AgentPlayground() {
                 };
                 setLiveToolCalls(prev => [...prev, toolCall]);
                 addEvent('tool_called', { tool: data.tool });
+                
+                // Handle spreadsheet tool calls
+                if (data.tool?.startsWith('spreadsheet_') && spreadsheetRef.current && agentInstance) {
+                  const toolName = data.tool;
+                  const params = data.parameters || {};
+                  
+                  // Process spreadsheet tool calls
+                  if (toolName === 'spreadsheet_set_cell' && params.cell_id && params.value) {
+                    spreadsheetRef.current.processMessage(`set ${params.cell_id} to ${params.value}`);
+                  } else if (toolName === 'spreadsheet_sum_range' && params.start_cell && params.end_cell) {
+                    const target = params.target_cell ? ` in ${params.target_cell}` : '';
+                    spreadsheetRef.current.processMessage(`calculate sum of ${params.start_cell}:${params.end_cell}${target}`);
+                  } else if (toolName === 'spreadsheet_avg_range' && params.start_cell && params.end_cell) {
+                    const target = params.target_cell ? ` in ${params.target_cell}` : '';
+                    spreadsheetRef.current.processMessage(`calculate average of ${params.start_cell}:${params.end_cell}${target}`);
+                  } else if (toolName === 'spreadsheet_add_row') {
+                    // Trigger row addition in spreadsheet
+                    if (spreadsheetRef.current) {
+                      // This would need to be exposed via ref
+                    }
+                  } else if (toolName === 'spreadsheet_add_column') {
+                    // Trigger column addition in spreadsheet
+                    if (spreadsheetRef.current) {
+                      // This would need to be exposed via ref
+                    }
+                  }
+                }
               } else if (data.type === 'tool_result') {
                 setLiveToolCalls(prev => 
                   prev.map(tc => 
@@ -715,6 +788,20 @@ export function AgentPlayground() {
               } else if (data.type === 'done') {
                 // Stream completed successfully
                 addEvent('stream_done', { total_tokens: data.total_tokens });
+              } else if (data.type === 'response' && data.content) {
+                // Check if response contains spreadsheet commands
+                const responseContent = data.content.toLowerCase();
+                const spreadsheetKeywords = ['spreadsheet', 'table', 'cell', 'set', 'add', 'calculate', 'sum', 'avg'];
+                const isSpreadsheetResponse = spreadsheetKeywords.some(keyword => responseContent.includes(keyword));
+                
+                if (isSpreadsheetResponse && spreadsheetRef.current) {
+                  // Process agent's response for spreadsheet
+                  setTimeout(() => {
+                    if (spreadsheetRef.current) {
+                      spreadsheetRef.current.processMessage(data.content);
+                    }
+                  }, 100);
+                }
               }
             } catch {
               // Non-JSON line, treat as token
@@ -741,6 +828,22 @@ export function AgentPlayground() {
         }
         return updated;
       });
+
+      // Check if complete response contains spreadsheet commands
+      if (fullContent && spreadsheetRef.current) {
+        const responseContent = fullContent.toLowerCase();
+        const spreadsheetKeywords = ['spreadsheet', 'table', 'cell', 'set', 'add', 'calculate', 'sum', 'avg', 'a1', 'b1', 'c1'];
+        const isSpreadsheetResponse = spreadsheetKeywords.some(keyword => responseContent.includes(keyword));
+        
+        if (isSpreadsheetResponse) {
+          // Process agent's complete response for spreadsheet
+          setTimeout(() => {
+            if (spreadsheetRef.current) {
+              spreadsheetRef.current.processMessage(fullContent);
+            }
+          }, 200);
+        }
+      }
 
       addEvent('response_complete', { length: fullContent.length });
       
@@ -1041,6 +1144,24 @@ export function AgentPlayground() {
     </div>
   );
 
+  // Render spreadsheet panel
+  const renderSpreadsheetPanel = () => (
+    <div className="spreadsheet-panel">
+      <LiveSpreadsheet
+        instanceId={agentInstance?.instanceId}
+        agentName={agentConfig.name}
+        onCellUpdate={(cellId, value, agentName) => {
+          addEvent('spreadsheet_update', { cellId, value, agentName });
+        }}
+        onAgentMessage={(message) => {
+          // This will be called when spreadsheet processes agent messages
+          addEvent('spreadsheet_message', { message });
+        }}
+        ref={spreadsheetRef}
+      />
+    </div>
+  );
+
   // Render monitor panel
   const renderMonitorPanel = () => (
     <div className="monitor-panel">
@@ -1150,12 +1271,21 @@ export function AgentPlayground() {
         >
           <FaChartLine /> Monitor
         </button>
+        <button
+          className={`tab ${activeTab === 'spreadsheet' ? 'active' : ''}`}
+          onClick={() => setActiveTab('spreadsheet')}
+          disabled={!agentInstance}
+          title={!agentInstance ? 'Initialize an agent first' : 'Live Spreadsheet'}
+        >
+          <FaTable /> Spreadsheet
+        </button>
       </div>
 
       <div className="playground-content">
         {activeTab === 'configure' && renderConfigPanel()}
         {activeTab === 'test' && renderTestPanel()}
         {activeTab === 'monitor' && renderMonitorPanel()}
+        {activeTab === 'spreadsheet' && renderSpreadsheetPanel()}
       </div>
     </div>
   );

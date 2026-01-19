@@ -120,7 +120,12 @@ class SystemInitializer:
             self.logger.info("Initializing PostgreSQL...")
             await get_postgres_manager()
             
-            # 2. Initialize core managers
+            # 2. Initialize database tables
+            self.logger.info("Initializing agent database tables...")
+            from ..database.agent_tables import initialize_agent_database
+            await initialize_agent_database()
+            
+            # 3. Initialize core managers
             self.logger.info("Initializing core managers...")
             await get_session_manager()
             await get_memory_manager()
@@ -129,12 +134,12 @@ class SystemInitializer:
             await get_langgraph_manager()
             await get_enhanced_guardrails()
             
-            # 3. Initialize integrations
+            # 4. Initialize integrations
             self.logger.info("Initializing integrations...")
             await get_api_bridge()
             await get_synapse_broker()
             
-            # 4. Initialize LoRA and automation services
+            # 5. Initialize LoRA and automation services
             self.logger.info("Initializing LoRA and automation services...")
             from ..integrations.lora_adapter_service import get_lora_service
             from ..integrations.company_data_automation import get_automation_service

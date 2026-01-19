@@ -174,6 +174,8 @@ class OllamaContainerClient:
                         
                         self.logger.info(f"Found {len(self._available_models)} models in Ollama")
                         return True
+                    else:
+                        self.logger.debug(f"Ollama at {url} returned status {response.status_code}")
             except Exception as e:
                 self.logger.debug(f"Failed to connect to {url}: {e}")
                 continue

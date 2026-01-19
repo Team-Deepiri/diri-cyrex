@@ -6,6 +6,7 @@ ARG BUILD_TYPE=prebuilt
 ARG PYTORCH_VERSION=2.9.1
 ARG CUDA_VERSION=12.8
 ARG PYTHON_VERSION=3.11
+ARG DEVICE_TYPE=auto  # auto, gpu, cpu, mpsos - auto detects from BASE_IMAGE
 ## Use CUDA 12.8 base image for RTX 5080/5090 (sm_120) support
 # If official PyTorch image doesn't exist, fallback to CUDA 12.6 and upgrade PyTorch
 ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
@@ -286,11 +287,42 @@ RUN echo "📦 Download stage complete. Packages in /tmp/ml-packages:" && \
 # =============================================================================
 FROM base-prebuilt AS final-prebuilt
 
+# Re-declare ARG in this stage
+ARG DEVICE_TYPE=auto
+ARG BASE_IMAGE
+
 # Copy downloaded ML packages (if available)
 COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
+# Copy all requirements files for conditional installation
+COPY diri-cyrex/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements-mpsos.txt /app/requirements-mpsos.txt
+
 # Upgrade pip with resume-friendly settings
 RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --upgrade pip setuptools wheel
+
+# Detect device type and set requirements file
+# Note: This detection runs before torch is installed, so we check BASE_IMAGE
+RUN if [ "$DEVICE_TYPE" = "auto" ]; then \
+        if echo "$BASE_IMAGE" | grep -qi "cpu\|slim"; then \
+            DEVICE_TYPE="cpu"; \
+        elif echo "$BASE_IMAGE" | grep -qi "mps\|macos\|darwin"; then \
+            DEVICE_TYPE="mpsos"; \
+        else \
+            DEVICE_TYPE="gpu"; \
+        fi; \
+    fi && \
+    echo "Detected device type: $DEVICE_TYPE" && \
+    if [ "$DEVICE_TYPE" = "mpsos" ]; then \
+        REQ_FILE="/app/requirements-mpsos.txt"; \
+    elif [ "$DEVICE_TYPE" = "cpu" ]; then \
+        REQ_FILE="/app/requirements-cpu.txt"; \
+    else \
+        REQ_FILE="/app/requirements.txt"; \
+    fi && \
+    echo "Using requirements file: $REQ_FILE" && \
+    echo "$REQ_FILE" > /tmp/req_file.txt
 
 # Install core dependencies first (small packages, fast)
 RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
@@ -401,6 +433,69 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
     pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=2 \
         tensorboard>=2.15.0 || echo "Warning: tensorboard installation failed (optional), continuing..."
 
+# Install platform-specific requirements (including document processing packages)
+# Filter out packages already installed individually to avoid redundancy
+# Note: pip's --upgrade-strategy=only-if-needed will skip packages that already meet requirements,
+# but we filter explicitly to reduce processing time and avoid version conflicts
+RUN REQ_FILE=$(cat /tmp/req_file.txt) && \
+    echo "Installing platform-specific requirements from $REQ_FILE..." && \
+    echo "Filtering out already-installed packages..." && \
+    pip list --format=freeze | cut -d'=' -f1 | tr '[:upper:]' '[:lower:]' | sed 's/-/_/g' > /tmp/installed_packages.txt && \
+    python3 << PYEOF
+import re
+import os
+
+# Read installed packages (normalized names)
+with open('/tmp/installed_packages.txt', 'r') as f:
+    installed = {line.strip() for line in f if line.strip()}
+
+# Get requirements file path from environment
+req_file_path = open('/tmp/req_file.txt', 'r').read().strip()
+
+# Read requirements file
+with open(req_file_path, 'r') as f:
+    lines = f.readlines()
+
+# Filter requirements
+filtered = []
+skipped_count = 0
+for line in lines:
+    stripped = line.strip()
+    # Keep comments and empty lines
+    if not stripped or stripped.startswith('#'):
+        filtered.append(line)
+        continue
+    
+    # Extract package name (handle: package==version, package>=version, package[extra], etc.)
+    # Remove comments first
+    pkg_line = stripped.split('#')[0].strip()
+    match = re.match(r'^([a-zA-Z0-9_-]+)', pkg_line)
+    if match:
+        pkg_name = match.group(1).lower().replace('-', '_')
+        # Check if already installed
+        if pkg_name in installed:
+            skipped_count += 1
+            print(f"Skipping already-installed: {match.group(1)}")
+        else:
+            filtered.append(line)
+    else:
+        # Keep lines we can't parse (might be URLs, etc.)
+        filtered.append(line)
+
+# Write filtered requirements
+with open('/tmp/filtered_requirements.txt', 'w') as f:
+    f.writelines(filtered)
+
+print(f"Filtered {skipped_count} already-installed packages")
+print(f"Remaining packages to install: {len([l for l in filtered if l.strip() and not l.strip().startswith('#')])}")
+PYEOF
+    pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+        -r /tmp/filtered_requirements.txt && \
+    echo "✓ Platform-specific requirements installed successfully" || \
+    (echo "⚠️  WARNING: Some requirements installation failed" && \
+     pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
+     echo "Some packages may not be fully installed")
+
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
     python -c "import torch; print('✓ torch version:', torch.__version__); print('✓ CUDA available:', torch.cuda.is_available() if hasattr(torch.cuda, 'is_available') else False)" && \
@@ -461,6 +556,10 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--worker
 # =============================================================================
 FROM install-torch AS base-from-scratch
 
+# Re-declare ARG in this stage
+ARG DEVICE_TYPE=auto
+ARG BASE_IMAGE
+
 # Set common environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -481,18 +580,56 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 FROM base-from-scratch AS final-from-scratch
 
+# Re-declare ARG in this stage
+ARG DEVICE_TYPE=auto
+ARG BASE_IMAGE
+
 # Copy deepiri-modelkit first (needed for installation)
 COPY deepiri-modelkit /app/deepiri-modelkit
 
-# Copy requirements and setup
+# Copy all requirements files for conditional installation
 COPY diri-cyrex/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements-mpsos.txt /app/requirements-mpsos.txt
 
-# Remove torch and deepiri-modelkit editable install from requirements.txt
+# Remove torch and deepiri-modelkit editable install from requirements files
 # (torch already installed in base-from-scratch, modelkit installed separately)
 RUN sed -i '/^torch/d' /app/requirements.txt && \
     sed -i '/torch/d' /app/requirements.txt && \
     sed -i '/deepiri-modelkit/d' /app/requirements.txt && \
-    sed -i '/^-e.*modelkit/d' /app/requirements.txt || true
+    sed -i '/^-e.*modelkit/d' /app/requirements.txt || true && \
+    sed -i '/^torch/d' /app/requirements-cpu.txt && \
+    sed -i '/torch/d' /app/requirements-cpu.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements-cpu.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements-cpu.txt || true && \
+    sed -i '/^torch/d' /app/requirements-mpsos.txt && \
+    sed -i '/torch/d' /app/requirements-mpsos.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements-mpsos.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements-mpsos.txt || true
+
+# Detect device type and set requirements file
+# Note: This detection runs after torch is installed, so we can check CUDA availability
+RUN if [ "$DEVICE_TYPE" = "auto" ]; then \
+        if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then \
+            DEVICE_TYPE="gpu"; \
+        elif echo "$BASE_IMAGE" | grep -qi "cpu\|slim"; then \
+            DEVICE_TYPE="cpu"; \
+        elif echo "$BASE_IMAGE" | grep -qi "mps\|macos\|darwin"; then \
+            DEVICE_TYPE="mpsos"; \
+        else \
+            DEVICE_TYPE="cpu"; \
+        fi; \
+    fi && \
+    echo "Detected device type: $DEVICE_TYPE" && \
+    if [ "$DEVICE_TYPE" = "mpsos" ]; then \
+        REQ_FILE="/app/requirements-mpsos.txt"; \
+    elif [ "$DEVICE_TYPE" = "cpu" ]; then \
+        REQ_FILE="/app/requirements-cpu.txt"; \
+    else \
+        REQ_FILE="/app/requirements.txt"; \
+    fi && \
+    echo "Using requirements file: $REQ_FILE" && \
+    echo "$REQ_FILE" > /tmp/req_file.txt
 
 # Install deepiri-modelkit as editable package (before other requirements)
 RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
@@ -625,6 +762,69 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
         hyperopt>=0.2.7 || echo "Warning: hyperopt installation failed (optional), continuing..." && \
     pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=2 \
         tensorboard>=2.15.0 || echo "Warning: tensorboard installation failed (optional), continuing..."
+
+# Install platform-specific requirements (including document processing packages)
+# Filter out packages already installed individually to avoid redundancy
+# Note: pip's --upgrade-strategy=only-if-needed will skip packages that already meet requirements,
+# but we filter explicitly to reduce processing time and avoid version conflicts
+RUN REQ_FILE=$(cat /tmp/req_file.txt) && \
+    echo "Installing platform-specific requirements from $REQ_FILE..." && \
+    echo "Filtering out already-installed packages..." && \
+    pip list --format=freeze | cut -d'=' -f1 | tr '[:upper:]' '[:lower:]' | sed 's/-/_/g' > /tmp/installed_packages.txt && \
+    python3 << PYEOF
+import re
+import os
+
+# Read installed packages (normalized names)
+with open('/tmp/installed_packages.txt', 'r') as f:
+    installed = {line.strip() for line in f if line.strip()}
+
+# Get requirements file path from environment
+req_file_path = open('/tmp/req_file.txt', 'r').read().strip()
+
+# Read requirements file
+with open(req_file_path, 'r') as f:
+    lines = f.readlines()
+
+# Filter requirements
+filtered = []
+skipped_count = 0
+for line in lines:
+    stripped = line.strip()
+    # Keep comments and empty lines
+    if not stripped or stripped.startswith('#'):
+        filtered.append(line)
+        continue
+    
+    # Extract package name (handle: package==version, package>=version, package[extra], etc.)
+    # Remove comments first
+    pkg_line = stripped.split('#')[0].strip()
+    match = re.match(r'^([a-zA-Z0-9_-]+)', pkg_line)
+    if match:
+        pkg_name = match.group(1).lower().replace('-', '_')
+        # Check if already installed
+        if pkg_name in installed:
+            skipped_count += 1
+            print(f"Skipping already-installed: {match.group(1)}")
+        else:
+            filtered.append(line)
+    else:
+        # Keep lines we can't parse (might be URLs, etc.)
+        filtered.append(line)
+
+# Write filtered requirements
+with open('/tmp/filtered_requirements.txt', 'w') as f:
+    f.writelines(filtered)
+
+print(f"Filtered {skipped_count} already-installed packages")
+print(f"Remaining packages to install: {len([l for l in filtered if l.strip() and not l.strip().startswith('#')])}")
+PYEOF
+    pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+        -r /tmp/filtered_requirements.txt && \
+    echo "✓ Platform-specific requirements installed successfully" || \
+    (echo "⚠️  WARNING: Some requirements installation failed" && \
+     pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
+     echo "Some packages may not be fully installed")
 
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
