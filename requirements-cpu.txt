@@ -107,3 +107,4 @@ beautifulsoup4>=4.12.0  # HTML parsing
 openpyxl>=3.1.0  # Excel file reading/writing
 # docling>=1.0.0  # DocLayNet for advanced layout detection (optional, install separately if needed)
 
+

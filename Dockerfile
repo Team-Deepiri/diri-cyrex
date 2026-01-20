@@ -489,8 +489,9 @@ with open('/tmp/filtered_requirements.txt', 'w') as f:
 print(f"Filtered {skipped_count} already-installed packages")
 print(f"Remaining packages to install: {len([l for l in filtered if l.strip() and not l.strip().startswith('#')])}")
 PYEOF
-    pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
-        -r /tmp/filtered_requirements.txt && \
+
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+    -r /tmp/filtered_requirements.txt && \
     echo "✓ Platform-specific requirements installed successfully" || \
     (echo "⚠️  WARNING: Some requirements installation failed" && \
      pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
@@ -819,8 +820,9 @@ with open('/tmp/filtered_requirements.txt', 'w') as f:
 print(f"Filtered {skipped_count} already-installed packages")
 print(f"Remaining packages to install: {len([l for l in filtered if l.strip() and not l.strip().startswith('#')])}")
 PYEOF
-    pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
-        -r /tmp/filtered_requirements.txt && \
+
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+    -r /tmp/filtered_requirements.txt && \
     echo "✓ Platform-specific requirements installed successfully" || \
     (echo "⚠️  WARNING: Some requirements installation failed" && \
      pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \

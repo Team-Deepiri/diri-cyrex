@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { FaComments, FaTimes, FaPlus, FaUsers, FaRobot, FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import { FaComments, FaTimes, FaPlus, FaUsers, FaRobot, FaChevronDown, FaChevronUp, FaTools, FaCheckCircle, FaExclamationCircle } from 'react-icons/fa';
 import './MessagesWidget.css';
 
 const API_BASE = import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
@@ -57,6 +57,10 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>('llama3:8b');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastSyncedMessageCountRef = useRef<number>(0);
+  const [showToolCallsModal, setShowToolCallsModal] = useState(false);
+  const [selectedAgentForToolCalls, setSelectedAgentForToolCalls] = useState<AgentChat | null>(null);
+  const [toolCallsData, setToolCallsData] = useState<any[]>([]);
 
   // Fetch agent chats
   useEffect(() => {
@@ -145,6 +149,7 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
           streaming: false,
         }));
         setMessages(mappedMessages);
+        lastSyncedMessageCountRef.current = mappedMessages.length;
       } else {
         // If no history, start with empty array
         setMessages([]);
@@ -221,7 +226,27 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
       timestamp: new Date().toISOString(),
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    setMessages(prev => {
+      // Check if this message already exists (avoid duplicates)
+      const msgTime = new Date(userMessage.timestamp).getTime();
+      const isDuplicate = prev.some((msg: any) => {
+        const existingTime = new Date(msg.timestamp).getTime();
+        const timeDiff = Math.abs(msgTime - existingTime);
+        return (
+          msg.role === userMessage.role &&
+          msg.content === userMessage.content &&
+          timeDiff < 5000 // 5 seconds
+        );
+      });
+      
+      if (isDuplicate) {
+        return prev; // Don't add duplicate
+      }
+      
+      const updated = [...prev, userMessage];
+      lastSyncedMessageCountRef.current = updated.length;
+      return updated;
+    });
     setInputMessage('');
 
     try {
@@ -250,7 +275,11 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
             timestamp: new Date().toISOString(),
             streaming: true,
           };
-          setMessages(prev => [...prev, assistantMessage]);
+          setMessages(prev => {
+            const updated = [...prev, assistantMessage];
+            lastSyncedMessageCountRef.current = updated.length;
+            return updated;
+          });
 
           if (reader) {
             while (true) {
@@ -352,56 +381,59 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
           const reader = response.body?.getReader();
           const decoder = new TextDecoder();
 
-          if (reader) {
-            let currentAgentId: string | null = null;
-            let agentResponses: Record<string, string> = {};
+            if (reader) {
+              let currentAgentId: string | null = null;
+              let agentResponses: Record<string, string> = {};
 
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-              const chunk = decoder.decode(value);
-              const lines = chunk.split('\n').filter(line => line.trim());
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(line => line.trim());
 
-              for (const line of lines) {
-                try {
-                  const data = JSON.parse(line);
-                  if (data.type === 'agent_start') {
-                    currentAgentId = data.agent_id;
-                    agentResponses[data.agent_id] = '';
-                  } else if (data.type === 'token' && currentAgentId) {
-                    agentResponses[currentAgentId] += data.content;
-                    // Update messages with agent responses
-                    setMessages(prev => {
-                      const updated = [...prev];
-                      // Find or create agent message
-                      let agentMsgIdx = updated.findIndex(
-                        m => m.role === 'assistant' && m.agentId === currentAgentId
-                      );
-                      if (agentMsgIdx === -1) {
-                        updated.push({
-                          id: `msg-${Date.now()}-${currentAgentId}`,
-                          role: 'assistant',
-                          agentId: currentAgentId,
-                          agentName: data.agent_name,
-                          content: agentResponses[currentAgentId],
-                          timestamp: new Date().toISOString(),
-                        });
-                      } else {
-                        updated[agentMsgIdx] = {
-                          ...updated[agentMsgIdx],
-                          content: agentResponses[currentAgentId],
-                        };
+                for (const line of lines) {
+                  try {
+                    const data = JSON.parse(line);
+                    if (data.type === 'agent_start') {
+                      currentAgentId = data.agent_id;
+                      if (currentAgentId) {
+                        agentResponses[currentAgentId] = '';
                       }
-                      return updated;
-                    });
+                    } else if (data.type === 'token' && currentAgentId) {
+                      const agentId = currentAgentId;
+                      agentResponses[agentId] = (agentResponses[agentId] || '') + data.content;
+                      // Update messages with agent responses
+                      setMessages(prev => {
+                        const updated = [...prev];
+                        // Find or create agent message
+                        let agentMsgIdx = updated.findIndex(
+                          (m: any) => m.role === 'assistant' && m.agentId === agentId
+                        );
+                        if (agentMsgIdx === -1) {
+                          updated.push({
+                            id: `msg-${Date.now()}-${agentId}`,
+                            role: 'assistant',
+                            agentId: agentId,
+                            agentName: data.agent_name,
+                            content: agentResponses[agentId] || '',
+                            timestamp: new Date().toISOString(),
+                          });
+                        } else {
+                          updated[agentMsgIdx] = {
+                            ...updated[agentMsgIdx],
+                            content: agentResponses[agentId] || '',
+                          };
+                        }
+                        return updated;
+                      });
+                    }
+                  } catch {
+                    // Non-JSON line, ignore
                   }
-                } catch {
-                  // Non-JSON line, ignore
                 }
               }
             }
-          }
         }
       }
     } catch (error) {
@@ -420,6 +452,317 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Fetch tool calls for an agent
+  const fetchToolCalls = async (chat: AgentChat) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/${chat.instanceId}/conversation`);
+      if (response.ok) {
+        const data = await response.json();
+        const history = data.messages || [];
+        
+        // Extract all tool calls from messages
+        const toolCalls: any[] = [];
+        history.forEach((msg: any) => {
+          if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+            msg.tool_calls.forEach((tc: any) => {
+              toolCalls.push({
+                toolId: tc.tool_id || tc.toolId || `tc-${Date.now()}-${Math.random()}`,
+                toolName: tc.tool_name || tc.toolName || 'Unknown',
+                parameters: tc.parameters || {},
+                result: tc.result,
+                status: tc.status || 'completed',
+                duration: tc.duration,
+                timestamp: msg.timestamp || msg.created_at,
+                messageId: msg.message_id,
+              });
+            });
+          }
+        });
+        
+        setToolCallsData(toolCalls);
+        setSelectedAgentForToolCalls(chat);
+        setShowToolCallsModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch tool calls:', error);
+      alert('Failed to load tool calls');
+    }
+  };
+
+  // Real-time message sync: Poll for new messages when chat is open
+  useEffect(() => {
+    if (activeView !== 'chat' || !selectedChat?.instanceId) {
+      lastSyncedMessageCountRef.current = 0;
+      return;
+    }
+
+    // Initialize ref with current messages length
+    lastSyncedMessageCountRef.current = messages.length;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/agent/${selectedChat.instanceId}/conversation`);
+        if (response.ok) {
+          const data = await response.json();
+          const history = data.messages || [];
+          
+          // Only update if we have new messages
+          if (history.length > lastSyncedMessageCountRef.current) {
+            const mappedMessages = history.map((msg: any, index: number) => ({
+              id: msg.message_id || `msg-hist-${index}-${Date.now()}`,
+              role: msg.role || 'user',
+              content: String(msg.content || ''),
+              timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+              streaming: false,
+            }));
+            
+            // Smart merge: replace temporary messages with database versions, then deduplicate
+            setMessages(prev => {
+              // First pass: replace temporary messages with database versions
+              const historyMap = new Map<string, any>();
+              mappedMessages.forEach((msg: any) => {
+                historyMap.set(msg.id, msg);
+              });
+              
+              // Replace temporary messages (those starting with "msg-" but not "msg-hist-") with database versions
+              let updated = prev.map((msg: any) => {
+                // If this is a temporary message, try to find its database version
+                if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
+                  const msgTime = new Date(msg.timestamp).getTime();
+                  
+                  // Look for matching message in database by content+role+timestamp
+                  for (const dbMsg of historyMap.values()) {
+                    const dbTime = new Date(dbMsg.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - dbTime);
+                    
+                    if (
+                      msg.role === dbMsg.role &&
+                      msg.content === dbMsg.content &&
+                      timeDiff < 15000 // 15 seconds window
+                    ) {
+                      // Replace temporary message with database version
+                      return dbMsg;
+                    }
+                  }
+                }
+                
+                // Check if we have an updated version from database
+                const dbVersion = historyMap.get(msg.id);
+                if (dbVersion) {
+                  return dbVersion;
+                }
+                
+                return msg;
+              });
+              
+              // Second pass: deduplicate based on content+role+timestamp
+              const deduplicated: any[] = [];
+              const seenContent = new Map<string, any>(); // content+role -> message
+              
+              for (const msg of updated) {
+                const contentKey = `${msg.role}:${msg.content}`;
+                const msgTime = new Date(msg.timestamp).getTime();
+                const existing = seenContent.get(contentKey);
+                
+                if (!existing) {
+                  // First time seeing this content
+                  seenContent.set(contentKey, msg);
+                  deduplicated.push(msg);
+                } else {
+                  // Check if this is a duplicate (within 15 seconds - more lenient)
+                  const existingTime = new Date(existing.timestamp).getTime();
+                  const timeDiff = Math.abs(msgTime - existingTime);
+                  
+                  if (timeDiff < 10000) {
+                    // It's a duplicate - prefer database ID over temporary ID
+                    const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id');
+                    const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id');
+                    
+                    if (isDbId && !existingIsDbId) {
+                      // Replace with database version
+                      const idx = deduplicated.indexOf(existing);
+                      if (idx >= 0) {
+                        deduplicated[idx] = msg;
+                        seenContent.set(contentKey, msg);
+                      }
+                    }
+                    // Otherwise keep the existing one (don't add duplicate)
+                  } else {
+                    // Different message with same content (probably not a duplicate)
+                    seenContent.set(contentKey, msg);
+                    deduplicated.push(msg);
+                  }
+                }
+              }
+              
+              // Third pass: add any new messages from database that weren't in prev
+              const existingIds = new Set(deduplicated.map((m: any) => m.id));
+              const newMessages = mappedMessages.filter((m: any) => {
+                // Skip if ID already exists
+                if (existingIds.has(m.id)) return false;
+                
+                // Check if content+role already exists (within 10 seconds)
+                const contentKey = `${m.role}:${m.content}`;
+                const msgTime = new Date(m.timestamp).getTime();
+                
+                for (const existing of deduplicated) {
+                  const existingKey = `${existing.role}:${existing.content}`;
+                  if (contentKey === existingKey) {
+                    const existingTime = new Date(existing.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - existingTime);
+                    
+                    if (timeDiff < 15000) { // 15 seconds window
+                      return false; // This is a duplicate
+                    }
+                  }
+                }
+                
+                return true;
+              });
+              
+              if (newMessages.length > 0 || deduplicated.length !== prev.length) {
+                // Merge and sort by timestamp
+                const merged = [...deduplicated, ...newMessages].sort((a: any, b: any) => 
+                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                );
+                lastSyncedMessageCountRef.current = merged.length;
+                return merged;
+              }
+              
+              return deduplicated;
+            });
+          } else if (history.length > 0) {
+            // Check for updated messages (e.g., streaming completed)
+            const historyMap = new Map<string, any>();
+            history.forEach((msg: any, index: number) => {
+              const msgId = msg.message_id || `msg-hist-${index}-${Date.now()}`;
+              historyMap.set(msgId, {
+                id: msgId,
+                role: msg.role || 'user',
+                content: String(msg.content || ''),
+                timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+                streaming: false,
+              });
+            });
+            
+            setMessages(prev => {
+              // First pass: replace temporary messages with database versions
+              let updated = prev.map((msg: any) => {
+                // If this is a temporary message, try to find its database version
+                if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
+                  const msgTime = new Date(msg.timestamp).getTime();
+                  
+                  // Look for matching message in database by content+role+timestamp
+                  for (const dbMsg of historyMap.values()) {
+                    const dbTime = new Date(dbMsg.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - dbTime);
+                    
+                    if (
+                      msg.role === dbMsg.role &&
+                      msg.content === dbMsg.content &&
+                      timeDiff < 15000 // 15 seconds window
+                    ) {
+                      // Replace temporary message with database version
+                      return dbMsg;
+                    }
+                  }
+                }
+                
+                // Check if we have an updated version from database
+                const dbVersion = historyMap.get(msg.id);
+                if (dbVersion) {
+                  return dbVersion;
+                }
+                
+                return msg;
+              });
+              
+              // Second pass: deduplicate based on content+role+timestamp
+              const deduplicated: any[] = [];
+              const seenContent = new Map<string, any>(); // content+role -> message
+              
+              for (const msg of updated) {
+                const contentKey = `${msg.role}:${msg.content}`;
+                const msgTime = new Date(msg.timestamp).getTime();
+                const existing = seenContent.get(contentKey);
+                
+                if (!existing) {
+                  // First time seeing this content
+                  seenContent.set(contentKey, msg);
+                  deduplicated.push(msg);
+                } else {
+                  // Check if this is a duplicate (within 15 seconds - more lenient)
+                  const existingTime = new Date(existing.timestamp).getTime();
+                  const timeDiff = Math.abs(msgTime - existingTime);
+                  
+                  if (timeDiff < 10000) {
+                    // It's a duplicate - prefer database ID over temporary ID
+                    const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id');
+                    const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id');
+                    
+                    if (isDbId && !existingIsDbId) {
+                      // Replace with database version
+                      const idx = deduplicated.indexOf(existing);
+                      if (idx >= 0) {
+                        deduplicated[idx] = msg;
+                        seenContent.set(contentKey, msg);
+                      }
+                    }
+                    // Otherwise keep the existing one (don't add duplicate)
+                  } else {
+                    // Different message with same content (probably not a duplicate)
+                    seenContent.set(contentKey, msg);
+                    deduplicated.push(msg);
+                  }
+                }
+              }
+              
+              // Third pass: add any new messages from database that weren't in prev
+              const existingIds = new Set(deduplicated.map((m: any) => m.id));
+              const newMessages = Array.from(historyMap.values()).filter((m: any) => {
+                // Skip if ID already exists
+                if (existingIds.has(m.id)) return false;
+                
+                // Check if content+role already exists (within 10 seconds)
+                const contentKey = `${m.role}:${m.content}`;
+                const msgTime = new Date(m.timestamp).getTime();
+                
+                for (const existing of deduplicated) {
+                  const existingKey = `${existing.role}:${existing.content}`;
+                  if (contentKey === existingKey) {
+                    const existingTime = new Date(existing.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - existingTime);
+                    
+                    if (timeDiff < 15000) { // 15 seconds window
+                      return false; // This is a duplicate
+                    }
+                  }
+                }
+                
+                return true;
+              });
+              
+              if (newMessages.length > 0 || deduplicated.length !== prev.length) {
+                const merged = [...deduplicated, ...newMessages].sort((a: any, b: any) => 
+                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                );
+                lastSyncedMessageCountRef.current = merged.length;
+                return merged;
+              }
+              
+              return deduplicated;
+            });
+          }
+        }
+      } catch (error) {
+        // Silently fail - don't spam console
+        console.debug('Polling error (non-critical):', error);
+      }
+    }, 1000); // Poll every 1 second
+
+    return () => clearInterval(pollInterval);
+  }, [activeView, selectedChat?.instanceId]);
 
   if (!isOpen) return null;
 
@@ -541,18 +884,32 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
                   <div
                     key={chat.instanceId}
                     className="message-item"
-                    onClick={() => openChat(chat)}
                   >
-                    <div className="message-item-avatar">
-                      <FaRobot />
+                    <div 
+                      className="message-item-main"
+                      onClick={() => openChat(chat)}
+                    >
+                      <div className="message-item-avatar">
+                        <FaRobot />
+                      </div>
+                      <div className="message-item-content">
+                        <div className="message-item-name">{chat.name}</div>
+                        <div className="message-item-preview">{chat.lastMessage}</div>
+                      </div>
+                      {chat.unreadCount && chat.unreadCount > 0 && (
+                        <div className="message-item-badge">{chat.unreadCount}</div>
+                      )}
                     </div>
-                    <div className="message-item-content">
-                      <div className="message-item-name">{chat.name}</div>
-                      <div className="message-item-preview">{chat.lastMessage}</div>
-                    </div>
-                    {chat.unreadCount && chat.unreadCount > 0 && (
-                      <div className="message-item-badge">{chat.unreadCount}</div>
-                    )}
+                    <button
+                      className="btn-icon btn-tool-inspect"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fetchToolCalls(chat);
+                      }}
+                      title="Inspect Tool Calls"
+                    >
+                      <FaTools />
+                    </button>
                   </div>
                 ))
               )}
@@ -636,6 +993,79 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
           </div>
         )}
       </div>
+
+      {/* Tool Calls Inspection Modal */}
+      {showToolCallsModal && (
+        <div className="modal-overlay" onClick={() => setShowToolCallsModal(false)}>
+          <div className="modal-content tool-calls-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                <FaTools /> Tool Calls - {selectedAgentForToolCalls?.name}
+              </h3>
+              <button className="btn-icon" onClick={() => setShowToolCallsModal(false)}>
+                <FaTimes />
+              </button>
+            </div>
+            <div className="modal-body tool-calls-body">
+              {toolCallsData.length === 0 ? (
+                <div className="empty-state">
+                  <FaTools size={48} />
+                  <p>No tool calls found for this agent</p>
+                </div>
+              ) : (
+                <div className="tool-calls-list">
+                  <div className="tool-calls-stats">
+                    <span>Total: {toolCallsData.length}</span>
+                    <span>Completed: {toolCallsData.filter((tc: any) => tc.status === 'completed').length}</span>
+                    <span>Failed: {toolCallsData.filter((tc: any) => tc.status === 'failed').length}</span>
+                  </div>
+                  {toolCallsData.map((tc: any, index: number) => (
+                    <div key={tc.toolId || `tc-${index}`} className={`tool-call-card ${tc.status}`}>
+                      <div className="tool-call-header">
+                        <div className="tool-call-title">
+                          <FaTools />
+                          <span className="tool-name">{tc.toolName}</span>
+                          <span className={`tool-status ${tc.status}`}>
+                            {tc.status === 'completed' && <FaCheckCircle className="success" />}
+                            {tc.status === 'failed' && <FaExclamationCircle className="error" />}
+                            {tc.status}
+                          </span>
+                        </div>
+                        {tc.timestamp && (
+                          <div className="tool-call-meta">
+                            <span>{new Date(tc.timestamp).toLocaleString()}</span>
+                            {tc.duration && <span>Duration: {tc.duration}ms</span>}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {tc.parameters && Object.keys(tc.parameters).length > 0 && (
+                        <div className="tool-call-section">
+                          <h4>Parameters</h4>
+                          <pre className="tool-call-data">
+                            {JSON.stringify(tc.parameters, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {tc.result !== undefined && (
+                        <div className="tool-call-section">
+                          <h4>Result</h4>
+                          <pre className="tool-call-data">
+                            {typeof tc.result === 'string' 
+                              ? tc.result 
+                              : JSON.stringify(tc.result, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
