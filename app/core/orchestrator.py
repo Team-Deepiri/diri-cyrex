@@ -411,18 +411,37 @@ If a tool fails, explain what happened and suggest alternatives."""),
                     
                     if not react_prompt:
                         # Fallback prompt - use this by default to avoid network calls
+                        # Enhanced prompt for better tool usage with local LLMs
                         react_prompt = ChatPromptTemplate.from_messages([
-                            ("system", """You are a helpful AI assistant with access to tools.
+                            ("system", """You are a helpful AI assistant with access to tools. You MUST use tools when asked to perform actions.
+
+IMPORTANT: When the user asks you to edit, set, update, or change spreadsheet cells, you MUST use the spreadsheet_set_cell tool. Do not just say you did it - actually use the tool.
+
+Available tools: {tool_names}
+
 Use the following format:
 
 Question: the input question you must answer
-Thought: you should always think about what to do
+Thought: you should always think about what to do. If the user wants to edit cells, you MUST use the spreadsheet_set_cell tool.
 Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
+Action Input: the input to the action (as a JSON string with the required parameters)
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know the final answer
-Final Answer: the final answer to the original input question"""),
+Final Answer: the final answer to the original input question
+
+Example for editing cells:
+Question: Edit J7 and J8 to 1
+Thought: The user wants me to edit cells J7 and J8 to have the value "1". I need to use the spreadsheet_set_cell tool twice.
+Action: spreadsheet_set_cell
+Action Input: {{"cell_id": "J7", "value": "1"}}
+Observation: {{"success": true, "cell_id": "J7", "value": "1"}}
+Thought: Good, J7 is set. Now I need to set J8.
+Action: spreadsheet_set_cell
+Action Input: {{"cell_id": "J8", "value": "1"}}
+Observation: {{"success": true, "cell_id": "J8", "value": "1"}}
+Thought: Both cells have been set successfully.
+Final Answer: I've successfully set cells J7 and J8 to 1."""),
                             ("human", "{input}"),
                             MessagesPlaceholder(variable_name="agent_scratchpad"),
                         ])
@@ -604,9 +623,19 @@ Final Answer: the final answer to the original input question"""),
                     tool_calls = len(intermediate_steps)
                     if tool_calls > 0:
                         self.logger.info(f"Agent executor completed with {tool_calls} tool calls")
+                        for i, step in enumerate(intermediate_steps):
+                            if isinstance(step, tuple) and len(step) >= 2:
+                                action = step[0]
+                                observation = step[1]
+                                tool_name = getattr(action, 'tool', 'unknown') if hasattr(action, 'tool') else 'unknown'
+                                self.logger.info(f"Tool call {i+1}: {tool_name} -> {str(observation)[:100]}")
+                    else:
+                        self.logger.warning(f"Agent executor completed but made NO tool calls. Response: {response[:200]}")
+                        self.logger.warning(f"Full result keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
                     
                 except Exception as e:
-                    self.logger.warning(f"Agent executor failed: {e}, falling back to direct LLM", exc_info=True)
+                    self.logger.error(f"Agent executor failed: {e}", exc_info=True)
+                    self.logger.warning(f"Falling back to direct LLM (tools will not be available)")
                     # Fallback to direct LLM call
                     # If max_tokens is specified, temporarily update config
                     if max_tokens and hasattr(self.llm_provider, 'config'):
