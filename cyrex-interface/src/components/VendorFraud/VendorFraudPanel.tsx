@@ -94,6 +94,13 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
   const [priceToCheck, setPriceToCheck] = useState<number>(0);
   const [benchmarkResult, setBenchmarkResult] = useState<unknown>(null);
 
+  // Search State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResult, setSearchResult] = useState<unknown>(null);
+
+  //Analytics State
+  const [analytics, setAnalytics] = useState<unknown>(null);
+  
   // Configure API
   useEffect(() => {
     if (baseUrl) vendorFraudApi.setBaseUrl(baseUrl);
@@ -112,6 +119,20 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
     };
     loadIndustries();
   }, []);
+
+  // Load analytics data 
+  useEffect(() => { 
+    const loadAnalytics = async () => {
+      try {
+        const result = await vendorFraudApi.getAnalytics();
+        const place = result.analytics;
+        setAnalytics(result.analytics);
+      } catch (err) {
+        console.error('Failed to load analytics:', err);
+      }
+    }
+    loadAnalytics();
+  }, [])
 
   // Add line item
   const addLineItem = useCallback(() => {
@@ -245,6 +266,25 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
       setLoading(false);
     }
   }, [serviceType, industry, priceToCheck]);
+
+
+  //Search for document in vendor database 
+  const searchDocument = async () => {
+    setLoading(true); 
+    //Set something to true
+    //Ideally useState for search Result
+
+    try { 
+      const result = await vendorFraudApi.searchVendors(searchQuery);
+
+      //Check to see how result is returned
+      setSearchResult(result)
+    } catch (err) { 
+     setError(err instanceof Error ? err.message : 'Document search failed');
+    } finally { 
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="vendor-fraud-panel">
@@ -396,9 +436,10 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
               <input
                 type="text"
                 placeholder="Search vendors by name..."
-                style={{ width: '100%', padding: '12px', marginBottom: '16px' }}
-              />
-              <button onClick={() => {}} className="vf-search-btn">
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{ width: '100%', padding: '12px', marginBottom: '16px' }} 
+             />
+              <button onClick={() => searchDocument()} className="vf-search-btn">
                 <SearchIcon size={18} /> Search
               </button>
             </div>
@@ -422,17 +463,17 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
             <div className="vf-analytics-grid">
               <div className="vf-analytics-card">
                 <h4>Fraud Detection Rate</h4>
-                <div className="vf-metric-value">Loading...</div>
+                <div className="vf-metric-value">{analytics?.fraud_detection_rate ?? "Loading..."}</div>
                 <div className="vf-metric-label">Detection accuracy</div>
               </div>
               <div className="vf-analytics-card">
                 <h4>Network Effects</h4>
-                <div className="vf-metric-value">Loading...</div>
+                <div className="vf-metric-value">{analytics?.cross_industry_flags ?? "Loading ..."}</div>
                 <div className="vf-metric-label">Cross-industry flags</div>
               </div>
               <div className="vf-analytics-card">
                 <h4>Total Value Protected</h4>
-                <div className="vf-metric-value">Loading...</div>
+                <div className="vf-metric-value">{analytics?.total_invoices_analyzed || "Loading... "}</div>
                 <div className="vf-metric-label">Amount analyzed</div>
               </div>
             </div>
