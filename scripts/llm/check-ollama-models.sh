@@ -76,6 +76,9 @@ categorize_model() {
         setup="setup4"  # 32GB RAM + 10GB+ VRAM
     elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 8 ]; then
         setup="setup3"  # 32GB RAM + 8GB+ VRAM
+    # ADD THIS NEW CONDITION FOR YOUR CASE:
+    elif [ "$vram_gb" -ge 15 ]; then
+        setup="setup5"  # Treat 15GB VRAM as Setup 5 (Premium GPU Experience)
     elif [ "$ram_gb" -ge 16 ] && [ "$vram_gb" -ge 10 ]; then
         setup="setup2"  # 16GB RAM + 10GB+ VRAM
     elif [ "$ram_gb" -ge 16 ] && [ "$vram_gb" -ge 8 ]; then
@@ -99,9 +102,12 @@ categorize_model() {
         
         # 7B models - Safe on Setup 1+
         "mistral:7b"|"neural-chat:7b"|"qwen2.5:7b"|"gemma:7b"|"yi:6b"|"openchat:7b"|"zephyr:7b"|"nous-hermes:7b"|"mythomax:7b"|"dolphin-mistral:7b"|"orca-mini:7b")
-            if [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+            # For high-end GPU setups, prioritize VRAM over system RAM
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
-            elif [ "$ram_gb" -ge 16 ]; then
+            elif [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+                echo "recommended"
+            elif [ "$vram_gb" -ge 8 ] || [ "$ram_gb" -ge 16 ]; then
                 echo "usable"
             elif [ "$ram_gb" -ge 8 ]; then
                 echo "marginal"
@@ -189,9 +195,12 @@ categorize_model() {
         
         # Coding models - 7B
         "codellama:7b"|"deepseek-coder:6.7b"|"qwen2.5-coder:7b"|"starcoder2:7b"|"wizardcoder:7b")
-            if [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+            # For high-end GPU setups, prioritize VRAM over system RAM
+            if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
-            elif [ "$ram_gb" -ge 16 ]; then
+            elif [ "$vram_gb" -ge 8 ] && [ "$ram_gb" -ge 16 ]; then
+                echo "recommended"
+            elif [ "$vram_gb" -ge 8 ] || [ "$ram_gb" -ge 16 ]; then
                 echo "usable"
             else
                 echo "marginal"
@@ -668,6 +677,10 @@ elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
 elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 8 ]; then
     SETUP_CATEGORY="setup3"
     echo "   🎯 Setup: 32GB RAM + 8GB VRAM"
+# ADD THIS NEW CONDITION FOR YOUR CASE:
+elif [ "$GPU_VRAM_GB" -ge 15 ]; then
+    SETUP_CATEGORY="setup5"  # Treat 15GB VRAM as Setup 5
+    echo "   🎯 Setup: ${SYSTEM_RAM_GB}GB RAM + ${GPU_VRAM_GB}GB VRAM (Premium GPU Experience)"
 elif [ "$SYSTEM_RAM_GB" -ge 16 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
     SETUP_CATEGORY="setup2"
     echo "   🎯 Setup: 16GB RAM + 10GB VRAM"
@@ -979,15 +992,21 @@ if [ "$HANDLE_RECHECK" = true ]; then
     
     # Determine setup category
     SETUP_CATEGORY="unknown"
-    if [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 16 ]; then
+    # Handle edge cases: 15GB VRAM is close to 16GB, treat as Setup 5
+    # Also handle cases where RAM is close to 32GB (e.g., 30GB+)
+    if ([ "$SYSTEM_RAM_GB" -ge 32 ] || [ "$SYSTEM_RAM_GB" -ge 30 ]) && ([ "$GPU_VRAM_GB" -ge 16 ] || [ "$GPU_VRAM_GB" -ge 15 ]); then
         SETUP_CATEGORY="setup5"
-        echo "   🎯 Setup: 32GB RAM + 16GB VRAM (Best Experience)"
+        echo "   🎯 Setup: ${SYSTEM_RAM_GB}GB RAM + ${GPU_VRAM_GB}GB VRAM (Best Experience - Setup 5 equivalent)"
     elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
         SETUP_CATEGORY="setup4"
         echo "   🎯 Setup: 32GB RAM + 10GB VRAM"
     elif [ "$SYSTEM_RAM_GB" -ge 32 ] && [ "$GPU_VRAM_GB" -ge 8 ]; then
         SETUP_CATEGORY="setup3"
         echo "   🎯 Setup: 32GB RAM + 8GB VRAM"
+    # ADD THIS NEW CONDITION FOR YOUR CASE:
+    elif [ "$GPU_VRAM_GB" -ge 15 ]; then
+        SETUP_CATEGORY="setup5"  # Treat 15GB VRAM as Setup 5
+        echo "   🎯 Setup: ${SYSTEM_RAM_GB}GB RAM + ${GPU_VRAM_GB}GB VRAM (Premium GPU Experience)"
     elif [ "$SYSTEM_RAM_GB" -ge 16 ] && [ "$GPU_VRAM_GB" -ge 10 ]; then
         SETUP_CATEGORY="setup2"
         echo "   🎯 Setup: 16GB RAM + 10GB VRAM"

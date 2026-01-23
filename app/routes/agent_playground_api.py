@@ -61,7 +61,14 @@ class AgentConfigRequest(BaseModel):
     model: str = "llama3:8b"
     temperature: float = 0.7
     max_tokens: int = 2000
-    system_prompt: str = """You are a helpful, intelligent AI assistant. Your goal is to provide accurate, useful, and contextually appropriate responses.
+    system_prompt: str = """You are a helpful, intelligent AI assistant with access to tools. Your goal is to provide accurate, useful, and contextually appropriate responses.
+
+CRITICAL TOOL USAGE RULES:
+- When asked to edit, set, write, or update spreadsheet cells, you MUST use the spreadsheet_set_cell tool
+- When asked to read or get spreadsheet cell values, you MUST use the spreadsheet_get_cell tool
+- NEVER claim you did something unless you actually called the tool - check tool results before confirming
+- If a tool call fails, explain the error to the user
+- After calling a tool, report the actual result from the tool, not what you think happened
 
 Guidelines:
 - Be clear, concise, and direct in your responses
@@ -70,11 +77,14 @@ Guidelines:
 - Maintain context from the conversation history
 - Be professional but friendly in your tone
 - Focus on being helpful and solving the user's problem
-- If asked to do something you cannot do, explain what you can do instead
-- When working with spreadsheets, use the available spreadsheet tools (spreadsheet_get_cell, spreadsheet_set_cell, etc.)
-- Cell references like "J7 through J22" mean column J, rows 7 to 22
+- When working with spreadsheets, ALWAYS use the available spreadsheet tools:
+  * spreadsheet_set_cell(cell_id, value) - to set a cell value (e.g., "J7", "1.2")
+  * spreadsheet_get_cell(cell_id) - to read a cell value
+  * spreadsheet_sum_range(start_cell, end_cell, target_cell) - to sum a range
+  * spreadsheet_avg_range(start_cell, end_cell, target_cell) - to average a range
+- Cell references like "J7" mean column J, row 7
 
-Remember: Quality over quantity. Better to give a short, accurate answer than a long, rambling one."""
+Remember: Quality over quantity. Better to give a short, accurate answer than a long, rambling one. ALWAYS use tools when available - don't just describe what you would do."""
     tools: List[str] = Field(default_factory=list)
 
 
@@ -132,6 +142,8 @@ async def _register_spreadsheet_tools_for_instance(instance_id: str):
             try:
                 spreadsheet = await _get_spreadsheet_data(instance_id)
                 data = spreadsheet["data"]
+                columns = spreadsheet.get("columns", [])
+                row_count = spreadsheet.get("row_count", 1000)
                 
                 if cell_id not in data:
                     data[cell_id] = {"id": cell_id, "value": ""}
@@ -144,9 +156,12 @@ async def _register_spreadsheet_tools_for_instance(instance_id: str):
                     cell["value"] = value
                     cell["formula"] = None
                 
-                await _save_spreadsheet_data(instance_id, data)
+                # Save with columns and row_count preserved
+                await _save_spreadsheet_data(instance_id, data, columns=columns, row_count=row_count)
+                logger.info(f"Tool set_cell: Saved cell {cell_id}={value} for instance {instance_id}")
                 return json.dumps({"success": True, "cell_id": cell_id, "value": value})
             except Exception as e:
+                logger.error(f"Tool set_cell failed: {e}", exc_info=True)
                 return json.dumps({"success": False, "error": str(e)})
         
         def set_cell_sync(cell_id: str, value: str) -> str:
@@ -623,11 +638,13 @@ async def stream_agent_response(
             # Use orchestrator with tool execution
             try:
                 # Use orchestrator to process with tools
+                # Pass system prompt directly to orchestrator
                 result = await orchestrator.process_request(
                     user_input=user_input,
                     use_tools=True,
                     use_rag=False,  # Disable RAG for playground for now
                     max_tokens=config.max_tokens,
+                    system_prompt=config.system_prompt,  # Pass system prompt to orchestrator
                 )
                 
                 response_text = result.get("response", "")
@@ -677,12 +694,21 @@ async def stream_agent_response(
                             "parameters": parameters,
                         }) + "\n"
                         
+                        # Parse observation if it's a JSON string (tools return JSON strings)
+                        parsed_result = observation
+                        if isinstance(observation, str):
+                            try:
+                                parsed_result = json.loads(observation)
+                            except (json.JSONDecodeError, TypeError):
+                                # Not JSON, keep as string
+                                parsed_result = observation
+                        
                         # Emit tool_result event
                         yield json.dumps({
                             "type": "tool_result",
                             "tool": tool_name,
                             "parameters": parameters,
-                            "result": observation if observation is not None else {},
+                            "result": parsed_result if parsed_result is not None else {},
                         }) + "\n"
                 
                 # Stream response in chunks
@@ -874,9 +900,12 @@ async def generate_agent_response(
 
 @router.post("/{instance_id}/stop")
 async def stop_agent(instance_id: str) -> Dict[str, Any]:
-    """Stop an agent instance"""
+    """Stop an agent instance (idempotent - safe to call multiple times)"""
+    # Check if agent exists
     if instance_id not in _active_agents:
-        raise HTTPException(status_code=404, detail="Agent instance not found")
+        # Already stopped or never existed - return success (idempotent)
+        logger.debug(f"Agent instance {instance_id} not found (may already be stopped)")
+        return {"success": True, "message": "Agent already stopped or not found"}
     
     # Publish stop event
     try:
@@ -888,11 +917,15 @@ async def stop_agent(instance_id: str) -> Dict[str, Any]:
         )
     except Exception as e:
         logger.warning(f"Failed to publish stop event: {e}")
+        # Continue anyway - don't fail the stop request if event publishing fails
     
     # Remove from active agents
-    del _active_agents[instance_id]
-    
-    logger.info(f"Stopped agent instance: {instance_id}")
+    try:
+        del _active_agents[instance_id]
+        logger.info(f"Stopped agent instance: {instance_id}")
+    except KeyError:
+        # Already deleted (race condition) - that's fine
+        logger.debug(f"Agent instance {instance_id} already removed")
     
     return {"success": True, "message": "Agent stopped"}
 
@@ -1333,11 +1366,13 @@ async def load_spreadsheet_data(request: SpreadsheetLoadRequest):
         
         if not row:
             # Return empty spreadsheet if not found
+            # Return A-Z columns (26 columns) and 1000 rows by default
+            default_columns = [chr(65 + i) for i in range(26)]  # A-Z
             return {
                 "success": True,
                 "found": False,
-                "columns": ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
-                "row_count": 20,
+                "columns": default_columns,
+                "row_count": 1000,
                 "data": {},
                 "agent_name": request.agent_name,
                 "instance_id": request.instance_id

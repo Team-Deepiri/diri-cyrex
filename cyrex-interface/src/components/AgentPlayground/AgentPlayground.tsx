@@ -852,7 +852,16 @@ export function AgentPlayground() {
                 if (data.tool?.startsWith('spreadsheet_') && spreadsheetRef.current && agentInstance) {
                   const toolName = data.tool;
                   const params = data.parameters || {};
-                  const result = data.result;
+                  let result = data.result;
+                  
+                  // Parse result if it's a JSON string
+                  if (typeof result === 'string') {
+                    try {
+                      result = JSON.parse(result);
+                    } catch {
+                      // Not JSON, keep as string
+                    }
+                  }
                   
                   // Use the direct tool result method instead of parsing natural language
                   spreadsheetRef.current.setCellFromTool(toolName, params, result);

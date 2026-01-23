@@ -2,7 +2,7 @@
 Spreadsheet Tools for Agents
 Tools for interacting with the live spreadsheet in the agent playground
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import json
 from ...logging_config import get_logger
 from ...database.postgres import get_postgres_manager
@@ -14,7 +14,7 @@ _spreadsheet_states: Dict[str, Dict[str, Any]] = {}
 
 
 async def _get_spreadsheet_data(instance_id: str, user_id: str = "admin") -> Dict[str, Any]:
-    """Get spreadsheet data from PostgreSQL"""
+    """Get spreadsheet data from PostgreSQL, initializing if needed"""
     try:
         postgres = await get_postgres_manager()
         spreadsheet_id = f"{user_id}_{instance_id or 'default'}"
@@ -28,28 +28,69 @@ async def _get_spreadsheet_data(instance_id: str, user_id: str = "admin") -> Dic
         if row:
             data = json.loads(row['data']) if isinstance(row['data'], str) else row['data']
             columns = json.loads(row['columns']) if isinstance(row['columns'], str) else row['columns']
-            return {"data": data, "columns": columns, "row_count": row['row_count']}
-        return {"data": {}, "columns": [], "row_count": 20}
+            row_count = row['row_count']
+            logger.debug(f"Loaded spreadsheet for instance {instance_id}: {len(data)} cells, {len(columns)} columns, {row_count} rows")
+            return {"data": data, "columns": columns, "row_count": row_count}
+        
+        # Initialize new spreadsheet with defaults
+        default_columns = [chr(65 + i) for i in range(26)]  # A-Z
+        default_data = {}
+        default_row_count = 1000
+        
+        # Save initial state to database
+        try:
+            await postgres.execute("""
+                INSERT INTO cyrex.spreadsheet_data 
+                (spreadsheet_id, user_id, instance_id, columns, row_count, data, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                ON CONFLICT (spreadsheet_id) DO NOTHING
+            """,
+                spreadsheet_id,
+                user_id,
+                instance_id,
+                json.dumps(default_columns),
+                default_row_count,
+                json.dumps(default_data),
+            )
+            logger.info(f"Initialized new spreadsheet for instance {instance_id}")
+        except Exception as init_error:
+            logger.warning(f"Failed to initialize spreadsheet in DB: {init_error}")
+        
+        return {"data": default_data, "columns": default_columns, "row_count": default_row_count}
     except Exception as e:
-        logger.warning(f"Failed to load spreadsheet from DB: {e}, using in-memory state")
-        return {"data": _spreadsheet_states.get(instance_id, {}), "columns": [], "row_count": 20}
+        logger.error(f"Failed to load spreadsheet from DB: {e}, using in-memory state", exc_info=True)
+        # Fallback to in-memory with defaults
+        default_columns = [chr(65 + i) for i in range(26)]  # A-Z
+        return {"data": _spreadsheet_states.get(instance_id, {}), "columns": default_columns, "row_count": 1000}
 
 
-async def _save_spreadsheet_data(instance_id: str, data: Dict[str, Any], user_id: str = "admin"):
+async def _save_spreadsheet_data(instance_id: str, data: Dict[str, Any], user_id: str = "admin", columns: Optional[List[str]] = None, row_count: Optional[int] = None):
     """Save spreadsheet data to PostgreSQL"""
     try:
         postgres = await get_postgres_manager()
         spreadsheet_id = f"{user_id}_{instance_id or 'default'}"
         
-        # Get current columns and row_count
-        row = await postgres.fetchrow("""
-            SELECT columns, row_count
-            FROM cyrex.spreadsheet_data
-            WHERE spreadsheet_id = $1
-        """, spreadsheet_id)
+        # Get current columns and row_count if not provided
+        if columns is None or row_count is None:
+            row = await postgres.fetchrow("""
+                SELECT columns, row_count
+                FROM cyrex.spreadsheet_data
+                WHERE spreadsheet_id = $1
+            """, spreadsheet_id)
+            
+            # Default: A-Z columns (26 columns) and 1000 rows
+            default_columns = [chr(65 + i) for i in range(26)]  # A-Z
+            if columns is None:
+                if row:
+                    columns = json.loads(row['columns']) if isinstance(row['columns'], str) else row['columns']
+                else:
+                    columns = default_columns
+            if row_count is None:
+                row_count = row['row_count'] if row else 1000
         
-        columns = json.loads(row['columns']) if row and isinstance(row['columns'], str) else (row['columns'] if row else ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'])
-        row_count = row['row_count'] if row else 20
+        # Ensure columns is a list
+        if isinstance(columns, str):
+            columns = json.loads(columns)
         
         await postgres.execute("""
             INSERT INTO cyrex.spreadsheet_data 
@@ -57,6 +98,8 @@ async def _save_spreadsheet_data(instance_id: str, data: Dict[str, Any], user_id
             VALUES ($1, $2, $3, $4, $5, $6, NOW())
             ON CONFLICT (spreadsheet_id) DO UPDATE SET
                 data = EXCLUDED.data,
+                columns = EXCLUDED.columns,
+                row_count = EXCLUDED.row_count,
                 updated_at = NOW()
         """,
             spreadsheet_id,
@@ -66,8 +109,10 @@ async def _save_spreadsheet_data(instance_id: str, data: Dict[str, Any], user_id
             row_count,
             json.dumps(data),
         )
+        logger.debug(f"Saved spreadsheet data for instance {instance_id}, {len(data)} cells")
     except Exception as e:
-        logger.warning(f"Failed to save spreadsheet to DB: {e}, using in-memory state")
+        logger.error(f"Failed to save spreadsheet to DB: {e}", exc_info=True)
+        # Fallback to in-memory state
         if instance_id not in _spreadsheet_states:
             _spreadsheet_states[instance_id] = {}
         _spreadsheet_states[instance_id] = data
@@ -92,6 +137,8 @@ async def register_spreadsheet_tools(agent, instance_id: Optional[str] = None):
             # Get current spreadsheet data
             spreadsheet = await _get_spreadsheet_data(instance_id)
             data = spreadsheet["data"]
+            columns = spreadsheet.get("columns", [])
+            row_count = spreadsheet.get("row_count", 1000)
             
             # Update cell
             if cell_id not in data:
@@ -105,8 +152,8 @@ async def register_spreadsheet_tools(agent, instance_id: Optional[str] = None):
                 cell["value"] = value
                 cell["formula"] = None
             
-            # Save to database
-            await _save_spreadsheet_data(instance_id, data)
+            # Save to database with columns and row_count
+            await _save_spreadsheet_data(instance_id, data, columns=columns, row_count=row_count)
             
             logger.info(f"Set cell {cell_id} to {value} for instance {instance_id}")
             return {
