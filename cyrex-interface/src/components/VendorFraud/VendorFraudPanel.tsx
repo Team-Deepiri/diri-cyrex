@@ -126,6 +126,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
       try {
         const result = await vendorFraudApi.getAnalytics();
         const place = result.analytics;
+        console.log("Place: ", place);
         setAnalytics(result.analytics);
       } catch (err) {
         console.error('Failed to load analytics:', err);
@@ -385,28 +386,28 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
               <div className="vf-stat-card">
                 <div className="vf-stat-icon"><DocumentIcon size={32} /></div>
                 <div className="vf-stat-info">
-                  <div className="vf-stat-value">Loading...</div>
+                  <div className="vf-stat-value">{analytics?.total_invoices_analyzed ?? "Loading..."}</div>
                   <div className="vf-stat-label">Invoices Analyzed</div>
                 </div>
               </div>
               <div className="vf-stat-card">
                 <div className="vf-stat-icon"><WarningIcon size={32} /></div>
                 <div className="vf-stat-info">
-                  <div className="vf-stat-value">Loading...</div>
+                  <div className="vf-stat-value">{analytics?.fraud_detected_count ?? "Loading..."}</div>
                   <div className="vf-stat-label">Fraud Detected</div>
                 </div>
               </div>
               <div className="vf-stat-card">
                 <div className="vf-stat-icon"><BuildingIcon size={32} /></div>
                 <div className="vf-stat-info">
-                  <div className="vf-stat-value">Loading...</div>
+                  <div className="vf-stat-value">{ analytics?.vendors_tracked ?? "Loading..."}</div>
                   <div className="vf-stat-label">Vendors Tracked</div>
                 </div>
               </div>
               <div className="vf-stat-card">
                 <div className="vf-stat-icon"><GlobeIcon size={32} /></div>
                 <div className="vf-stat-info">
-                  <div className="vf-stat-value">Loading...</div>
+                  <div className="vf-stat-value">{analytics?.vendors_tracked ?? "Loading..."}</div>
                   <div className="vf-stat-label">Network Effects</div>
                 </div>
               </div>
