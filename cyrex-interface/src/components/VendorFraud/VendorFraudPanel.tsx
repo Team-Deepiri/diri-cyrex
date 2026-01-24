@@ -126,7 +126,6 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
       try {
         const result = await vendorFraudApi.getAnalytics();
         const place = result.analytics;
-        console.log("Place: ", place);
         setAnalytics(result.analytics);
       } catch (err) {
         console.error('Failed to load analytics:', err);
@@ -276,8 +275,8 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
     //Ideally useState for search Result
 
     try { 
-      const result = await vendorFraudApi.searchVendors(searchQuery);
-
+      const result = await vendorFraudApi.searchVendors(searchQuery); 
+      console.log("Search result: ", result);
       //Check to see how result is returned
       setSearchResult(result)
     } catch (err) { 
@@ -364,9 +363,7 @@ export const VendorFraudPanel: React.FC<Props> = ({ baseUrl, apiKey }) => {
         >
           <MoneyIcon size={16} /> Benchmarks
         </button>
-      </div>
-
-      {/* Error display */}
+      </div> 
       {error && (
         <div className="vf-error">
           <WarningIcon size={18} /> {error}

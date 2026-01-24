@@ -96,8 +96,8 @@ class VendorFraudAgent(BaseAgent):
         session_id: Optional[str] = None,
         industry: IndustryNiche = IndustryNiche.GENERIC,
     ):
-        super().__init__(agent_config, llm_provider, session_id)
         self.industry = industry
+        super().__init__(agent_config, llm_provider, session_id)
         self.rag_engine = None
         self.graph = None
         
