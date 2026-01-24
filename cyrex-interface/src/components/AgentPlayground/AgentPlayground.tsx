@@ -122,7 +122,8 @@ const API_BASE = import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
 
 export function AgentPlayground() {
   // State
-  const [activeTab, setActiveTab] = useState<'configure' | 'test' | 'monitor' | 'spreadsheet'>('configure');
+  const [activeTab, setActiveTab] = useState<'configure' | 'test' | 'monitor' | 'spreadsheet' | 'tool-calls'>('configure');
+  const [allToolCalls, setAllToolCalls] = useState<ToolCall[]>([]);
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({
     agentId: '',
     agentType: 'conversational',
@@ -156,6 +157,7 @@ export function AgentPlayground() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const spreadsheetRef = useRef<LiveSpreadsheetRef>(null);
+  const lastSyncedMessageCountRef = useRef<number>(0);
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -406,6 +408,7 @@ export function AgentPlayground() {
           toolCalls: msg.tool_calls || undefined,
         }));
         setConversation(mappedMessages);
+        lastSyncedMessageCountRef.current = mappedMessages.length;
         addEvent('conversation_loaded', { messageCount: mappedMessages.length });
       }
     } catch (error) {
@@ -420,6 +423,375 @@ export function AgentPlayground() {
       loadConversationHistory(agentInstance.instanceId);
     }
   }, [activeTab, agentInstance?.instanceId, loadConversationHistory]);
+
+  // Real-time message sync: Poll for new messages when test tab is active
+  useEffect(() => {
+    if (activeTab !== 'test' || !agentInstance?.instanceId) {
+      lastSyncedMessageCountRef.current = 0;
+      return;
+    }
+
+    // Initialize ref with current conversation length
+    lastSyncedMessageCountRef.current = conversation.length;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/agent/${agentInstance.instanceId}/conversation`);
+        if (response.ok) {
+          const data = await response.json();
+          const history = data.messages || [];
+          
+          // Only update if we have new messages
+          if (history.length > lastSyncedMessageCountRef.current) {
+            const mappedMessages: ConversationMessage[] = history.map((msg: any, index: number) => ({
+              id: msg.message_id || `msg-hist-${index}-${Date.now()}`,
+              role: msg.role || 'user',
+              content: String(msg.content || ''),
+              timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+              streaming: false,
+              isError: msg.is_error || false,
+              toolCalls: msg.tool_calls || undefined,
+            }));
+            
+            // Smart merge: replace temporary messages with database versions, then deduplicate
+            setConversation(prev => {
+              // Don't update streaming messages - let them complete first
+              const hasStreaming = prev.some(msg => msg.streaming);
+              if (hasStreaming) {
+                // Only update non-streaming messages
+                const historyMap = new Map<string, ConversationMessage>();
+                mappedMessages.forEach(msg => {
+                  historyMap.set(msg.id, { ...msg, streaming: false });
+                });
+                
+                const updated = prev.map(msg => {
+                  if (msg.streaming) {
+                    return msg; // Don't touch streaming messages
+                  }
+                  
+                  const dbVersion = historyMap.get(msg.id);
+                  if (dbVersion) {
+                    return dbVersion;
+                  }
+                  
+                  // Try to match temporary messages
+                  if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
+                    const msgTime = new Date(msg.timestamp).getTime();
+                    for (const dbMsg of historyMap.values()) {
+                      const dbTime = new Date(dbMsg.timestamp).getTime();
+                      const timeDiff = Math.abs(msgTime - dbTime);
+                      
+                      if (
+                        msg.role === dbMsg.role &&
+                        msg.content === dbMsg.content &&
+                        timeDiff < 15000
+                      ) {
+                        return dbMsg;
+                      }
+                    }
+                  }
+                  
+                  return msg;
+                });
+                
+                // Add new messages that aren't in prev
+                const existingKeys = new Set(prev.map(m => {
+                  const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
+                  return `${m.role}:${m.content}:${ts}`;
+                }));
+                
+                const newMessages = mappedMessages
+                  .filter(m => {
+                    const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
+                    const key = `${m.role}:${m.content}:${ts}`;
+                    return !existingKeys.has(key);
+                  })
+                  .map(m => ({ ...m, streaming: false }));
+                
+                const merged = [...updated, ...newMessages].sort((a, b) => 
+                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                );
+                
+                lastSyncedMessageCountRef.current = merged.length;
+                return merged;
+              }
+              
+              // No streaming messages - do full merge
+              const historyMap = new Map<string, ConversationMessage>();
+              mappedMessages.forEach(msg => {
+                historyMap.set(msg.id, { ...msg, streaming: false });
+              });
+              
+              // Replace temporary messages with database versions
+              let updated = prev.map(msg => {
+                // For user messages, prioritize matching by content+role over ID
+                // This helps catch duplicates where frontend added it and database has it
+                if (msg.role === 'user') {
+                  const msgTime = new Date(msg.timestamp).getTime();
+                  
+                  // Look for matching message in database by content+role+timestamp
+                  for (const dbMsg of historyMap.values()) {
+                    if (dbMsg.role === 'user' && dbMsg.content === msg.content) {
+                      const dbTime = new Date(dbMsg.timestamp).getTime();
+                      const timeDiff = Math.abs(msgTime - dbTime);
+                      
+                      if (timeDiff < 10000) { // 10 seconds window for user messages
+                        // Replace temporary message with database version
+                        console.debug('Replacing temporary user message with database version:', msg.content);
+                        return dbMsg;
+                      }
+                    }
+                  }
+                }
+                
+                // If this is a temporary message, try to find its database version
+                if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
+                  const msgTime = new Date(msg.timestamp).getTime();
+                  
+                  // Look for matching message in database by content+role+timestamp
+                  for (const dbMsg of historyMap.values()) {
+                    const dbTime = new Date(dbMsg.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - dbTime);
+                    
+                    if (
+                      msg.role === dbMsg.role &&
+                      msg.content === dbMsg.content &&
+                      timeDiff < 15000 // 15 seconds window
+                    ) {
+                      // Replace temporary message with database version
+                      return dbMsg;
+                    }
+                  }
+                }
+                
+                // Check if we have an updated version from database
+                const dbVersion = historyMap.get(msg.id);
+                if (dbVersion) {
+                  return dbVersion;
+                }
+                
+                return { ...msg, streaming: false }; // Ensure not streaming
+              });
+              
+              // Second pass: deduplicate based on content+role+timestamp (rounded to seconds)
+              // For user messages, use stricter matching (content+role only, no timestamp)
+              const deduplicated: ConversationMessage[] = [];
+              const seenKeys = new Set<string>();
+              const seenUserMessages = new Set<string>(); // Track user messages separately
+              
+              for (const msg of updated) {
+                // For user messages, use content+role only (no timestamp) to catch duplicates
+                if (msg.role === 'user') {
+                  const userKey = `${msg.role}:${msg.content}`;
+                  if (!seenUserMessages.has(userKey)) {
+                    seenUserMessages.add(userKey);
+                    deduplicated.push(msg);
+                  } else {
+                    // Duplicate user message found - prefer database ID
+                    const existingIdx = deduplicated.findIndex(m => 
+                      m.role === 'user' && m.content === msg.content
+                    );
+                    
+                    if (existingIdx >= 0) {
+                      const existing = deduplicated[existingIdx];
+                      const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id') || msg.id.length > 20;
+                      const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id') || existing.id.length > 20;
+                      
+                      if (isDbId && !existingIsDbId) {
+                        console.debug('Replacing duplicate user message with database version:', msg.content);
+                        deduplicated[existingIdx] = msg; // Replace with database version
+                      }
+                      // Otherwise keep existing (don't add duplicate)
+                    }
+                  }
+                  continue; // Skip timestamp-based deduplication for user messages
+                }
+                
+                // For non-user messages, use timestamp-based deduplication
+                const timestampSec = Math.floor(new Date(msg.timestamp).getTime() / 1000);
+                const key = `${msg.role}:${msg.content}:${timestampSec}`;
+                
+                if (!seenKeys.has(key)) {
+                  seenKeys.add(key);
+                  deduplicated.push(msg);
+                } else {
+                  // Duplicate found - prefer database ID
+                  const existingIdx = deduplicated.findIndex(m => {
+                    const mTimestampSec = Math.floor(new Date(m.timestamp).getTime() / 1000);
+                    return `${m.role}:${m.content}:${mTimestampSec}` === key;
+                  });
+                  
+                  if (existingIdx >= 0) {
+                    const existing = deduplicated[existingIdx];
+                    const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id') || msg.id.length > 20;
+                    const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id') || existing.id.length > 20;
+                    
+                    if (isDbId && !existingIsDbId) {
+                      deduplicated[existingIdx] = msg; // Replace with database version
+                    }
+                    // Otherwise keep existing (don't add duplicate)
+                  }
+                }
+              }
+              
+              // Third pass: add any new messages from database that weren't in prev
+              const existingKeysSet = new Set(deduplicated.map(m => {
+                const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
+                return `${m.role}:${m.content}:${ts}`;
+              }));
+              
+              const newMessages = mappedMessages
+                .filter(m => {
+                  const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
+                  const key = `${m.role}:${m.content}:${ts}`;
+                  return !existingKeysSet.has(key);
+                })
+                .map(m => ({ ...m, streaming: false }));
+              
+              if (newMessages.length > 0 || deduplicated.length !== prev.length) {
+                // Merge and sort by timestamp
+                const merged = [...deduplicated, ...newMessages].sort((a, b) => 
+                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                );
+                lastSyncedMessageCountRef.current = merged.length;
+                return merged;
+              }
+              
+              return deduplicated;
+            });
+          } else if (history.length > 0) {
+            // Check for updated messages (e.g., streaming completed)
+            const historyMap = new Map<string, ConversationMessage>();
+            history.forEach((msg: any, index: number) => {
+              const msgId = msg.message_id || `msg-hist-${index}-${Date.now()}`;
+              historyMap.set(msgId, {
+                id: msgId,
+                role: msg.role || 'user',
+                content: String(msg.content || ''),
+                timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+                streaming: false,
+                isError: msg.is_error || false,
+                toolCalls: msg.tool_calls || undefined,
+              });
+            });
+            
+            setConversation(prev => {
+              // First pass: replace temporary messages with database versions
+              let updated = prev.map(msg => {
+                // If this is a temporary message, try to find its database version
+                if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
+                  const msgTime = new Date(msg.timestamp).getTime();
+                  
+                  // Look for matching message in database by content+role+timestamp
+                  for (const dbMsg of historyMap.values()) {
+                    const dbTime = new Date(dbMsg.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - dbTime);
+                    
+                    if (
+                      msg.role === dbMsg.role &&
+                      msg.content === dbMsg.content &&
+                      timeDiff < 15000 // 15 seconds window
+                    ) {
+                      // Replace temporary message with database version
+                      return dbMsg;
+                    }
+                  }
+                }
+                
+                // Check if we have an updated version from database
+                const dbVersion = historyMap.get(msg.id);
+                if (dbVersion) {
+                  return dbVersion;
+                }
+                
+                return msg;
+              });
+              
+              // Second pass: deduplicate based on content+role+timestamp
+              const deduplicated: ConversationMessage[] = [];
+              const seenContent = new Map<string, ConversationMessage>(); // content+role -> message
+              
+              for (const msg of updated) {
+                const contentKey = `${msg.role}:${msg.content}`;
+                const msgTime = new Date(msg.timestamp).getTime();
+                const existing = seenContent.get(contentKey);
+                
+                if (!existing) {
+                  // First time seeing this content
+                  seenContent.set(contentKey, msg);
+                  deduplicated.push(msg);
+                } else {
+                  // Check if this is a duplicate (within 15 seconds - more lenient)
+                  const existingTime = new Date(existing.timestamp).getTime();
+                  const timeDiff = Math.abs(msgTime - existingTime);
+                  
+                  if (timeDiff < 15000) {
+                    // It's a duplicate - prefer database ID over temporary ID
+                    const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id');
+                    const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id');
+                    
+                    if (isDbId && !existingIsDbId) {
+                      // Replace with database version
+                      const idx = deduplicated.indexOf(existing);
+                      if (idx >= 0) {
+                        deduplicated[idx] = msg;
+                        seenContent.set(contentKey, msg);
+                      }
+                    }
+                    // Otherwise keep the existing one (don't add duplicate)
+                  } else {
+                    // Different message with same content (probably not a duplicate)
+                    seenContent.set(contentKey, msg);
+                    deduplicated.push(msg);
+                  }
+                }
+              }
+              
+              // Third pass: add any new messages from database that weren't in prev
+              const existingIds = new Set(deduplicated.map(m => m.id));
+              const newMessages = Array.from(historyMap.values()).filter((m: ConversationMessage) => {
+                // Skip if ID already exists
+                if (existingIds.has(m.id)) return false;
+                
+                // Check if content+role already exists (within 15 seconds)
+                const contentKey = `${m.role}:${m.content}`;
+                const msgTime = new Date(m.timestamp).getTime();
+                
+                for (const existing of deduplicated) {
+                  const existingKey = `${existing.role}:${existing.content}`;
+                  if (contentKey === existingKey) {
+                    const existingTime = new Date(existing.timestamp).getTime();
+                    const timeDiff = Math.abs(msgTime - existingTime);
+                    
+                    if (timeDiff < 15000) {
+                      return false; // This is a duplicate
+                    }
+                  }
+                }
+                
+                return true;
+              });
+              
+              if (newMessages.length > 0 || deduplicated.length !== prev.length) {
+                const merged = [...deduplicated, ...newMessages].sort((a: ConversationMessage, b: ConversationMessage) => 
+                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+                );
+                lastSyncedMessageCountRef.current = merged.length;
+                return merged;
+              }
+              
+              return deduplicated;
+            });
+          }
+        }
+      } catch (error) {
+        // Silently fail - don't spam console
+        console.debug('Polling error (non-critical):', error);
+      }
+    }, 1000); // Poll every 1 second
+
+    return () => clearInterval(pollInterval);
+  }, [activeTab, agentInstance?.instanceId]);
 
   // Initialize agent
   const initializeAgent = async () => {
@@ -604,39 +976,38 @@ export function AgentPlayground() {
       return;
     }
 
-    const userMessage: ConversationMessage = {
-      id: `msg-${Date.now()}`,
-      role: 'user',
-      content: userInput,
-      timestamp: new Date().toISOString(),
-    };
-
-    setConversation(prev => [...prev, userMessage]);
+    // Don't add user message optimistically - let polling add it from database
+    // This prevents duplicates when the backend saves it and polling loads it
+    // Just clear the input for better UX
+    const messageContent = userInput;
+    setUserInput('');
     
     // Check if message is for spreadsheet
-    const lowerInput = userInput.toLowerCase();
+    const lowerInput = messageContent.toLowerCase();
     const spreadsheetKeywords = ['spreadsheet', 'table', 'cell', 'set', 'add', 'calculate', 'sum', 'avg'];
     const isSpreadsheetMessage = spreadsheetKeywords.some(keyword => lowerInput.includes(keyword));
     
     if (isSpreadsheetMessage && spreadsheetRef.current) {
       // Queue message for spreadsheet processing
-      setSpreadsheetMessageQueue(prev => [...prev, userInput]);
+      setSpreadsheetMessageQueue(prev => [...prev, messageContent]);
       // Process immediately
       setTimeout(() => {
         if (spreadsheetRef.current) {
-          spreadsheetRef.current.processMessage(userInput);
+          spreadsheetRef.current.processMessage(messageContent);
         }
       }, 100);
     }
     
-    setUserInput('');
     setIsStreaming(true);
     setLiveToolCalls([]);
     
-    addEvent('message_sent', { content: userInput });
+    // Track when we sent the message for response time calculation
+    const startTime = Date.now();
+    
+    addEvent('message_sent', { content: messageContent });
 
     // Update agent status
-    setAgentInstance(prev => prev ? { ...prev, status: 'processing', currentTask: userInput } : null);
+    setAgentInstance(prev => prev ? { ...prev, status: 'processing', currentTask: messageContent } : null);
 
     // Add placeholder for streaming response
     const assistantMessage: ConversationMessage = {
@@ -646,7 +1017,11 @@ export function AgentPlayground() {
       timestamp: new Date().toISOString(),
       streaming: true,
     };
-    setConversation(prev => [...prev, assistantMessage]);
+    setConversation(prev => {
+      const updated = [...prev, assistantMessage];
+      lastSyncedMessageCountRef.current = updated.length;
+      return updated;
+    });
 
     try {
       const response = await fetch(`${API_BASE}/api/agent/invoke`, {
@@ -654,7 +1029,7 @@ export function AgentPlayground() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           instance_id: agentInstance.instanceId,
-          input: userInput,
+          input: messageContent,
           config: agentConfig,
           stream: true,
         }),
@@ -750,31 +1125,11 @@ export function AgentPlayground() {
                 setLiveToolCalls(prev => [...prev, toolCall]);
                 addEvent('tool_called', { tool: data.tool });
                 
-                // Handle spreadsheet tool calls
+                // Handle spreadsheet tool calls - we'll wait for tool_result to actually update
+                // This is just for UI feedback that a tool is being called
                 if (data.tool?.startsWith('spreadsheet_') && spreadsheetRef.current && agentInstance) {
-                  const toolName = data.tool;
-                  const params = data.parameters || {};
-                  
-                  // Process spreadsheet tool calls
-                  if (toolName === 'spreadsheet_set_cell' && params.cell_id && params.value) {
-                    spreadsheetRef.current.processMessage(`set ${params.cell_id} to ${params.value}`);
-                  } else if (toolName === 'spreadsheet_sum_range' && params.start_cell && params.end_cell) {
-                    const target = params.target_cell ? ` in ${params.target_cell}` : '';
-                    spreadsheetRef.current.processMessage(`calculate sum of ${params.start_cell}:${params.end_cell}${target}`);
-                  } else if (toolName === 'spreadsheet_avg_range' && params.start_cell && params.end_cell) {
-                    const target = params.target_cell ? ` in ${params.target_cell}` : '';
-                    spreadsheetRef.current.processMessage(`calculate average of ${params.start_cell}:${params.end_cell}${target}`);
-                  } else if (toolName === 'spreadsheet_add_row') {
-                    // Trigger row addition in spreadsheet
-                    if (spreadsheetRef.current) {
-                      // This would need to be exposed via ref
-                    }
-                  } else if (toolName === 'spreadsheet_add_column') {
-                    // Trigger column addition in spreadsheet
-                    if (spreadsheetRef.current) {
-                      // This would need to be exposed via ref
-                    }
-                  }
+                  // Tool call detected - will be processed when tool_result arrives
+                  addEvent('spreadsheet_tool_called', { tool: data.tool, parameters: data.parameters });
                 }
               } else if (data.type === 'tool_result') {
                 setLiveToolCalls(prev => 
@@ -785,6 +1140,16 @@ export function AgentPlayground() {
                   )
                 );
                 addEvent('tool_completed', { tool: data.tool });
+                
+                // Handle spreadsheet tool results - directly update spreadsheet
+                if (data.tool?.startsWith('spreadsheet_') && spreadsheetRef.current && agentInstance) {
+                  const toolName = data.tool;
+                  const params = data.parameters || {};
+                  const result = data.result;
+                  
+                  // Use the direct tool result method instead of parsing natural language
+                  spreadsheetRef.current.setCellFromTool(toolName, params, result);
+                }
               } else if (data.type === 'done') {
                 // Stream completed successfully
                 addEvent('stream_done', { total_tokens: data.total_tokens });
@@ -822,11 +1187,12 @@ export function AgentPlayground() {
           updated[lastIdx] = { 
             ...updated[lastIdx], 
             content: finalContent,
-            streaming: false,
+            streaming: false, // Always set to false when stream completes
             toolCalls: liveToolCalls,
           };
         }
-        return updated;
+        // Also ensure any other streaming messages are finalized (safety check)
+        return updated.map(msg => msg.streaming ? { ...msg, streaming: false } : msg);
       });
 
       // Check if complete response contains spreadsheet commands
@@ -855,7 +1221,7 @@ export function AgentPlayground() {
         metrics: {
           ...prev.metrics,
           tokensUsed: prev.metrics.tokensUsed + (fullContent.length / 4),
-          responseTime: Date.now() - new Date(userMessage.timestamp).getTime(),
+          responseTime: Date.now() - (startTime || Date.now()),
           toolCalls: prev.metrics.toolCalls + liveToolCalls.length,
         },
       } : null);
@@ -1162,6 +1528,98 @@ export function AgentPlayground() {
     </div>
   );
 
+  // Extract all tool calls from conversation
+  useEffect(() => {
+    const toolCalls: ToolCall[] = [];
+    conversation.forEach(msg => {
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        msg.toolCalls.forEach(tc => {
+          toolCalls.push({
+            ...tc,
+            // Add message context
+            toolId: tc.toolId || `tc-${Date.now()}-${Math.random()}`,
+          });
+        });
+      }
+    });
+    // Also include live tool calls that might not be in conversation yet
+    liveToolCalls.forEach(tc => {
+      if (!toolCalls.find(existing => existing.toolId === tc.toolId)) {
+        toolCalls.push(tc);
+      }
+    });
+    setAllToolCalls(toolCalls);
+  }, [conversation, liveToolCalls]);
+
+  // Render tool calls panel
+  const renderToolCallsPanel = () => (
+    <div className="tool-calls-panel">
+      <div className="tool-calls-header">
+        <h3><FaTools /> Tool Calls</h3>
+        <div className="tool-calls-stats">
+          <span>Total: {allToolCalls.length}</span>
+          <span>Completed: {allToolCalls.filter(tc => tc.status === 'completed').length}</span>
+          <span>Failed: {allToolCalls.filter(tc => tc.status === 'failed').length}</span>
+          <span>Pending: {allToolCalls.filter(tc => tc.status === 'pending' || tc.status === 'executing').length}</span>
+        </div>
+      </div>
+
+      <div className="tool-calls-list">
+        {allToolCalls.length === 0 ? (
+          <div className="empty-state">
+            <FaTools size={48} />
+            <h3>No Tool Calls Yet</h3>
+            <p>Tool calls will appear here when the agent uses tools</p>
+          </div>
+        ) : (
+          allToolCalls.map((tc, index) => (
+            <div key={tc.toolId || `tc-${index}`} className={`tool-call-card ${tc.status}`}>
+              <div className="tool-call-header">
+                <div className="tool-call-title">
+                  <FaTools />
+                  <span className="tool-name">{tc.toolName}</span>
+                  <span className={`tool-status ${tc.status}`}>{tc.status}</span>
+                </div>
+                <div className="tool-call-meta">
+                  {tc.duration && <span>Duration: {tc.duration}ms</span>}
+                </div>
+              </div>
+              
+              {tc.parameters && Object.keys(tc.parameters).length > 0 && (
+                <div className="tool-call-section">
+                  <h4>Parameters</h4>
+                  <pre className="tool-call-data">
+                    {JSON.stringify(tc.parameters, null, 2)}
+                  </pre>
+                </div>
+              )}
+              
+              {tc.result !== undefined && (
+                <div className="tool-call-section">
+                  <h4>Result</h4>
+                  <pre className="tool-call-data">
+                    {typeof tc.result === 'string' 
+                      ? tc.result 
+                      : JSON.stringify(tc.result, null, 2)}
+                  </pre>
+                </div>
+              )}
+              
+              {tc.status === 'failed' && (
+                <div className="tool-call-section error">
+                  <h4>Error</h4>
+                  <pre className="tool-call-data error">
+                    {String(tc.result || 'Unknown error')}
+                  </pre>
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
   // Render monitor panel
   const renderMonitorPanel = () => (
     <div className="monitor-panel">
@@ -1279,6 +1737,14 @@ export function AgentPlayground() {
         >
           <FaTable /> Spreadsheet
         </button>
+        <button
+          className={`tab ${activeTab === 'tool-calls' ? 'active' : ''}`}
+          onClick={() => setActiveTab('tool-calls')}
+          disabled={!agentInstance}
+          title={!agentInstance ? 'Initialize an agent first' : 'Tool Calls'}
+        >
+          <FaTools /> Tool Calls
+        </button>
       </div>
 
       <div className="playground-content">
@@ -1286,6 +1752,7 @@ export function AgentPlayground() {
         {activeTab === 'test' && renderTestPanel()}
         {activeTab === 'monitor' && renderMonitorPanel()}
         {activeTab === 'spreadsheet' && renderSpreadsheetPanel()}
+        {activeTab === 'tool-calls' && renderToolCallsPanel()}
       </div>
     </div>
   );

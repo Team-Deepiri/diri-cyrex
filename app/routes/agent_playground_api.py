@@ -18,6 +18,7 @@ from ..core.enhanced_state_manager import get_enhanced_state_manager, WorkflowPh
 from ..core.redis_streams_broker import get_redis_streams_broker, StreamEventType
 from ..core.advanced_guardrails import get_advanced_guardrails, GuardrailAction
 from ..core.orchestrator import get_orchestrator
+from ..core.tool_registry import get_tool_registry, ToolCategory
 from ..integrations.ollama_container import get_ollama_client, ChatMessage, GenerationOptions
 from ..integrations.realtime_streaming import get_stream_publisher
 from ..agents.base_agent import BaseAgent, AgentResponse
@@ -107,6 +108,104 @@ class AgentInstanceResponse(BaseModel):
 
 _active_agents: Dict[str, Dict[str, Any]] = {}
 _group_chats: Dict[str, Dict[str, Any]] = {}  # Group chat ID -> group chat data
+
+
+# ============================================================================
+# Tool Registration Helpers
+# ============================================================================
+
+async def _register_spreadsheet_tools_for_instance(instance_id: str):
+    """Register spreadsheet tools for a specific instance with the ToolRegistry"""
+    try:
+        from langchain_core.tools import Tool
+        from ..agents.tools.spreadsheet_tools import (
+            _get_spreadsheet_data,
+            _save_spreadsheet_data,
+        )
+        import asyncio
+        
+        tool_registry = get_tool_registry()
+        
+        # Create instance-aware tool functions
+        async def set_cell_tool(cell_id: str, value: str) -> str:
+            """Set a cell value in the spreadsheet"""
+            try:
+                spreadsheet = await _get_spreadsheet_data(instance_id)
+                data = spreadsheet["data"]
+                
+                if cell_id not in data:
+                    data[cell_id] = {"id": cell_id, "value": ""}
+                
+                cell = data[cell_id]
+                if value.startswith("="):
+                    cell["formula"] = value[1:]
+                    cell["value"] = ""
+                else:
+                    cell["value"] = value
+                    cell["formula"] = None
+                
+                await _save_spreadsheet_data(instance_id, data)
+                return json.dumps({"success": True, "cell_id": cell_id, "value": value})
+            except Exception as e:
+                return json.dumps({"success": False, "error": str(e)})
+        
+        def set_cell_sync(cell_id: str, value: str) -> str:
+            """Sync wrapper for set_cell"""
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(set_cell_tool(cell_id, value))
+        
+        async def get_cell_tool(cell_id: str) -> str:
+            """Get a cell value from the spreadsheet"""
+            try:
+                spreadsheet = await _get_spreadsheet_data(instance_id)
+                data = spreadsheet["data"]
+                cell = data.get(cell_id, {})
+                return json.dumps({
+                    "success": True,
+                    "cell_id": cell_id,
+                    "value": cell.get("value", ""),
+                    "formula": cell.get("formula"),
+                })
+            except Exception as e:
+                return json.dumps({"success": False, "error": str(e)})
+        
+        def get_cell_sync(cell_id: str) -> str:
+            """Sync wrapper for get_cell"""
+            loop = asyncio.get_event_loop()
+            return loop.run_until_complete(get_cell_tool(cell_id))
+        
+        # Register tools - these are instance-aware via closure
+        # Note: If multiple instances register, the last one wins, but that's OK since
+        # each instance's tools capture their own instance_id in the closure
+        existing_set_cell = tool_registry.get_tool("spreadsheet_set_cell")
+        existing_get_cell = tool_registry.get_tool("spreadsheet_get_cell")
+        
+        if existing_set_cell:
+            logger.debug(f"Tool spreadsheet_set_cell already registered, overwriting for instance {instance_id}")
+        if existing_get_cell:
+            logger.debug(f"Tool spreadsheet_get_cell already registered, overwriting for instance {instance_id}")
+        
+        tool_registry.register_tool(
+            Tool(
+                name="spreadsheet_set_cell",
+                description="Set a cell value in the spreadsheet. Use cell_id like 'A1', 'B2', 'J7', etc. Value can be a number or formula starting with =. ALWAYS use this tool when asked to edit or set cell values.",
+                func=set_cell_sync,
+            ),
+            category=ToolCategory.DATA,
+        )
+        
+        tool_registry.register_tool(
+            Tool(
+                name="spreadsheet_get_cell",
+                description="Get a cell value from the spreadsheet. Use cell_id like 'A1', 'B2', 'J7', etc.",
+                func=get_cell_sync,
+            ),
+            category=ToolCategory.DATA,
+        )
+        
+        logger.info(f"Registered spreadsheet tools for instance {instance_id}")
+    except Exception as e:
+        logger.warning(f"Failed to register spreadsheet tools for instance {instance_id}: {e}", exc_info=True)
 
 
 # ============================================================================
@@ -242,6 +341,22 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
         
         # Load existing conversation history from database
         conversation_history = await load_conversation_history(instance_id)
+        
+        # Register spreadsheet tools for this instance with ToolRegistry
+        # This ensures the orchestrator's agent executor can use them
+        if any(tool.startswith("spreadsheet_") for tool in final_config.get("tools", [])):
+            await _register_spreadsheet_tools_for_instance(instance_id)
+            # Recreate agent executor to include new tools
+            orchestrator = get_orchestrator()
+            if orchestrator.llm_provider:
+                try:
+                    llm = orchestrator.llm_provider.get_llm()
+                    tools = orchestrator.tool_registry.get_tools()
+                    if tools:
+                        orchestrator.agent_executor = orchestrator._create_agent_executor(llm, tools)
+                        logger.info(f"Recreated agent executor with {len(tools)} tools including spreadsheet tools")
+                except Exception as e:
+                    logger.warning(f"Failed to recreate agent executor: {e}", exc_info=True)
         
         # Store agent configuration
         _active_agents[instance_id] = {
@@ -494,11 +609,17 @@ async def stream_agent_response(
         
         # Check if tools are enabled and available
         orchestrator = get_orchestrator()
+        tools_available = orchestrator.tool_registry.get_tools()
+        logger.info(f"Tools in registry: {[t.name for t in tools_available]}")
+        logger.info(f"Config tools requested: {config.tools}")
+        logger.info(f"Agent executor available: {orchestrator.agent_executor is not None}")
+        
         use_tools = len(config.tools) > 0 and orchestrator.agent_executor is not None
         full_response = ""
         tool_calls_count = 0
         
         if use_tools:
+            logger.info(f"Using agent executor with tools for request: {user_input}")
             # Use orchestrator with tool execution
             try:
                 # Use orchestrator to process with tools
@@ -514,14 +635,54 @@ async def stream_agent_response(
                 intermediate_steps = result.get("intermediate_steps", [])
                 tool_calls_count = len(intermediate_steps)
                 
-                # Emit tool call events
+                logger.info(f"Agent executor returned {tool_calls_count} intermediate steps")
+                if intermediate_steps:
+                    logger.info(f"Intermediate steps: {intermediate_steps}")
+                else:
+                    logger.warning(f"No tool calls made by agent executor. Response: {response_text[:200]}")
+                
+                # Emit tool call and result events
                 for step in intermediate_steps:
                     if isinstance(step, tuple) and len(step) >= 2:
-                        tool_name = str(step[0]) if step[0] else "unknown"
+                        # LangChain intermediate_steps format: (AgentAction, observation)
+                        # AgentAction has: tool, tool_input, log
+                        # observation is the tool result
+                        action = step[0]
+                        observation = step[1]
+                        
+                        # Extract tool name and parameters
+                        tool_name = "unknown"
+                        tool_input = {}
+                        
+                        if hasattr(action, 'tool'):
+                            tool_name = action.tool
+                        elif isinstance(action, dict):
+                            tool_name = action.get('tool', str(action))
+                            tool_input = action.get('tool_input', {})
+                        else:
+                            # Try to extract from string representation
+                            tool_name = str(action)
+                        
+                        # Extract parameters from tool_input
+                        parameters = {}
+                        if hasattr(action, 'tool_input'):
+                            parameters = action.tool_input if isinstance(action.tool_input, dict) else {}
+                        elif isinstance(action, dict):
+                            parameters = action.get('tool_input', {})
+                        
+                        # Emit tool_call event
                         yield json.dumps({
                             "type": "tool_call",
                             "tool": tool_name,
-                            "parameters": {},
+                            "parameters": parameters,
+                        }) + "\n"
+                        
+                        # Emit tool_result event
+                        yield json.dumps({
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "parameters": parameters,
+                            "result": observation if observation is not None else {},
                         }) + "\n"
                 
                 # Stream response in chunks

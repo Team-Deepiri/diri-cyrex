@@ -37,6 +37,8 @@ interface LiveSpreadsheetProps {
 
 export interface LiveSpreadsheetRef {
   processMessage: (message: string) => void;
+  setCell: (cellId: string, value: string, agentName?: string) => void;
+  setCellFromTool: (toolName: string, params: Record<string, unknown>, result?: unknown) => void;
 }
 
 const INITIAL_COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
@@ -920,13 +922,72 @@ export const LiveSpreadsheet = forwardRef<LiveSpreadsheetRef, LiveSpreadsheetPro
       }
     };
 
+    // Direct method to set cell value (used by tool results)
+    const setCellDirect = useCallback((cellId: string, value: string, updatingAgent?: string) => {
+      updateCell(cellId.toUpperCase(), value, updatingAgent || agentName || 'Agent');
+    }, [updateCell, agentName]);
+
+    // Process tool result to update spreadsheet
+    const processToolResult = useCallback((toolName: string, params: Record<string, unknown>, result?: unknown) => {
+      if (toolName === 'spreadsheet_set_cell') {
+        const cellId = String(params.cell_id || '');
+        const value = String(params.value || '');
+        if (cellId && value) {
+          setCellDirect(cellId, value, agentName || 'Agent');
+        }
+      } else if (toolName === 'spreadsheet_sum_range') {
+        const startCell = String(params.start_cell || '');
+        const endCell = String(params.end_cell || '');
+        const targetCell = params.target_cell ? String(params.target_cell) : null;
+        
+        if (startCell && endCell) {
+          // If we have a result with the sum, use it
+          if (result && typeof result === 'object' && result !== null) {
+            const resultObj = result as Record<string, unknown>;
+            const sum = resultObj.sum;
+            if (targetCell && sum !== undefined) {
+              setCellDirect(targetCell, String(sum), agentName || 'Agent');
+            } else if (targetCell) {
+              // Set formula if no direct sum value
+              setCellDirect(targetCell, `=SUM(${startCell}:${endCell})`, agentName || 'Agent');
+            }
+          } else if (targetCell) {
+            // Set formula as fallback
+            setCellDirect(targetCell, `=SUM(${startCell}:${endCell})`, agentName || 'Agent');
+          }
+        }
+      } else if (toolName === 'spreadsheet_avg_range') {
+        const startCell = String(params.start_cell || '');
+        const endCell = String(params.end_cell || '');
+        const targetCell = params.target_cell ? String(params.target_cell) : null;
+        
+        if (startCell && endCell) {
+          // If we have a result with the average, use it
+          if (result && typeof result === 'object' && result !== null) {
+            const resultObj = result as Record<string, unknown>;
+            const avg = resultObj.average || resultObj.avg;
+            if (targetCell && avg !== undefined) {
+              setCellDirect(targetCell, String(avg), agentName || 'Agent');
+            } else if (targetCell) {
+              // Set formula if no direct average value
+              setCellDirect(targetCell, `=AVG(${startCell}:${endCell})`, agentName || 'Agent');
+            }
+          } else if (targetCell) {
+            // Set formula as fallback
+            setCellDirect(targetCell, `=AVG(${startCell}:${endCell})`, agentName || 'Agent');
+          }
+        }
+      }
+    }, [setCellDirect, agentName]);
+
     // Process agent message to update spreadsheet
     const processAgentMessage = useCallback((message: string) => {
       // Pattern: "set [cell] to [value]" or "put [value] in [cell]"
+      // Updated to match all column letters (A-Z, AA-ZZ, etc.)
       const setPatterns = [
-        /set\s+([a-j]\d+)\s+to\s+([\d.]+)/i,
-        /put\s+([\d.]+)\s+in\s+([a-j]\d+)/i,
-        /([a-j]\d+)\s*=\s*([\d.]+)/i
+        /set\s+([A-Z]+\d+)\s+to\s+([\d.]+)/i,
+        /put\s+([\d.]+)\s+in\s+([A-Z]+\d+)/i,
+        /([A-Z]+\d+)\s*=\s*([\d.]+)/i
       ];
       
       for (const pattern of setPatterns) {
@@ -942,7 +1003,7 @@ export const LiveSpreadsheet = forwardRef<LiveSpreadsheetRef, LiveSpreadsheetPro
       }
 
       // Pattern: "add [value] to [cell]"
-      const addPattern = /add\s+([\d.]+)\s+to\s+([a-j]\d+)/i;
+      const addPattern = /add\s+([\d.]+)\s+to\s+([A-Z]+\d+)/i;
       const addMatch = message.match(addPattern);
       if (addMatch) {
         const [, value, cellId] = addMatch;
@@ -960,8 +1021,8 @@ export const LiveSpreadsheet = forwardRef<LiveSpreadsheetRef, LiveSpreadsheetPro
 
       // Pattern: "calculate sum of [range] in [cell]" or "sum [range] in [cell]"
       const sumPatterns = [
-        /(?:calculate\s+)?sum\s+([a-j]\d+:[a-j]\d+)\s+in\s+([a-j]\d+)/i,
-        /sum\s+([a-j]\d+:[a-j]\d+)\s+to\s+([a-j]\d+)/i
+        /(?:calculate\s+)?sum\s+([A-Z]+\d+:[A-Z]+\d+)\s+in\s+([A-Z]+\d+)/i,
+        /sum\s+([A-Z]+\d+:[A-Z]+\d+)\s+to\s+([A-Z]+\d+)/i
       ];
       
       for (const pattern of sumPatterns) {
@@ -980,12 +1041,18 @@ export const LiveSpreadsheet = forwardRef<LiveSpreadsheetRef, LiveSpreadsheetPro
       }
     }, [agentName, updateCell]);
 
-    // Expose processMessage to parent via ref
+    // Expose methods to parent via ref
     useImperativeHandle(ref, () => ({
       processMessage: (message: string) => {
         processAgentMessage(message);
+      },
+      setCell: (cellId: string, value: string, agentName?: string) => {
+        setCellDirect(cellId, value, agentName);
+      },
+      setCellFromTool: (toolName: string, params: Record<string, unknown>, result?: unknown) => {
+        processToolResult(toolName, params, result);
       }
-    }), [processAgentMessage]);
+    }), [processAgentMessage, setCellDirect, processToolResult]);
 
     // Listen for agent messages from parent
     useEffect(() => {
