@@ -18,6 +18,7 @@ from ..integrations.local_llm import LocalLLMProvider, get_local_llm
 from ..integrations.api_bridge import get_api_bridge
 from ..logging_config import get_logger
 import json
+import types
 
 logger = get_logger("cyrex.agent.base")
 
@@ -431,7 +432,18 @@ Provide a final response incorporating the tool results.
     
     def register_tool(self, name: str, tool_func: Callable, description: str = ""):
         """Register a custom tool"""
-        tool_func.__doc__ = description or tool_func.__doc__
+        # If it's a bound method, get the underlying function
+        if isinstance(tool_func, types.MethodType):
+            func = tool_func.__func__
+        else:
+            func = tool_func
+
+        # Only try to set __doc__ if it's writable
+        try:
+            func.__doc__ = description or func.__doc__
+        except AttributeError:
+            pass  # ignore if __doc__ can't be set
+
         self._tools[name] = tool_func
         self.logger.debug(f"Tool registered: {name}")
     
