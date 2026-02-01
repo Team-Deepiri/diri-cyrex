@@ -1,44 +1,43 @@
 # MacBook Team Member Setup Guide
 
-This guide is specifically for MacBook team members who need to run the Deepiri development environment with GPU acceleration.
+## Overview
 
-## Important: MacBooks Cannot Use CUDA
+This guide covers how to run the Deepiri development environment with GPU acceleration on MacBooks with Apple Silicon.
 
-**Key Point**: MacBooks (M1/M2/M3/M4) do NOT have NVIDIA GPUs and cannot use CUDA. They use Apple's Metal Performance Shaders (MPS) instead.
+**Important:** MacBooks (M1/M2/M3/M4) do NOT have NVIDIA GPUs and cannot use CUDA. They use Apple's Metal Performance Shaders (MPS) instead.
 
-- CUDA = NVIDIA GPUs only (Linux/Windows with NVIDIA GPU)
-- MPS = Apple Silicon GPUs only (MacBooks)
+- **CUDA** = NVIDIA GPUs only (Linux/Windows with NVIDIA GPU)
+- **MPS** = Apple Silicon GPUs only (MacBooks)
 - These are NOT interchangeable
 
-## Setup Options for MacBook Team Members
-
-### Option 1: Native macOS Development (Recommended)
+## Option 1: Native macOS Development (Recommended)
 
 Run everything natively on macOS for best performance and GPU acceleration.
 
-#### Step 1: Install Ollama for macOS
+### Installing Ollama for macOS
 
-Ollama on macOS automatically uses Metal (Apple GPU) for acceleration:
+Ollama on macOS automatically uses Metal (Apple GPU) for acceleration.
 
 ```bash
-# Install Ollama using Homebrew (recommended)
+# Install using Homebrew (recommended)
 brew install ollama
 
 # Or download from: https://ollama.ai/download
 ```
 
-Start Ollama service:
+Start the Ollama service:
 
 ```bash
 ollama serve
 ```
 
-Ollama will automatically use your Mac's GPU (Metal) - no CUDA needed.
+Ollama will automatically use your Mac's GPU (Metal) without any CUDA configuration.
 
-#### Step 2: Install PyTorch with MPS Support
+### Installing PyTorch with MPS Support
+
+Create a virtual environment and install PyTorch with MPS support.
 
 ```bash
-# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
 
@@ -49,25 +48,28 @@ pip install torch torchvision torchaudio
 python -c "import torch; print(f'MPS available: {torch.backends.mps.is_available()}')"
 ```
 
-#### Step 3: Install Project Dependencies
+### Installing Project Dependencies
+
+Install the Cyrex project requirements.
 
 ```bash
 cd deepiri-platform/diri-cyrex
 pip install -r requirements.txt
 ```
 
-#### Step 4: Configure Environment
+### Configuring Environment Variables
 
 Set environment variables for native macOS:
 
 ```bash
-# In your .zshrc or .bash_profile
 export OLLAMA_BASE_URL=http://localhost:11434
 export LOCAL_LLM_BACKEND=ollama
 export LOCAL_LLM_MODEL=llama3:8b
 ```
 
-#### Step 5: Pull Ollama Models
+### Pulling Ollama Models
+
+Download the models you need.
 
 ```bash
 # Pull the default model
@@ -78,46 +80,50 @@ ollama run llama3:8b "test"
 # Check Activity Monitor - you should see GPU usage
 ```
 
-### Option 2: Docker for Services, Native for GPU Work
+## Option 2: Docker for Services, Native for GPU Work
 
-Use Docker for services that don't need GPU, but run PyTorch/Ollama natively.
+Use Docker for services that don't need GPU, but run PyTorch and Ollama natively.
 
-#### Docker Setup (CPU-only services)
+### Docker Setup (CPU-only services)
+
+Start services that don't require GPU acceleration in Docker.
 
 ```bash
-# Start services that don't need GPU
 docker compose -f docker-compose.dev.yml up -d postgres redis
+```
 
-# Run Ollama natively (outside Docker)
+Run Ollama natively outside of Docker.
+
+```bash
 ollama serve
 ```
 
-#### Connect Native Ollama to Docker Services
+### Connecting Native Ollama to Docker Services
 
-Update `docker-compose.dev.yml` to use host Ollama:
+Update `docker-compose.dev.yml` to connect to your host's Ollama instance.
 
 ```yaml
 services:
   cyrex:
     environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434  # Connect to native Ollama
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
 ```
 
-### Option 3: Remote GPU Server (For Heavy Workloads)
+## Option 3: Remote GPU Server (For Heavy Workloads)
 
-If you need CUDA for training or large models, use a remote Linux server with NVIDIA GPU.
+For CUDA training or large models, connect to a remote Linux server with an NVIDIA GPU.
 
-#### Setup Remote Server
+### Setting Up the Remote Server
 
-1. Set up a Linux server with NVIDIA GPU
-2. Install CUDA, PyTorch, and Ollama on the server
-3. Configure SSH access
-4. Connect from MacBook via API or SSH
+- Set up a Linux server with an NVIDIA GPU
+- Install CUDA, PyTorch, and Ollama on the server
+- Configure SSH access
 
-#### Connect from MacBook
+### Connecting from MacBook
+
+Connect to the remote Ollama instance from your MacBook.
 
 ```python
-# Example: Connect to remote Ollama
 import httpx
 
 OLLAMA_URL = "http://your-gpu-server:11434"
@@ -130,9 +136,11 @@ response = httpx.get(f"{OLLAMA_URL}/api/tags")
 
 - Docker on macOS runs Linux containers in a VM
 - Metal (MPS) is macOS-specific and doesn't work in Linux containers
-- You can only use CPU in Docker containers on macOS
+- Docker containers on macOS can only use CPU
 
-### Workaround: Hybrid Approach
+### Hybrid Approach Workaround
+
+Run GPU-accelerated services natively while using Docker for CPU-only services.
 
 ```bash
 # Services in Docker (CPU only)
@@ -145,22 +153,25 @@ python app.py  # Uses MPS for PyTorch
 
 ## Verification Steps
 
-### 1. Verify Ollama is Using GPU
+### Verifying Ollama GPU Usage
+
+Start Ollama and test with a model.
 
 ```bash
-# Start Ollama
 ollama serve
-
-# In another terminal, run a model
-ollama run llama3:8b "Hello"
-
-# Check Activity Monitor:
-# - Open Activity Monitor
-# - Go to Window > GPU History
-# - You should see GPU usage when Ollama is running
 ```
 
-### 2. Verify PyTorch MPS
+In another terminal:
+
+```bash
+ollama run llama3:8b "Hello"
+```
+
+Check Activity Monitor by going to **Window > GPU History**. You should see GPU usage when Ollama is running.
+
+### Verifying PyTorch MPS
+
+Run this Python script to verify MPS is working.
 
 ```python
 import torch
@@ -176,7 +187,9 @@ if torch.backends.mps.is_available():
     print(f"MPS test successful: {z.device}")
 ```
 
-### 3. Verify Deepiri Integration
+### Verifying Deepiri Integration
+
+Check that Deepiri correctly detects your device.
 
 ```python
 from app.utils.device_detection import get_device
@@ -199,91 +212,91 @@ print(f"Detected device: {device}")  # Should be 'mps' on MacBook
 ### Memory Considerations
 
 - MacBooks use unified memory (shared between CPU and GPU)
-- Monitor memory usage: `Activity Monitor > Memory`
+- Monitor memory usage via **Activity Monitor > Memory**
 - Close other apps when running large models
-- Consider using smaller models (llama3:8b instead of llama3:70b)
+- Consider smaller models (`llama3:8b` instead of `llama3:70b`)
 
 ## Troubleshooting
 
 ### Ollama Not Using GPU
 
-**Symptoms**: Slow inference, no GPU usage in Activity Monitor
+**Symptoms:** Slow inference, no GPU usage in Activity Monitor
 
-**Solutions**:
-1. Verify Ollama version: `ollama --version` (should be recent)
-2. Check model size: Smaller models work better on Mac
-3. Restart Ollama: `pkill ollama && ollama serve`
-4. Verify Metal is available: System Information > Graphics/Displays
+**Solutions:**
+- Verify Ollama version: `ollama --version` (should be recent)
+- Check model size: Smaller models work better on Mac
+- Restart Ollama: `pkill ollama && ollama serve`
+- Verify Metal is available: **System Information > Graphics/Displays**
 
 ### PyTorch MPS Not Available
 
-**Symptoms**: `torch.backends.mps.is_available()` returns `False`
+**Symptoms:** `torch.backends.mps.is_available()` returns `False`
 
-**Solutions**:
-1. Update macOS: Must be 12.3+ (Monterey or newer)
-2. Reinstall PyTorch: `pip install --upgrade torch torchvision torchaudio`
-3. Check Python version: Must be 3.8+
-4. Verify architecture: `uname -m` should return `arm64`
+**Solutions:**
+- Update macOS: Must be 12.3+ (Monterey or newer)
+- Reinstall PyTorch: `pip install --upgrade torch torchvision torchaudio`
+- Check Python version: Must be 3.8+
+- Verify architecture: `uname -m` should return `arm64`
 
 ### Docker Services Can't Connect to Native Ollama
 
-**Symptoms**: Connection refused when connecting to Ollama from Docker
+**Symptoms:** Connection refused when connecting to Ollama from Docker
 
-**Solutions**:
-1. Use `host.docker.internal:11434` instead of `localhost:11434`
-2. Verify Ollama is running: `curl http://localhost:11434/api/tags`
-3. Check firewall settings
-4. Use Docker network mode: `network_mode: host` (Linux only, not macOS)
+**Solutions:**
+- Use `host.docker.internal:11434` instead of `localhost:11434`
+- Verify Ollama is running: `curl http://localhost:11434/api/tags`
+- Check firewall settings
+- Note: `network_mode: host` works on Linux only, not macOS
 
 ## Recommended Setup for MacBook Team
 
 ### Minimal Setup (Fastest to Get Started)
 
 ```bash
-# 1. Install Ollama
+# Install Ollama
 brew install ollama
 
-# 2. Install Python dependencies
+# Install Python dependencies
 python3 -m venv venv
 source venv/bin/activate
 pip install torch torchvision torchaudio
 pip install -r requirements.txt
 
-# 3. Start Ollama
+# Start Ollama
 ollama serve
 
-# 4. Pull model
+# Pull model
 ollama pull llama3:8b
 
-# 5. Run services (use Docker for non-GPU services)
+# Run services (use Docker for non-GPU services)
 docker compose -f docker-compose.dev.yml up -d postgres redis
 ```
 
 ### Full Setup (All Services)
 
 ```bash
-# 1. Install Ollama natively
+# Install Ollama natively
 brew install ollama
 
-# 2. Start Ollama (native, uses Metal GPU)
+# Start Ollama (native, uses Metal GPU)
 ollama serve
 
-# 3. Pull models
+# Pull models
 ollama pull llama3:8b
 
-# 4. Start Docker services (CPU only)
+# Start Docker services (CPU only)
 docker compose -f docker-compose.dev.yml up -d
 
-# 5. Configure Cyrex to use native Ollama
+# Configure Cyrex to use native Ollama
 export OLLAMA_BASE_URL=http://host.docker.internal:11434
 
-# 6. Start Cyrex service
+# Start Cyrex service
 docker compose -f docker-compose.dev.yml up cyrex
 ```
 
 ## Environment Variables for MacBook
 
-Create a `.env.macbook` file:
+Create a `.env.macbook` file with these settings:
 
 ```bash
 # Ollama (native, uses Metal GPU)
@@ -314,17 +327,17 @@ REDIS_HOST=localhost
 
 ## Key Takeaways
 
-1. **MacBooks use MPS (Metal), not CUDA** - This is automatic and works well
-2. **Ollama on Mac uses Metal GPU** - No CUDA needed, just install Ollama natively
-3. **Docker on Mac = CPU only** - Use native services for GPU work
-4. **Hybrid approach works best** - Docker for services, native for GPU
-5. **Performance is good** - MPS provides solid acceleration for inference
+- **MacBooks use MPS (Metal), not CUDA** - This is automatic and works well
+- **Ollama on Mac uses Metal GPU** - No CUDA needed, just install Ollama natively
+- **Docker on Mac = CPU only** - Use native services for GPU work
+- **Hybrid approach works best** - Docker for services, native for GPU
+- **Performance is good** - MPS provides solid acceleration for inference
 
 ## Additional Resources
 
-- Ollama macOS Installation: https://ollama.ai/download
-- PyTorch MPS Documentation: https://pytorch.org/docs/stable/notes/mps.html
-- Apple Metal Documentation: https://developer.apple.com/metal/
+- **Ollama macOS Installation:** https://ollama.ai/download
+- **PyTorch MPS Documentation:** https://pytorch.org/docs/stable/notes/mps.html
+- **Apple Metal Documentation:** https://developer.apple.com/metal/
 
 ## Quick Reference Commands
 
@@ -353,4 +366,3 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 # Connect Docker to native Ollama
 export OLLAMA_BASE_URL=http://host.docker.internal:11434
 ```
-
