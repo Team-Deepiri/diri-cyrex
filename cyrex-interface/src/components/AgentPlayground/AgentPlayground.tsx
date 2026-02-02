@@ -453,334 +453,32 @@ export function AgentPlayground() {
               toolCalls: msg.tool_calls || undefined,
             }));
             
-            // Smart merge: replace temporary messages with database versions, then deduplicate
+            // Simplified polling logic:
+            // - If streaming: Keep all current messages (including temp user message)
+            // - If not streaming: Replace temp messages with database versions
             setConversation(prev => {
-              // Don't update streaming messages - let them complete first
-              const hasStreaming = prev.some(msg => msg.streaming);
-              if (hasStreaming) {
-                // Only update non-streaming messages
-                const historyMap = new Map<string, ConversationMessage>();
+              // If currently streaming, keep current state (including optimistic user message)
+              if (isStreaming) {
+                // But replace any temp user messages that now have database versions
+                const dbMessagesByContent = new Map<string, ConversationMessage>();
                 mappedMessages.forEach(msg => {
-                  historyMap.set(msg.id, { ...msg, streaming: false });
+                  if (msg.role === 'user') {
+                    dbMessagesByContent.set(msg.content, msg);
+                  }
                 });
                 
-                const updated = prev.map(msg => {
-                  if (msg.streaming) {
-                    return msg; // Don't touch streaming messages
+                return prev.map(msg => {
+                  if (msg.id.startsWith('temp-user-')) {
+                    const dbVersion = dbMessagesByContent.get(msg.content);
+                    return dbVersion || msg;
                   }
-                  
-                  const dbVersion = historyMap.get(msg.id);
-                  if (dbVersion) {
-                    return dbVersion;
-                  }
-                  
-                  // Try to match temporary messages
-                  if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
-                    const msgTime = new Date(msg.timestamp).getTime();
-                    for (const dbMsg of historyMap.values()) {
-                      const dbTime = new Date(dbMsg.timestamp).getTime();
-                      const timeDiff = Math.abs(msgTime - dbTime);
-                      
-                      if (
-                        msg.role === dbMsg.role &&
-                        msg.content === dbMsg.content &&
-                        timeDiff < 15000
-                      ) {
-                        return dbMsg;
-                      }
-                    }
-                  }
-                  
                   return msg;
                 });
-                
-                // Add new messages that aren't in prev
-                const existingKeys = new Set(prev.map(m => {
-                  const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
-                  return `${m.role}:${m.content}:${ts}`;
-                }));
-                
-                const newMessages = mappedMessages
-                  .filter(m => {
-                    const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
-                    const key = `${m.role}:${m.content}:${ts}`;
-                    return !existingKeys.has(key);
-                  })
-                  .map(m => ({ ...m, streaming: false }));
-                
-                const merged = [...updated, ...newMessages].sort((a, b) => 
-                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                );
-                
-                lastSyncedMessageCountRef.current = merged.length;
-                return merged;
               }
               
-              // No streaming messages - do full merge
-              const historyMap = new Map<string, ConversationMessage>();
-              mappedMessages.forEach(msg => {
-                historyMap.set(msg.id, { ...msg, streaming: false });
-              });
-              
-              // Replace temporary messages with database versions
-              let updated = prev.map(msg => {
-                // For user messages, prioritize matching by content+role over ID
-                // This helps catch duplicates where frontend added it and database has it
-                if (msg.role === 'user') {
-                  const msgTime = new Date(msg.timestamp).getTime();
-                  
-                  // Look for matching message in database by content+role+timestamp
-                  for (const dbMsg of historyMap.values()) {
-                    if (dbMsg.role === 'user' && dbMsg.content === msg.content) {
-                      const dbTime = new Date(dbMsg.timestamp).getTime();
-                      const timeDiff = Math.abs(msgTime - dbTime);
-                      
-                      if (timeDiff < 10000) { // 10 seconds window for user messages
-                        // Replace temporary message with database version
-                        console.debug('Replacing temporary user message with database version:', msg.content);
-                        return dbMsg;
-                      }
-                    }
-                  }
-                }
-                
-                // If this is a temporary message, try to find its database version
-                if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
-                  const msgTime = new Date(msg.timestamp).getTime();
-                  
-                  // Look for matching message in database by content+role+timestamp
-                  for (const dbMsg of historyMap.values()) {
-                    const dbTime = new Date(dbMsg.timestamp).getTime();
-                    const timeDiff = Math.abs(msgTime - dbTime);
-                    
-                    if (
-                      msg.role === dbMsg.role &&
-                      msg.content === dbMsg.content &&
-                      timeDiff < 15000 // 15 seconds window
-                    ) {
-                      // Replace temporary message with database version
-                      return dbMsg;
-                    }
-                  }
-                }
-                
-                // Check if we have an updated version from database
-                const dbVersion = historyMap.get(msg.id);
-                if (dbVersion) {
-                  return dbVersion;
-                }
-                
-                return { ...msg, streaming: false }; // Ensure not streaming
-              });
-              
-              // Second pass: deduplicate based on content+role+timestamp (rounded to seconds)
-              // For user messages, use stricter matching (content+role only, no timestamp)
-              const deduplicated: ConversationMessage[] = [];
-              const seenKeys = new Set<string>();
-              const seenUserMessages = new Set<string>(); // Track user messages separately
-              
-              for (const msg of updated) {
-                // For user messages, use content+role only (no timestamp) to catch duplicates
-                if (msg.role === 'user') {
-                  const userKey = `${msg.role}:${msg.content}`;
-                  if (!seenUserMessages.has(userKey)) {
-                    seenUserMessages.add(userKey);
-                    deduplicated.push(msg);
-                  } else {
-                    // Duplicate user message found - prefer database ID
-                    const existingIdx = deduplicated.findIndex(m => 
-                      m.role === 'user' && m.content === msg.content
-                    );
-                    
-                    if (existingIdx >= 0) {
-                      const existing = deduplicated[existingIdx];
-                      const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id') || msg.id.length > 20;
-                      const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id') || existing.id.length > 20;
-                      
-                      if (isDbId && !existingIsDbId) {
-                        console.debug('Replacing duplicate user message with database version:', msg.content);
-                        deduplicated[existingIdx] = msg; // Replace with database version
-                      }
-                      // Otherwise keep existing (don't add duplicate)
-                    }
-                  }
-                  continue; // Skip timestamp-based deduplication for user messages
-                }
-                
-                // For non-user messages, use timestamp-based deduplication
-                const timestampSec = Math.floor(new Date(msg.timestamp).getTime() / 1000);
-                const key = `${msg.role}:${msg.content}:${timestampSec}`;
-                
-                if (!seenKeys.has(key)) {
-                  seenKeys.add(key);
-                  deduplicated.push(msg);
-                } else {
-                  // Duplicate found - prefer database ID
-                  const existingIdx = deduplicated.findIndex(m => {
-                    const mTimestampSec = Math.floor(new Date(m.timestamp).getTime() / 1000);
-                    return `${m.role}:${m.content}:${mTimestampSec}` === key;
-                  });
-                  
-                  if (existingIdx >= 0) {
-                    const existing = deduplicated[existingIdx];
-                    const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id') || msg.id.length > 20;
-                    const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id') || existing.id.length > 20;
-                    
-                    if (isDbId && !existingIsDbId) {
-                      deduplicated[existingIdx] = msg; // Replace with database version
-                    }
-                    // Otherwise keep existing (don't add duplicate)
-                  }
-                }
-              }
-              
-              // Third pass: add any new messages from database that weren't in prev
-              const existingKeysSet = new Set(deduplicated.map(m => {
-                const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
-                return `${m.role}:${m.content}:${ts}`;
-              }));
-              
-              const newMessages = mappedMessages
-                .filter(m => {
-                  const ts = Math.floor(new Date(m.timestamp).getTime() / 1000);
-                  const key = `${m.role}:${m.content}:${ts}`;
-                  return !existingKeysSet.has(key);
-                })
-                .map(m => ({ ...m, streaming: false }));
-              
-              if (newMessages.length > 0 || deduplicated.length !== prev.length) {
-                // Merge and sort by timestamp
-                const merged = [...deduplicated, ...newMessages].sort((a, b) => 
-                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                );
-                lastSyncedMessageCountRef.current = merged.length;
-                return merged;
-              }
-              
-              return deduplicated;
-            });
-          } else if (history.length > 0) {
-            // Check for updated messages (e.g., streaming completed)
-            const historyMap = new Map<string, ConversationMessage>();
-            history.forEach((msg: any, index: number) => {
-              const msgId = msg.message_id || `msg-hist-${index}-${Date.now()}`;
-              historyMap.set(msgId, {
-                id: msgId,
-                role: msg.role || 'user',
-                content: String(msg.content || ''),
-                timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
-                streaming: false,
-                isError: msg.is_error || false,
-                toolCalls: msg.tool_calls || undefined,
-              });
-            });
-            
-            setConversation(prev => {
-              // First pass: replace temporary messages with database versions
-              let updated = prev.map(msg => {
-                // If this is a temporary message, try to find its database version
-                if (msg.id.startsWith('msg-') && !msg.id.includes('hist-')) {
-                  const msgTime = new Date(msg.timestamp).getTime();
-                  
-                  // Look for matching message in database by content+role+timestamp
-                  for (const dbMsg of historyMap.values()) {
-                    const dbTime = new Date(dbMsg.timestamp).getTime();
-                    const timeDiff = Math.abs(msgTime - dbTime);
-                    
-                    if (
-                      msg.role === dbMsg.role &&
-                      msg.content === dbMsg.content &&
-                      timeDiff < 15000 // 15 seconds window
-                    ) {
-                      // Replace temporary message with database version
-                      return dbMsg;
-                    }
-                  }
-                }
-                
-                // Check if we have an updated version from database
-                const dbVersion = historyMap.get(msg.id);
-                if (dbVersion) {
-                  return dbVersion;
-                }
-                
-                return msg;
-              });
-              
-              // Second pass: deduplicate based on content+role+timestamp
-              const deduplicated: ConversationMessage[] = [];
-              const seenContent = new Map<string, ConversationMessage>(); // content+role -> message
-              
-              for (const msg of updated) {
-                const contentKey = `${msg.role}:${msg.content}`;
-                const msgTime = new Date(msg.timestamp).getTime();
-                const existing = seenContent.get(contentKey);
-                
-                if (!existing) {
-                  // First time seeing this content
-                  seenContent.set(contentKey, msg);
-                  deduplicated.push(msg);
-                } else {
-                  // Check if this is a duplicate (within 15 seconds - more lenient)
-                  const existingTime = new Date(existing.timestamp).getTime();
-                  const timeDiff = Math.abs(msgTime - existingTime);
-                  
-                  if (timeDiff < 15000) {
-                    // It's a duplicate - prefer database ID over temporary ID
-                    const isDbId = !msg.id.startsWith('msg-') || msg.id.includes('hist-') || msg.id.includes('message_id');
-                    const existingIsDbId = !existing.id.startsWith('msg-') || existing.id.includes('hist-') || existing.id.includes('message_id');
-                    
-                    if (isDbId && !existingIsDbId) {
-                      // Replace with database version
-                      const idx = deduplicated.indexOf(existing);
-                      if (idx >= 0) {
-                        deduplicated[idx] = msg;
-                        seenContent.set(contentKey, msg);
-                      }
-                    }
-                    // Otherwise keep the existing one (don't add duplicate)
-                  } else {
-                    // Different message with same content (probably not a duplicate)
-                    seenContent.set(contentKey, msg);
-                    deduplicated.push(msg);
-                  }
-                }
-              }
-              
-              // Third pass: add any new messages from database that weren't in prev
-              const existingIds = new Set(deduplicated.map(m => m.id));
-              const newMessages = Array.from(historyMap.values()).filter((m: ConversationMessage) => {
-                // Skip if ID already exists
-                if (existingIds.has(m.id)) return false;
-                
-                // Check if content+role already exists (within 15 seconds)
-                const contentKey = `${m.role}:${m.content}`;
-                const msgTime = new Date(m.timestamp).getTime();
-                
-                for (const existing of deduplicated) {
-                  const existingKey = `${existing.role}:${existing.content}`;
-                  if (contentKey === existingKey) {
-                    const existingTime = new Date(existing.timestamp).getTime();
-                    const timeDiff = Math.abs(msgTime - existingTime);
-                    
-                    if (timeDiff < 15000) {
-                      return false; // This is a duplicate
-                    }
-                  }
-                }
-                
-                return true;
-              });
-              
-              if (newMessages.length > 0 || deduplicated.length !== prev.length) {
-                const merged = [...deduplicated, ...newMessages].sort((a: ConversationMessage, b: ConversationMessage) => 
-                  new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-                );
-                lastSyncedMessageCountRef.current = merged.length;
-                return merged;
-              }
-              
-              return deduplicated;
+              // Not streaming - use database as source of truth
+              lastSyncedMessageCountRef.current = mappedMessages.length;
+              return mappedMessages;
             });
           }
         }
@@ -976,10 +674,19 @@ export function AgentPlayground() {
       return;
     }
 
-    // Don't add user message optimistically - let polling add it from database
-    // This prevents duplicates when the backend saves it and polling loads it
-    // Just clear the input for better UX
+    // Add user message optimistically with a unique temp ID
+    // Polling will replace this with the database version
     const messageContent = userInput;
+    const tempUserId = `temp-user-${Date.now()}`;
+    
+    const userMessage: ConversationMessage = {
+      id: tempUserId,
+      role: 'user',
+      content: messageContent,
+      timestamp: new Date().toISOString(),
+    };
+    
+    setConversation(prev => [...prev, userMessage]);
     setUserInput('');
     
     // Check if message is for spreadsheet
@@ -1145,7 +852,16 @@ export function AgentPlayground() {
                 if (data.tool?.startsWith('spreadsheet_') && spreadsheetRef.current && agentInstance) {
                   const toolName = data.tool;
                   const params = data.parameters || {};
-                  const result = data.result;
+                  let result = data.result;
+                  
+                  // Parse result if it's a JSON string
+                  if (typeof result === 'string') {
+                    try {
+                      result = JSON.parse(result);
+                    } catch {
+                      // Not JSON, keep as string
+                    }
+                  }
                   
                   // Use the direct tool result method instead of parsing natural language
                   spreadsheetRef.current.setCellFromTool(toolName, params, result);

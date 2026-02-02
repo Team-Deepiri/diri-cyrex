@@ -41,8 +41,9 @@ export interface LiveSpreadsheetRef {
   setCellFromTool: (toolName: string, params: Record<string, unknown>, result?: unknown) => void;
 }
 
-const INITIAL_COLUMNS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
-const INITIAL_ROWS = 20;
+// Generate A-Z columns (26 columns)
+const INITIAL_COLUMNS = Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i));
+const INITIAL_ROWS = 1000;
 
 // Generate column letter from index (A, B, ..., Z, AA, AB, etc.)
 const getColumnLetter = (index: number): string => {
@@ -930,8 +931,32 @@ export const LiveSpreadsheet = forwardRef<LiveSpreadsheetRef, LiveSpreadsheetPro
     // Process tool result to update spreadsheet
     const processToolResult = useCallback((toolName: string, params: Record<string, unknown>, result?: unknown) => {
       if (toolName === 'spreadsheet_set_cell') {
-        const cellId = String(params.cell_id || '');
-        const value = String(params.value || '');
+        // Handle both direct params and result object
+        let cellId = String(params.cell_id || '');
+        let value = String(params.value || '');
+        
+        // If result is provided and contains the data, use it
+        if (result) {
+          let resultObj: Record<string, unknown> = {};
+          if (typeof result === 'string') {
+            try {
+              resultObj = JSON.parse(result);
+            } catch {
+              // Not JSON, treat as plain string
+            }
+          } else if (typeof result === 'object' && result !== null) {
+            resultObj = result as Record<string, unknown>;
+          }
+          
+          // Extract from result if params are missing
+          if (!cellId && resultObj.cell_id) {
+            cellId = String(resultObj.cell_id);
+          }
+          if (!value && resultObj.value) {
+            value = String(resultObj.value);
+          }
+        }
+        
         if (cellId && value) {
           setCellDirect(cellId, value, agentName || 'Agent');
         }

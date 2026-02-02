@@ -412,14 +412,19 @@ If a tool fails, explain what happened and suggest alternatives."""),
                     if not react_prompt:
                         # Fallback prompt - use this by default to avoid network calls
                         # Enhanced prompt for better tool usage with local LLMs
+                        # This prompt will be enhanced with system instructions if provided
                         react_prompt = ChatPromptTemplate.from_messages([
                             ("system", """You are a helpful AI assistant with access to tools. You MUST use tools when asked to perform actions.
 
-IMPORTANT: When the user asks you to edit, set, update, or change spreadsheet cells, you MUST use the spreadsheet_set_cell tool. Do not just say you did it - actually use the tool.
+CRITICAL RULES:
+1. When the user asks you to edit, set, update, write, or change spreadsheet cells, you MUST use the spreadsheet_set_cell tool
+2. NEVER claim you did something unless you actually called the tool and got a result
+3. ALWAYS follow the Thought/Action/Action Input/Observation format below
+4. If you don't use a tool when asked to perform an action, you have FAILED
 
 Available tools: {tool_names}
 
-Use the following format:
+Use the following format EXACTLY:
 
 Question: the input question you must answer
 Thought: you should always think about what to do. If the user wants to edit cells, you MUST use the spreadsheet_set_cell tool.
@@ -431,28 +436,33 @@ Thought: I now know the final answer
 Final Answer: the final answer to the original input question
 
 Example for editing cells:
-Question: Edit J7 and J8 to 1
-Thought: The user wants me to edit cells J7 and J8 to have the value "1". I need to use the spreadsheet_set_cell tool twice.
+Question: Edit J7 to 1.3
+Thought: The user wants me to edit cell J7 to have the value "1.3". I MUST use the spreadsheet_set_cell tool.
 Action: spreadsheet_set_cell
-Action Input: {{"cell_id": "J7", "value": "1"}}
-Observation: {{"success": true, "cell_id": "J7", "value": "1"}}
-Thought: Good, J7 is set. Now I need to set J8.
-Action: spreadsheet_set_cell
-Action Input: {{"cell_id": "J8", "value": "1"}}
-Observation: {{"success": true, "cell_id": "J8", "value": "1"}}
-Thought: Both cells have been set successfully.
-Final Answer: I've successfully set cells J7 and J8 to 1."""),
+Action Input: {{"cell_id": "J7", "value": "1.3"}}
+Observation: {{"success": true, "cell_id": "J7", "value": "1.3"}}
+Thought: I successfully set cell J7 to 1.3 using the tool.
+Final Answer: I've successfully set cell J7 to 1.3."""),
                             ("human", "{input}"),
                             MessagesPlaceholder(variable_name="agent_scratchpad"),
                         ])
                     
                     agent = create_react_agent(llm, tools, react_prompt)
+                    
+                    # Custom error handler for parsing errors (helps with models that don't follow format perfectly)
+                    def handle_parsing_error(error: Exception) -> str:
+                        """Handle parsing errors gracefully"""
+                        error_str = str(error)
+                        self.logger.warning(f"Agent parsing error: {error_str}")
+                        # Return a message that encourages the agent to retry with proper format
+                        return "I encountered an error parsing my response. Let me try again with the correct format:\n\nThought: I need to use the correct format.\nAction: [tool_name]\nAction Input: [JSON parameters]"
+                    
                     executor = AgentExecutor(
                         agent=agent,
                         tools=tools,
                         verbose=self.logger.level <= 10,
                         max_iterations=10,
-                        handle_parsing_errors=True,
+                        handle_parsing_errors=handle_parsing_error,  # Use custom handler
                         return_intermediate_steps=True,
                     )
                     
@@ -482,6 +492,7 @@ Final Answer: I've successfully set cells J7 and J8 to 1."""),
         use_tools: bool = True,
         use_langgraph: bool = False,
         max_tokens: Optional[int] = None,
+        system_prompt: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -599,10 +610,27 @@ Final Answer: I've successfully set cells J7 and J8 to 1."""),
                     # Use agent executor for tool-using requests
                     self.logger.info(f"Using agent executor with tools for request")
                     
-                    # Prepare input for agent (include context if available)
+                    # Prepare input for agent (include context and system prompt if available)
+                    # For ReAct agents, we need to be very explicit about tool usage
+                    input_text = user_input
+                    if system_prompt:
+                        # Prepend system prompt with strong tool usage reminder
+                        input_text = f"""IMPORTANT SYSTEM INSTRUCTIONS:
+{system_prompt}
+
+CRITICAL: When asked to perform actions (like editing spreadsheets), you MUST use the appropriate tools. Follow the Thought/Action/Action Input/Observation format.
+
+User Request: {user_input}
+
+Remember: You MUST use tools to perform actions. Do not just describe what you would do - actually call the tools."""
+                    elif context:
+                        input_text = f"Context:\n{context}\n\nQuestion: {user_input}\n\nAnswer:"
+                    
                     agent_input = {
-                        "input": f"Context:\n{context}\n\nQuestion: {user_input}\n\nAnswer:" if context else user_input
+                        "input": input_text
                     }
+                    
+                    self.logger.info(f"Agent input prepared with system_prompt={system_prompt is not None}, context={context is not None}")
                     
                     # Execute agent (using ainvoke instead of deprecated arun)
                     result = await self.agent_executor.ainvoke(agent_input)
@@ -632,6 +660,13 @@ Final Answer: I've successfully set cells J7 and J8 to 1."""),
                     else:
                         self.logger.warning(f"Agent executor completed but made NO tool calls. Response: {response[:200]}")
                         self.logger.warning(f"Full result keys: {result.keys() if isinstance(result, dict) else 'not a dict'}")
+                        # Log the full result structure for debugging
+                        if isinstance(result, dict):
+                            self.logger.debug(f"Result structure: {list(result.keys())}")
+                            if "intermediate_steps" in result:
+                                self.logger.debug(f"Intermediate steps type: {type(result['intermediate_steps'])}, length: {len(result.get('intermediate_steps', []))}")
+                        # This is a known issue with llama3:8b - it may not follow ReAct format well
+                        self.logger.warning("NOTE: llama3:8b may not reliably follow ReAct format. Consider using a model better at tool calling (e.g., mistral:7b, qwen2.5:7b, or llama3.1:8b)")
                     
                 except Exception as e:
                     self.logger.error(f"Agent executor failed: {e}", exc_info=True)
