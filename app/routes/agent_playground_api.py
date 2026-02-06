@@ -388,6 +388,18 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
             },
         }
         
+        # 🔥 PRE-WARM THE MODEL: Load it into memory immediately
+        try:
+            logger.info(f"⚡ Pre-warming model {final_config['model']}...")
+            import asyncio
+            # Make a minimal LLM call to load the model into memory
+            warmup_start = asyncio.get_event_loop().time()
+            _ = await orchestrator.llm_provider._llm.ainvoke("Hi")
+            warmup_duration = asyncio.get_event_loop().time() - warmup_start
+            logger.info(f"✅ Model pre-warmed in {warmup_duration:.2f}s")
+        except Exception as e:
+            logger.warning(f"Failed to pre-warm model: {e}")
+        
         # Publish event
         try:
             broker = await get_redis_streams_broker()
@@ -645,6 +657,7 @@ async def stream_agent_response(
                     use_rag=False,  # Disable RAG for playground for now
                     max_tokens=config.max_tokens,
                     system_prompt=config.system_prompt,  # Pass system prompt to orchestrator
+                    model=config.model,  # Pass model selection from playground config
                 )
                 
                 response_text = result.get("response", "")
@@ -921,11 +934,11 @@ async def stop_agent(instance_id: str) -> Dict[str, Any]:
     
     # Remove from active agents
     try:
-        del _active_agents[instance_id]
-        logger.info(f"Stopped agent instance: {instance_id}")
+       del _active_agents[instance_id]
+       logger.debug(f"Stopped agent instance: {instance_id}")
     except KeyError:
         # Already deleted (race condition) - that's fine
-        logger.debug(f"Agent instance {instance_id} already removed")
+        logger.info(f"Agent instance {instance_id} already removed")
     
     return {"success": True, "message": "Agent stopped"}
 
@@ -1700,4 +1713,255 @@ async def save_document_correction(
     except Exception as e:
         logger.error(f"Error saving correction: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to save correction: {str(e)}")
+
+
+# ============================================================================
+# Group Chat Endpoints
+# ============================================================================
+
+class GroupChatCreateRequest(BaseModel):
+    """Request to create a group chat"""
+    name: str
+    agent_instance_ids: List[str] = Field(..., description="List of agent instance IDs to include in the group chat")
+
+
+class GroupChatMessageRequest(BaseModel):
+    """Request to send a message to a group chat"""
+    message: str
+    stream: bool = True
+
+
+@router.post("/group-chat/create")
+async def create_group_chat(request: GroupChatCreateRequest) -> Dict[str, Any]:
+    """Create a new group chat with multiple agents"""
+    try:
+        await ensure_database_initialized()
+        
+        # Validate that all agent instances exist
+        missing_agents = []
+        agent_details = []
+        for instance_id in request.agent_instance_ids:
+            if instance_id not in _active_agents:
+                missing_agents.append(instance_id)
+            else:
+                agent_data = _active_agents[instance_id]
+                agent_details.append({
+                    "instance_id": instance_id,
+                    "agent_id": agent_data["agent_id"],
+                    "name": agent_data["config"].get("name", "Agent"),
+                    "agent_type": agent_data["config"].get("agent_type", "conversational"),
+                })
+        
+        if missing_agents:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Agent instances not found: {missing_agents}"
+            )
+        
+        # Create group chat
+        group_chat_id = str(uuid.uuid4())
+        _group_chats[group_chat_id] = {
+            "group_chat_id": group_chat_id,
+            "name": request.name,
+            "agent_instances": agent_details,
+            "created_at": datetime.utcnow().isoformat(),
+            "messages": [],
+        }
+        
+        logger.info(f"Created group chat: {group_chat_id} with {len(agent_details)} agents")
+        
+        return {
+            "group_chat_id": group_chat_id,
+            "name": request.name,
+            "agent_count": len(agent_details),
+            "agents": agent_details,
+            "created_at": _group_chats[group_chat_id]["created_at"],
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create group chat: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/group-chat/list")
+async def list_group_chats() -> List[Dict[str, Any]]:
+    """List all group chats"""
+    return [
+        {
+            "groupChatId": chat["group_chat_id"],
+            "name": chat["name"],
+            "agentCount": len(chat["agent_instances"]),
+            "created_at": chat["created_at"],
+        }
+        for chat in _group_chats.values()
+    ]
+
+
+@router.get("/group-chat/{group_chat_id}")
+async def get_group_chat(group_chat_id: str) -> Dict[str, Any]:
+    """Get group chat details"""
+    if group_chat_id not in _group_chats:
+        raise HTTPException(status_code=404, detail="Group chat not found")
+    
+    chat = _group_chats[group_chat_id]
+    return {
+        "groupChatId": chat["group_chat_id"],
+        "name": chat["name"],
+        "agentCount": len(chat["agent_instances"]),
+        "agents": chat["agent_instances"],
+        "created_at": chat["created_at"],
+    }
+
+
+@router.post("/group-chat/{group_chat_id}/message")
+async def send_group_chat_message(
+    group_chat_id: str,
+    request: GroupChatMessageRequest,
+):
+    """Send a message to a group chat - all agents respond"""
+    if group_chat_id not in _group_chats:
+        raise HTTPException(status_code=404, detail="Group chat not found")
+    
+    group_chat = _group_chats[group_chat_id]
+    agent_instances = group_chat["agent_instances"]
+    
+    if not agent_instances:
+        raise HTTPException(status_code=400, detail="Group chat has no agents")
+    
+    if request.stream:
+        return StreamingResponse(
+            stream_group_chat_response(group_chat_id, request.message),
+            media_type="text/event-stream",
+        )
+    else:
+        # Non-streaming: collect all responses
+        responses = []
+        for agent_info in agent_instances:
+            instance_id = agent_info["instance_id"]
+            if instance_id in _active_agents:
+                agent_data = _active_agents[instance_id]
+                config = AgentConfigRequest(**agent_data["config"])
+                try:
+                    response = await generate_agent_response(
+                        instance_id,
+                        request.message,
+                        config,
+                    )
+                    responses.append({
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "response": response.get("response", ""),
+                        "success": response.get("success", False),
+                    })
+                except Exception as e:
+                    logger.error(f"Agent {agent_info['name']} failed: {e}")
+                    responses.append({
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "response": f"Error: {str(e)}",
+                        "success": False,
+                    })
+        
+        return {
+            "group_chat_id": group_chat_id,
+            "message": request.message,
+            "responses": responses,
+        }
+
+
+async def stream_group_chat_response(group_chat_id: str, user_message: str):
+    """Stream responses from all agents in a group chat"""
+    try:
+        group_chat = _group_chats[group_chat_id]
+        agent_instances = group_chat["agent_instances"]
+        
+        # Save user message
+        group_chat["messages"].append({
+            "role": "user",
+            "content": user_message,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        
+        # Process each agent sequentially and stream responses
+        for agent_info in agent_instances:
+            instance_id = agent_info["instance_id"]
+            if instance_id not in _active_agents:
+                continue
+                
+            agent_data = _active_agents[instance_id]
+            config = AgentConfigRequest(**agent_data["config"])
+            
+            # Emit agent start event
+            yield json.dumps({
+                "type": "agent_start",
+                "agent_id": agent_info["agent_id"],
+                "agent_name": agent_info["name"],
+            }) + "\n"
+            
+            try:
+                # Get agent response
+                conversation = agent_data.get("conversation", [])
+                messages = [ChatMessage(role="system", content=config.system_prompt)]
+                
+                for msg in conversation[-10:]:
+                    messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
+                
+                messages.append(ChatMessage(role="user", content=user_message))
+                
+                # Generate response
+                ollama = await get_ollama_client()
+                options = GenerationOptions(
+                    temperature=config.temperature,
+                    num_predict=config.max_tokens,
+                )
+                
+                full_response = ""
+                async for token in ollama.chat_stream(messages, model=config.model, options=options):
+                    full_response += token
+                    yield json.dumps({
+                        "type": "token",
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "content": token,
+                    }) + "\n"
+                
+                # Save response
+                conversation.append({
+                    "role": "user",
+                    "content": user_message,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                conversation.append({
+                    "role": "assistant",
+                    "content": full_response,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                
+                # Emit agent done event
+                yield json.dumps({
+                    "type": "agent_done",
+                    "agent_id": agent_info["agent_id"],
+                    "agent_name": agent_info["name"],
+                }) + "\n"
+                
+            except Exception as e:
+                logger.error(f"Error from agent {agent_info['name']}: {e}")
+                yield json.dumps({
+                    "type": "agent_error",
+                    "agent_id": agent_info["agent_id"],
+                    "agent_name": agent_info["name"],
+                    "error": str(e),
+                }) + "\n"
+        
+        # All agents done
+        yield json.dumps({"type": "done"}) + "\n"
+        
+    except Exception as e:
+        logger.error(f"Group chat streaming error: {e}", exc_info=True)
+        yield json.dumps({
+            "type": "error",
+            "content": f"Failed to process group chat: {str(e)}",
+        }) + "\n"
 

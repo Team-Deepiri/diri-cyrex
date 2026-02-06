@@ -19,6 +19,8 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from contextlib import asynccontextmanager
 import asyncio
 from typing import AsyncGenerator
+from collections import defaultdict
+from threading import Lock
 
 # Initialize loggers
 logger = get_logger("cyrex.main")
@@ -36,6 +38,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup/shutdown events."""
     # Startup
     logger.info("Starting Deepiri AI Challenge Service API", version="3.0.0")
+    
+    # Ensure uvicorn access log filter is applied (in case uvicorn reconfigures logger)
+    from .logging_config import RateLimitedAccessLogFilter
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    # Remove existing filter if present and add ours
+    filter_instance = RateLimitedAccessLogFilter()
+    for f in uvicorn_access_logger.filters[:]:
+        if isinstance(f, RateLimitedAccessLogFilter):
+            uvicorn_access_logger.removeFilter(f)
+    uvicorn_access_logger.addFilter(filter_instance)
+    # Also apply to all existing handlers
+    for handler in uvicorn_access_logger.handlers:
+        # Remove existing filter instances from handler
+        for f in handler.filters[:]:
+            if isinstance(f, RateLimitedAccessLogFilter):
+                handler.removeFilter(f)
+        handler.addFilter(filter_instance)
     
     # Validate required settings
     if not settings.OPENAI_API_KEY:
@@ -106,6 +125,42 @@ app.add_middleware(
 
 # CORS middleware handles OPTIONS requests automatically
 # No explicit handler needed - FastAPI's CORSMiddleware will return 204 for OPTIONS
+
+
+# Rate limiting for frequent polling endpoints - log every Nth request
+# Track request counts per path for rate limiting
+_request_counts = defaultdict(int)
+_request_lock = Lock()
+
+# Paths that should be rate-limited (log every 10th request)
+RATE_LIMITED_PATHS = [
+    "/health",
+    "/metrics",
+    "/orchestration/status",
+    "/orchestration/health-comprehensive",
+]
+
+def should_log_request(path: str) -> bool:
+    """Determine if a request path should be logged at INFO level."""
+    # Completely suppress conversation polling endpoints
+    if "/conversation" in path and path.endswith("/conversation"):
+        return False
+    
+    # Check if this is a rate-limited path
+    is_rate_limited = any(path.startswith(limited_path) for limited_path in RATE_LIMITED_PATHS)
+    
+    if is_rate_limited:
+        # Log every 10th request for polling endpoints
+        with _request_lock:
+            _request_counts[path] += 1
+            count = _request_counts[path]
+            should_log = (count % 10 == 0)
+            if should_log:
+                _request_counts[path] = 0  # Reset counter
+            return should_log
+    
+    # Always log non-polling endpoints
+    return True
 
 
 @app.middleware("http")
@@ -181,15 +236,17 @@ async def add_request_id_and_metrics(request: Request, call_next):
         REQ_COUNTER.labels(path=path, method=method, status=str(status)).inc()
         REQ_LATENCY.labels(path=path, method=method).observe(duration)
         
-        request_logger.log_request(
-            request_id=request_id,
-            method=method,
-            path=path,
-            status_code=status,
-            duration_ms=duration_ms,
-            user_agent=request.headers.get("user-agent"),
-            ip_address=request.client.host if request.client else None
-        )
+        # Only log at INFO level for non-polling endpoints
+        if should_log_request(path):
+            request_logger.log_request(
+                request_id=request_id,
+                method=method,
+                path=path,
+                status_code=status,
+                duration_ms=duration_ms,
+                user_agent=request.headers.get("user-agent"),
+                ip_address=request.client.host if request.client else None
+            )
 
 
 @app.get("/health")

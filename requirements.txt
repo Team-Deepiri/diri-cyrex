@@ -80,6 +80,7 @@ langchain-milvus==0.1.4
 langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
 langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
 langchain-classic>=0.0.20  # Provides deprecated AgentExecutor and other legacy functionality for LangChain 0.2.x
+langchain-experimental>=0.4.0  # Provides create_react_agent and other experimental agent functionality for LangChain 1.x
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # LangGraph for multi-agent workflows and stateful orchestration
