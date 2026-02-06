@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     # Default to api-gateway service name for Docker, fallback to localhost for local dev
     NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
+
+    # Authentication Configuration
+    JWT_SECRET: Optional[str] = None
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
