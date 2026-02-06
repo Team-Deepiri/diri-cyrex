@@ -66,9 +66,19 @@ class LoRAAdapterService:
                     s3_secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
                     s3_bucket=os.getenv("S3_BUCKET", "mlflow-artifacts")
                 )
-                self.streaming = StreamingClient(
-                    redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
-                )
+                # Use explicit Redis config with password support
+                redis_url = os.getenv("REDIS_URL")
+                if redis_url:
+                    self.streaming = StreamingClient(redis_url=redis_url)
+                else:
+                    redis_host = os.getenv("REDIS_HOST", "redis")
+                    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+                    redis_password = os.getenv("REDIS_PASSWORD", "redispassword")
+                    self.streaming = StreamingClient(
+                        redis_host=redis_host,
+                        redis_port=redis_port,
+                        redis_password=redis_password
+                    )
             except Exception as e:
                 logger.warning(f"ModelKit initialization failed: {e}")
         

@@ -57,9 +57,13 @@ class CyrexEventPublisher:
             success=True
         )
         
+        # Exclude None values and convert booleans to strings for Redis compatibility
+        event_data = event.model_dump(exclude_none=True) if hasattr(event, 'model_dump') else {k: v for k, v in event.dict().items() if v is not None}
+        # Convert boolean values to strings for Redis
+        event_data = {k: str(v) if isinstance(v, bool) else v for k, v in event_data.items()}
         await self.client.publish(
             StreamTopics.INFERENCE_EVENTS,
-            event.model_dump()
+            event_data
         )
     
     async def subscribe_to_model_events(
@@ -114,9 +118,21 @@ class CyrexEventPublisher:
     """
     
     def __init__(self):
-        self.streaming = StreamingClient(
-            redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
-        )
+        # Use explicit Redis config with password support
+        # Option A: Use REDIS_URL if provided (with password: redis://:password@host:port)
+        redis_url = os.getenv("REDIS_URL")
+        if redis_url:
+            self.streaming = StreamingClient(redis_url=redis_url)
+        else:
+            # Option B: Use separate environment variables (matches docker-compose config)
+            redis_host = os.getenv("REDIS_HOST", "redis")
+            redis_port = int(os.getenv("REDIS_PORT", "6379"))
+            redis_password = os.getenv("REDIS_PASSWORD", "redispassword")
+            self.streaming = StreamingClient(
+                redis_host=redis_host,
+                redis_port=redis_port,
+                redis_password=redis_password
+            )
         self._connected = False
     
     async def connect(self):
@@ -137,8 +153,11 @@ class CyrexEventPublisher:
         """Publish model inference event"""
         await self.connect()
         
-        # Convert Pydantic model to dict
-        event_data = event.model_dump() if hasattr(event, 'model_dump') else event.dict()
+        # Convert Pydantic model to dict, excluding None values and converting booleans to strings for Redis
+        event_data = event.model_dump(exclude_none=True) if hasattr(event, 'model_dump') else {k: v for k, v in event.dict().items() if v is not None}
+        
+        # Convert boolean values to strings for Redis compatibility
+        event_data = {k: str(v) if isinstance(v, bool) else v for k, v in event_data.items()}
         
         await self.streaming.publish("inference-events", event_data)
         
