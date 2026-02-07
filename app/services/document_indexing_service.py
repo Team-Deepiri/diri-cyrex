@@ -836,141 +836,25 @@ class DocumentIndexingService:
         Delete a document and all its chunks from the vector store.
         
         Args:
-            document_id: Unique document identifier (may be generated from title)
+            document_id: Unique document identifier
             
         Returns:
             True if deletion was successful, False otherwise
         """
-        logger.info("Starting delete operation", document_id=document_id)
         try:
-            # Check if this is a generated document_id (starts with "doc_")
-            # Generated IDs are created from titles when document_id is None in metadata
-            if document_id.startswith("doc_"):
-                # This is a generated ID - need to find the title first
-                # List all documents to find the one with matching generated ID
-                all_docs_list = await self.list_indexed_documents(limit=1000)
-                matching_doc = None
-                for doc in all_docs_list.get("documents", []):
-                    if doc.get("document_id") == document_id:
-                        matching_doc = doc
-                        break
-                
-                if not matching_doc:
-                    logger.warning(
-                        "Cannot delete: document not found in list",
-                        document_id=document_id
-                    )
-                    return False
-                
-                title = matching_doc.get("title")
-                if not title:
-                    logger.warning(
-                        "Cannot delete: document has no title",
-                        document_id=document_id
-                    )
-                    return False
-                
-                # Delete by title (since actual metadata has document_id: None)
-                # First, verify chunks exist with this title
-                test_docs = self.vector_store.list_documents(
-                    filters={"title": title},
-                    limit=1
-                )
-                
-                if not test_docs:
-                    logger.warning(
-                        "Cannot delete: no chunks found with this title",
-                        document_id=document_id,
-                        title=title
-                    )
-                    return False
-                
-                # Delete all chunks with this title
-                logger.info("Attempting to delete chunks", document_id=document_id, title=title)
-                result = await self.vector_store.adelete_by_filter(
-                    filters={"title": title}
-                )
-                logger.info("Delete operation completed", document_id=document_id, result=result)
-                
-                # Milvus delete operations are asynchronous - wait a bit for flush
-                import asyncio
-                await asyncio.sleep(0.5)  # Give Milvus time to flush
-                
-                # Verify deletion by checking if chunks still exist
-                verify_docs = self.vector_store.list_documents(
-                    filters={"title": title},
-                    limit=1
-                )
-                
-                if verify_docs:
-                    logger.warning(
-                        "Delete may have failed: chunks still exist after deletion",
-                        document_id=document_id,
-                        title=title,
-                        remaining_chunks=len(verify_docs)
-                    )
-                    # Still return True if we attempted deletion - Milvus might be slow
-                    # The chunks will be gone eventually
-                    logger.info(
-                        "Delete operation completed (verification pending)",
-                        document_id=document_id,
-                        title=title
-                    )
-                    return True
-                
-                logger.info(
-                    "Deleted document by title (generated ID) - verified",
-                    document_id=document_id,
-                    title=title
-                )
-                return True
-            else:
-                # Normal document_id - delete by document_id
-                # First verify chunks exist
-                test_docs = self.vector_store.list_documents(
-                    filters={"document_id": document_id},
-                    limit=1
-                )
-                
-                if not test_docs:
-                    logger.warning(
-                        "Cannot delete: no chunks found with this document_id",
-                        document_id=document_id
-                    )
-                    return False
-                
-                result = await self.vector_store.adelete_by_filter(
-                    filters={"document_id": document_id}
-                )
-                
-                # Milvus delete operations are asynchronous - wait a bit for flush
-                import asyncio
-                await asyncio.sleep(0.5)  # Give Milvus time to flush
-                
-                # Verify deletion
-                verify_docs = self.vector_store.list_documents(
-                    filters={"document_id": document_id},
-                    limit=1
-                )
-                
-                if verify_docs:
-                    logger.warning(
-                        "Delete may have failed: chunks still exist after deletion",
-                        document_id=document_id,
-                        remaining_chunks=len(verify_docs)
-                    )
-                    # Still return True if we attempted deletion - Milvus might be slow
-                    logger.info(
-                        "Delete operation completed (verification pending)",
-                        document_id=document_id
-                    )
-                    return True
-                
-                logger.info(
-                    "Document deleted",
-                    document_id=document_id
-                )
-                return True
+            # Delete all chunks with matching document_id in metadata
+            result = await self.vector_store.adelete_by_filter(
+                filters={"document_id": document_id}
+            )
+            
+            deleted_count = result.get("deleted", 0)
+            logger.info(
+                "Document deleted",
+                document_id=document_id,
+                chunks_deleted=deleted_count
+            )
+            
+            return True
             
         except Exception as e:
             logger.error(
@@ -1039,41 +923,27 @@ class DocumentIndexingService:
                 else:
                     metadata = raw_metadata or {}
                 
-                # Log first few documents to debug metadata structure (use INFO so it shows up)
+                # Log first few documents to debug metadata structure
                 if i < 3:
-                    logger.info(
+                    logger.debug(
                         "Sample document metadata",
                         index=i,
                         metadata_keys=list(metadata.keys()) if isinstance(metadata, dict) else type(metadata),
                         metadata_preview=str(metadata)[:200] if metadata else None,
-                        doc_keys=list(doc.keys()),
-                        full_doc=str(doc)[:500]
+                        doc_keys=list(doc.keys())
                     )
                 
                 doc_id = metadata.get("document_id")
                 
-                # Handle case where document_id is None (use title or generate from title)
-                if not doc_id or doc_id is None:
-                    # Try alternative field names
-                    doc_id = metadata.get("doc_id") or metadata.get("id") or metadata.get("source")
-                    
-                    # If still no ID, generate one from title (for documents indexed with None)
-                    if not doc_id or doc_id is None:
-                        title = metadata.get("title", "Unknown")
-                        # Use title as document_id if available, otherwise skip
-                        if title and title != "Unknown":
-                            # Generate a stable ID from title (normalize it)
-                            import hashlib
-                            doc_id = f"doc_{hashlib.md5(title.encode()).hexdigest()[:12]}"
-                        else:
-                            skipped_no_id += 1
-                            if skipped_no_id <= 3:  # Only log first few
-                                logger.info(
-                                    "Skipping document without document_id or title",
-                                    metadata_keys=list(metadata.keys()) if isinstance(metadata, dict) else type(metadata),
-                                    metadata_preview=str(metadata)[:200] if metadata else None
-                                )
-                            continue
+                if not doc_id:
+                    skipped_no_id += 1
+                    if skipped_no_id <= 3:  # Only log first few
+                        logger.debug(
+                            "Skipping document without document_id",
+                            metadata_keys=list(metadata.keys()) if isinstance(metadata, dict) else type(metadata),
+                            metadata_preview=str(metadata)[:200] if metadata else None
+                        )
+                    continue
                 
                 if doc_id not in document_map:
                     document_map[doc_id] = {
@@ -1118,50 +988,17 @@ class DocumentIndexingService:
         Get details about a specific indexed document.
         
         Args:
-            document_id: Unique document identifier (may be generated from title)
+            document_id: Unique document identifier
             
         Returns:
             Dictionary with document details or None if not found
         """
         try:
-            # Check if this is a generated document_id (starts with "doc_")
-            # Generated IDs are created from titles when document_id is None in metadata
-            if document_id.startswith("doc_"):
-                # This is a generated ID - need to find the title first
-                # List all documents to find the one with matching generated ID
-                all_docs_list = await self.list_indexed_documents(limit=1000)
-                matching_doc = None
-                for doc in all_docs_list.get("documents", []):
-                    if doc.get("document_id") == document_id:
-                        matching_doc = doc
-                        break
-                
-                if not matching_doc:
-                    logger.warning(
-                        "Cannot get document: document not found in list",
-                        document_id=document_id
-                    )
-                    return None
-                
-                title = matching_doc.get("title")
-                if not title:
-                    logger.warning(
-                        "Cannot get document: document has no title",
-                        document_id=document_id
-                    )
-                    return None
-                
-                # Get all chunks with this title (since actual metadata has document_id: None)
-                all_docs = self.vector_store.list_documents(
-                    filters={"title": title},
-                    limit=1000  # Get all chunks
-                )
-            else:
-                # Normal document_id - get by document_id
-                all_docs = self.vector_store.list_documents(
-                    filters={"document_id": document_id},
-                    limit=1000  # Get all chunks
-                )
+            # Get all chunks for this document
+            all_docs = self.vector_store.list_documents(
+                filters={"document_id": document_id},
+                limit=1000  # Get all chunks
+            )
             
             if not all_docs:
                 return None
@@ -1191,10 +1028,6 @@ class DocumentIndexingService:
             
             # Sort chunks by index
             chunks.sort(key=lambda x: x["chunk_index"])
-            
-            # If this was a generated ID, use it in the result instead of None
-            if document_id.startswith("doc_"):
-                metadata["document_id"] = document_id
             
             result = {
                 **metadata,
