@@ -5,6 +5,7 @@ Provides document CRUD operations with connection management,
 automatic collection creation, and in-memory fallback.
 """
 import os
+import json
 import threading
 from typing import Optional, List, Dict, Any
 
@@ -242,9 +243,20 @@ class MilvusVectorStore:
         documents = []
         for hits in results:
             for hit in hits:
+                # Get metadata - handle both dict and JSON string
+                raw_metadata = hit.entity.get("metadata", {})
+                if isinstance(raw_metadata, str):
+                    try:
+                        metadata = json.loads(raw_metadata)
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning("Failed to parse metadata JSON", metadata=raw_metadata[:100] if raw_metadata else None)
+                        metadata = {}
+                else:
+                    metadata = raw_metadata or {}
+                
                 doc = Document(
                     page_content=hit.entity.get("text", ""),
-                    metadata=hit.entity.get("metadata", {})
+                    metadata=metadata
                 )
                 doc.metadata["id"] = str(hit.id)
                 doc.metadata["score"] = hit.distance

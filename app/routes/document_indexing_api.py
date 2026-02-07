@@ -138,7 +138,7 @@ async def index_file_upload(
       -F "industry=manufacturing"
     ```
     """
-    request_id = getattr(request.state, 'request_id', 'unknown')
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
     
     # Parse metadata if provided
     metadata_dict = {}
@@ -156,10 +156,12 @@ async def index_file_upload(
         
         # Create temp file
         suffix = Path(file.filename).suffix if file.filename else ""
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb') as temp_file:
             content = await file.read()
             temp_file.write(content)
+            temp_file.flush()  # Ensure data is written to disk
             temp_file_path = temp_file.name
+        # File handle is now closed, but file remains on disk (delete=False)
         
         # Convert doc_type string to enum
         try:
@@ -177,14 +179,18 @@ async def index_file_upload(
             metadata=metadata_dict,
         )
         
+        # Format response to match blueprint expected output
         return {
             "success": True,
+            "message": "Document indexed successfully!",
             "document_id": indexed_doc.document_id,
             "title": indexed_doc.title,
+            "chunks": indexed_doc.chunk_count,
             "format": indexed_doc.format.value,
-            "chunk_count": indexed_doc.chunk_count,
             "file_size": indexed_doc.file_size,
-            "indexed_at": indexed_doc.indexed_at.isoformat(),
+            "indexed_at": indexed_doc.indexed_at.isoformat() if indexed_doc.indexed_at else None,
+            "doc_type": doc_type,
+            "industry": industry,
             "request_id": request_id,
         }
     
@@ -426,39 +432,20 @@ async def list_documents(
     request: Request = None,
 ):
     """List all indexed documents with optional filters"""
-    request_id = getattr(request.state, 'request_id', 'unknown')
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
     
     try:
         service = await get_document_indexing_service()
         
-        doc_type_enum = None
-        if doc_type:
-            try:
-                doc_type_enum = B2BDocumentType(doc_type)
-            except ValueError:
-                pass
-        
-        documents = service.list_indexed_documents(
-            doc_type=doc_type_enum,
+        result = await service.list_indexed_documents(
+            doc_type=doc_type,
             industry=industry,
         )
         
         return {
             "success": True,
-            "count": len(documents),
-            "documents": [
-                {
-                    "document_id": doc.document_id,
-                    "title": doc.title,
-                    "doc_type": doc.doc_type.value,
-                    "format": doc.format.value,
-                    "industry": doc.industry,
-                    "chunk_count": doc.chunk_count,
-                    "file_size": doc.file_size,
-                    "indexed_at": doc.indexed_at.isoformat(),
-                }
-                for doc in documents
-            ],
+            "count": result.get("total", 0),
+            "documents": result.get("documents", []),
             "request_id": request_id,
         }
     
@@ -474,26 +461,14 @@ async def get_document(document_id: str, request: Request):
     
     try:
         service = await get_document_indexing_service()
-        doc = service.get_indexed_document(document_id)
+        doc = await service.get_indexed_document(document_id)
         
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         
         return {
             "success": True,
-            "document": {
-                "document_id": doc.document_id,
-                "title": doc.title,
-                "doc_type": doc.doc_type.value,
-                "format": doc.format.value,
-                "source": doc.source,
-                "industry": doc.industry,
-                "chunk_count": doc.chunk_count,
-                "file_size": doc.file_size,
-                "page_count": doc.page_count,
-                "indexed_at": doc.indexed_at.isoformat(),
-                "metadata": doc.metadata,
-            },
+            "document": doc,
             "request_id": request_id,
         }
     

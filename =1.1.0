@@ -1,0 +1,20 @@
+Defaulting to user installation because normal site-packages is not writeable
+Collecting pdfplumber
+  Downloading pdfplumber-0.11.9-py3-none-any.whl.metadata (43 kB)
+Collecting python-docx
+  Downloading python_docx-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+Collecting pdfminer.six
+  Downloading pdfminer_six-20260107-py3-none-any.whl.metadata (4.3 kB)
+  Downloading pdfminer_six-20251230-py3-none-any.whl.metadata (4.3 kB)
+Requirement already satisfied: Pillow>=9.1 in /opt/conda/lib/python3.11/site-packages (from pdfplumber) (11.3.0)
+Collecting pypdfium2>=4.18.0 (from pdfplumber)
+  Downloading pypdfium2-5.3.0-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (67 kB)
+Requirement already satisfied: charset-normalizer>=2.0.0 in /opt/conda/lib/python3.11/site-packages (from pdfminer.six) (3.4.4)
+Requirement already satisfied: cryptography>=36.0.0 in /opt/conda/lib/python3.11/site-packages (from pdfminer.six) (46.0.4)
+Collecting lxml>=3.1.0 (from python-docx)
+  Downloading lxml-6.0.2-cp311-cp311-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl.metadata (3.6 kB)
+Requirement already satisfied: typing_extensions>=4.9.0 in /opt/conda/lib/python3.11/site-packages (from python-docx) (4.15.0)
+Requirement already satisfied: cffi>=2.0.0 in /opt/conda/lib/python3.11/site-packages (from cryptography>=36.0.0->pdfminer.six) (2.0.0)
+Requirement already satisfied: pycparser in /opt/conda/lib/python3.11/site-packages (from cffi>=2.0.0->cryptography>=36.0.0->pdfminer.six) (2.22)
+Downloading pdfplumber-0.11.9-py3-none-any.whl (60 kB)
+Downloading pdfminer_six-20251230-py3-none-any.whl (6.6 MB)
