@@ -9,6 +9,7 @@ import secrets
 import string
 from enum import Enum
 from typing import Optional
+from urllib.parse import urlparse
 
 
 class EnvironmentType(str, Enum):
@@ -112,6 +113,101 @@ class PasswordValidator:
             )
 
         return secret
+
+
+class UrlValidator:
+    """Validates URL format and security."""
+
+    def __init__(self, environment: Optional[EnvironmentType] = None):
+        self.environment = environment or detect_environment()
+
+    def validate(self, url: str, field_name: str = "URL", require_https: bool = False) -> str:
+        """Validate URL format and protocol."""
+        if not url:
+            raise ValueError(f"{field_name}: URL is required")
+
+        try:
+            parsed = urlparse(url)
+
+            if not parsed.scheme or not parsed.netloc:
+                raise ValueError(f"{field_name}: Invalid URL format - missing scheme or host")
+
+            if (require_https and
+                self.environment == EnvironmentType.PRODUCTION and
+                parsed.scheme != 'https'):
+                raise ValueError(
+                    f"{field_name}: HTTPS is required in production (got {parsed.scheme}). "
+                    "Update your URL to use https:// instead of http://"
+                )
+
+            return url
+
+        except Exception as e:
+            if isinstance(e, ValueError) and field_name in str(e):
+                raise
+            raise ValueError(f"{field_name}: Invalid URL format - {str(e)}")
+
+
+class MinioCredentialValidator:
+    """Validates MinIO username/password pairs."""
+
+    WEAK_USERNAMES = frozenset(['minioadmin', 'admin', 'minio', 'root'])
+
+    def __init__(self, environment: Optional[EnvironmentType] = None):
+        self.environment = environment or detect_environment()
+        self.password_validator = PasswordValidator(environment)
+
+    def validate_credentials(self, username: str, password: str) -> tuple:
+        """Validate MinIO credentials as a pair."""
+        if self.environment == EnvironmentType.DEVELOPMENT:
+            return username, password
+
+        if username.lower() in self.WEAK_USERNAMES:
+            raise ValueError(
+                f"MINIO_ROOT_USER: '{username}' is insecure for {self.environment.value}. "
+                "Use a unique username. Generate one with: openssl rand -base64 16"
+            )
+
+        validated_password = self.password_validator.validate(password, "MINIO_ROOT_PASSWORD")
+        return username, validated_password
+
+
+class ApiKeyValidator:
+    """Validates API keys with environment-aware rules."""
+
+    MIN_LENGTH = 20
+    WEAK_KEYS = frozenset(['change-me', 'your-api-key-here', 'your_api_key', 'api_key_here'])
+
+    def __init__(self, environment: Optional[EnvironmentType] = None):
+        self.environment = environment or detect_environment()
+
+    def validate(self, api_key: Optional[str], field_name: str = "API_KEY", required: bool = False) -> Optional[str]:
+        """Validate API key format and strength."""
+        if self.environment == EnvironmentType.DEVELOPMENT:
+            return api_key
+
+        if required and not api_key:
+            raise ValueError(
+                f"{field_name}: API key is required in {self.environment.value} environment. "
+                "Generate one from your API provider's dashboard."
+            )
+
+        if not api_key:
+            return None
+
+        if api_key.lower() in self.WEAK_KEYS:
+            raise ValueError(
+                f"{field_name}: '{api_key}' is a placeholder value, not a real API key. "
+                "Please obtain a valid API key from your service provider."
+            )
+
+        if len(api_key) < self.MIN_LENGTH:
+            raise ValueError(
+                f"{field_name}: API key must be at least {self.MIN_LENGTH} characters "
+                f"(got {len(api_key)}). Please use a valid API key."
+            )
+
+        return api_key
 
 
 def generate_secure_password(length: int = 32) -> str:
