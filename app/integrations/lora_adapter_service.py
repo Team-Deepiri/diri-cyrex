@@ -15,9 +15,13 @@ from ..core.types import Message, MessagePriority
 from ..integrations.synapse_broker import get_synapse_broker
 from ..database.postgres import get_postgres_manager
 from ..logging_config import get_logger
+from ..settings import settings
 import os
 
 logger = get_logger("cyrex.lora_adapter")
+
+# Project root: works in Docker (/app) and local (diri-cyrex); use for default cache paths
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 # ModelKit imports with graceful fallback
 try:
@@ -45,7 +49,8 @@ class LoRAAdapterService:
         adapter_cache_dir: Optional[str] = None,
     ):
         self.base_model_path = base_model_path or os.getenv("BASE_MODEL_PATH", "mistralai/Mistral-7B-v0.1")
-        self.adapter_cache_dir = Path(adapter_cache_dir or os.getenv("ADAPTER_CACHE_DIR", "/app/adapters"))
+        _default_adapter_dir = os.getenv("ADAPTER_CACHE_DIR") or str(_PROJECT_ROOT / "adapters")
+        self.adapter_cache_dir = Path(adapter_cache_dir or _default_adapter_dir)
         self.adapter_cache_dir.mkdir(parents=True, exist_ok=True)
         
         self.base_model = None
@@ -61,14 +66,19 @@ class LoRAAdapterService:
                 self.registry = ModelRegistryClient(
                     registry_type=os.getenv("MODEL_REGISTRY_TYPE", "mlflow"),
                     mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
-                    s3_endpoint=os.getenv("S3_ENDPOINT_URL", "http://minio:9000"),
-                    s3_access_key=os.getenv("MINIO_ACCESS_KEY") or os.getenv("MINIO_ROOT_USER"),
-                    s3_secret_key=os.getenv("MINIO_SECRET_KEY") or os.getenv("MINIO_ROOT_PASSWORD"),
-                    s3_bucket=os.getenv("S3_BUCKET", "mlflow-artifacts")
+                    s3_endpoint=settings.S3_ENDPOINT_URL,
+                    s3_access_key=settings.MINIO_ACCESS_KEY or settings.MINIO_ROOT_USER,
+                    s3_secret_key=settings.MINIO_SECRET_KEY or settings.MINIO_ROOT_PASSWORD,
+                    s3_bucket=settings.S3_BUCKET
                 )
-                self.streaming = StreamingClient(
-                    redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
-                )
+                _redis_url = os.getenv("REDIS_URL")
+                if not _redis_url:
+                    _redis_url = (
+                        f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+                        if settings.REDIS_PASSWORD
+                        else f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+                    )
+                self.streaming = StreamingClient(redis_url=_redis_url)
             except Exception as e:
                 logger.warning(f"ModelKit initialization failed: {e}")
         
@@ -223,13 +233,17 @@ class LoRAAdapterService:
             logger.error(f"Error handling adapter ready: {e}")
     
     async def _subscribe_modelkit_events(self):
-        """Subscribe to ModelKit streaming events"""
+        """Subscribe to ModelKit streaming events. subscribe() returns an async generator; iterate with async for."""
         if not self.streaming:
             return
         
         try:
-            async for event in self.streaming.subscribe("model-events"):
-                if event.get("event") == "lora-adapter-ready":
+            # Callback is required by API; we handle events in the loop below to avoid double-handling
+            async def _on_event(_event):
+                pass
+
+            async for event in self.streaming.subscribe("model-events", _on_event):
+                if isinstance(event, dict) and event.get("event") == "lora-adapter-ready":
                     await self._handle_adapter_ready_from_modelkit(event)
         except Exception as e:
             logger.error(f"ModelKit subscription error: {e}")

@@ -100,7 +100,19 @@ from deepiri_modelkit import (
     get_logger
 )
 
+from ...settings import settings
+
 logger = get_logger("cyrex.event_publisher")
+
+
+def _redis_url() -> str:
+    """Build Redis URL from env or settings (so REDIS_HOST/PORT work locally)."""
+    url = os.getenv("REDIS_URL")
+    if url:
+        return url
+    if settings.REDIS_PASSWORD:
+        return f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+    return f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
 
 
 class CyrexEventPublisher:
@@ -114,9 +126,7 @@ class CyrexEventPublisher:
     """
     
     def __init__(self):
-        self.streaming = StreamingClient(
-            redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
-        )
+        self.streaming = StreamingClient(redis_url=_redis_url())
         self._connected = False
     
     async def connect(self):

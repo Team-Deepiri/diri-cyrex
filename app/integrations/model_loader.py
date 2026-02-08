@@ -13,8 +13,12 @@ from deepiri_modelkit import (
     ModelReadyEvent,
     get_logger
 )
+from app.settings import settings
 
 logger = get_logger("cyrex.model_loader")
+
+# Project root for default cache paths (Docker: /app, local: diri-cyrex)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class AutoModelLoader:
@@ -33,18 +37,24 @@ class AutoModelLoader:
         self.registry = ModelRegistryClient(
             registry_type=os.getenv("MODEL_REGISTRY_TYPE", "mlflow"),
             mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
-            s3_endpoint=os.getenv("S3_ENDPOINT_URL", "http://minio:9000"),
-            s3_access_key=os.getenv("MINIO_ACCESS_KEY") or os.getenv("MINIO_ROOT_USER"),
-            s3_secret_key=os.getenv("MINIO_SECRET_KEY") or os.getenv("MINIO_ROOT_PASSWORD"),
-            s3_bucket=os.getenv("S3_BUCKET", "mlflow-artifacts")
+            s3_endpoint=settings.S3_ENDPOINT_URL,
+            s3_access_key=settings.MINIO_ACCESS_KEY or settings.MINIO_ROOT_USER,
+            s3_secret_key=settings.MINIO_SECRET_KEY or settings.MINIO_ROOT_PASSWORD,
+            s3_bucket=settings.S3_BUCKET
         )
-        
-        self.streaming = StreamingClient(
-            redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
-        )
+
+        _redis_url = os.getenv("REDIS_URL")
+        if not _redis_url:
+            _redis_url = (
+                f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+                if settings.REDIS_PASSWORD
+                else f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+            )
+        self.streaming = StreamingClient(redis_url=_redis_url)
         
         self.model_cache: Dict[str, Any] = {}
-        self.cache_dir = Path(os.getenv("MODEL_CACHE_DIR", "/app/models/cache"))
+        _default_cache = os.getenv("MODEL_CACHE_DIR") or str(_PROJECT_ROOT / "models" / "cache")
+        self.cache_dir = Path(_default_cache)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         self._running = False
@@ -209,15 +219,16 @@ class AutoModelLoader:
         self.registry = ModelRegistryClient(
             registry_type=os.getenv("MODEL_REGISTRY_TYPE", "mlflow"),
             mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
-            s3_endpoint=os.getenv("S3_ENDPOINT_URL", "http://minio:9000"),
-            s3_access_key=os.getenv("MINIO_ACCESS_KEY") or os.getenv("MINIO_ROOT_USER"),
-            s3_secret_key=os.getenv("MINIO_SECRET_KEY") or os.getenv("MINIO_ROOT_PASSWORD"),
-            s3_bucket=os.getenv("S3_BUCKET", "mlflow-artifacts")
+            s3_endpoint=settings.S3_ENDPOINT_URL,
+            s3_access_key=settings.MINIO_ACCESS_KEY or settings.MINIO_ROOT_USER,
+            s3_secret_key=settings.MINIO_SECRET_KEY or settings.MINIO_ROOT_PASSWORD,
+            s3_bucket=settings.S3_BUCKET
         )
-        
+
         self.streaming = CyrexEventPublisher()
         self.model_cache: Dict[str, Any] = {}
-        self.cache_dir = Path(os.getenv("MODEL_CACHE_DIR", "/app/models/cache"))
+        _default_cache = os.getenv("MODEL_CACHE_DIR") or str(_PROJECT_ROOT / "models" / "cache")
+        self.cache_dir = Path(_default_cache)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
         self._running = False
