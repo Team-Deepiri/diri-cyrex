@@ -1,7 +1,13 @@
 from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
+from pydantic import ValidationInfo
 from typing import Optional
 import os
+import logging
+
+from .utils.security_validators import PasswordValidator, detect_environment
+
+logger = logging.getLogger("cyrex.settings")
 
 
 class Settings(BaseSettings):
@@ -60,9 +66,38 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "deepiri"
     POSTGRES_USER: str = "deepiri"
     POSTGRES_PASSWORD: str = "deepiripassword"
-    
+
+    # JWT Configuration
+    JWT_SECRET: str = "default-secret-change-in-production"
+
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
+
+    @field_validator('POSTGRES_PASSWORD')
+    @classmethod
+    def validate_postgres_password(cls, v: str) -> str:
+        validator = PasswordValidator()
+        return validator.validate(v, "POSTGRES_PASSWORD")
+
+    @field_validator('REDIS_PASSWORD')
+    @classmethod
+    def validate_redis_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            env = detect_environment()
+            if env.value == "production":
+                raise ValueError(
+                    "REDIS_PASSWORD is required in production. "
+                    "Generate with: openssl rand -base64 32"
+                )
+            return v
+        validator = PasswordValidator()
+        return validator.validate(v, "REDIS_PASSWORD")
+
+    @field_validator('JWT_SECRET')
+    @classmethod
+    def validate_jwt_secret(cls, v: str) -> str:
+        validator = PasswordValidator()
+        return validator.validate_jwt_secret(v, "JWT_SECRET")
 
     model_config = ConfigDict(
         env_file=".env",
