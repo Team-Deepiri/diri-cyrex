@@ -57,7 +57,7 @@ class AuthenticationManager:
     
     def __init__(self):
         self.logger = logger
-        self._jwt_secret = getattr(settings, 'JWT_SECRET', 'default-secret-change-in-production')
+        self._jwt_secret = settings.JWT_SECRET
         self._api_key_header = 'x-api-key'
         self._auth_header = 'authorization'
         self._initialized = False

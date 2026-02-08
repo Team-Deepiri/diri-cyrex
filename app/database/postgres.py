@@ -40,7 +40,7 @@ class PostgreSQLManager:
         self.port = port or int(os.getenv("POSTGRES_PORT") or getattr(settings, 'POSTGRES_PORT', 5432))
         self.database = database or os.getenv("POSTGRES_DB") or getattr(settings, 'POSTGRES_DB', 'deepiri')
         self.user = user or os.getenv("POSTGRES_USER") or getattr(settings, 'POSTGRES_USER', 'deepiri')
-        self.password = password or os.getenv("POSTGRES_PASSWORD") or getattr(settings, 'POSTGRES_PASSWORD', 'deepiripassword')
+        self.password = password or os.getenv("POSTGRES_PASSWORD") or getattr(settings, 'POSTGRES_PASSWORD')
         self.min_size = min_size
         self.max_size = max_size
         self._pool: Optional[asyncpg.Pool] = None

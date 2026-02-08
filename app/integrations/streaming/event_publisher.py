@@ -19,7 +19,7 @@ class CyrexEventPublisher:
         """Initialize streaming client"""
         redis_host = os.getenv("REDIS_HOST", "redis")
         redis_port = int(os.getenv("REDIS_PORT", "6379"))
-        redis_password = os.getenv("REDIS_PASSWORD", "redispassword")
+        redis_password = os.getenv("REDIS_PASSWORD")
         
         self.client = BaseStreamingClient(
             redis_host=redis_host,

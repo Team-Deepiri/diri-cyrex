@@ -62,8 +62,8 @@ class LoRAAdapterService:
                     registry_type=os.getenv("MODEL_REGISTRY_TYPE", "mlflow"),
                     mlflow_tracking_uri=os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000"),
                     s3_endpoint=os.getenv("S3_ENDPOINT_URL", "http://minio:9000"),
-                    s3_access_key=os.getenv("MINIO_ACCESS_KEY", "minioadmin"),
-                    s3_secret_key=os.getenv("MINIO_SECRET_KEY", "minioadmin"),
+                    s3_access_key=os.getenv("MINIO_ACCESS_KEY") or os.getenv("MINIO_ROOT_USER"),
+                    s3_secret_key=os.getenv("MINIO_SECRET_KEY") or os.getenv("MINIO_ROOT_PASSWORD"),
                     s3_bucket=os.getenv("S3_BUCKET", "mlflow-artifacts")
                 )
                 self.streaming = StreamingClient(
