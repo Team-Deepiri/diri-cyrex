@@ -5,7 +5,13 @@ from typing import Optional
 import os
 import logging
 
-from .utils.security_validators import PasswordValidator, detect_environment
+from .utils.security_validators import (
+    PasswordValidator,
+    ApiKeyValidator,
+    MinioCredentialValidator,
+    UrlValidator,
+    detect_environment
+)
 
 logger = logging.getLogger("cyrex.settings")
 
@@ -67,6 +73,14 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "deepiri"
     POSTGRES_PASSWORD: str = "deepiripassword"
 
+    # MinIO/S3 Configuration
+    MINIO_ROOT_USER: str = "minioadmin"
+    MINIO_ROOT_PASSWORD: str = "minioadmin"
+    MINIO_ACCESS_KEY: Optional[str] = None
+    MINIO_SECRET_KEY: Optional[str] = None
+    S3_ENDPOINT_URL: str = "http://minio:9000"
+    S3_BUCKET: str = "mlflow-artifacts"
+
     # JWT Configuration
     JWT_SECRET: str = "default-secret-change-in-production"
 
@@ -98,6 +112,37 @@ class Settings(BaseSettings):
     def validate_jwt_secret(cls, v: str) -> str:
         validator = PasswordValidator()
         return validator.validate_jwt_secret(v, "JWT_SECRET")
+
+    @field_validator('MINIO_ROOT_USER')
+    @classmethod
+    def validate_minio_user(cls, v: str) -> str:
+        env = detect_environment()
+        if env.value == "production" and v.lower() == "minioadmin":
+            raise ValueError(
+                "MINIO_ROOT_USER: 'minioadmin' is insecure for production. "
+                "Generate with: openssl rand -base64 16"
+            )
+        return v
+
+    @field_validator('MINIO_ROOT_PASSWORD')
+    @classmethod
+    def validate_minio_password(cls, v: str) -> str:
+        validator = PasswordValidator()
+        return validator.validate(v, "MINIO_ROOT_PASSWORD")
+
+    @field_validator('S3_ENDPOINT_URL')
+    @classmethod
+    def validate_s3_url(cls, v: str) -> str:
+        validator = UrlValidator()
+        return validator.validate(v, "S3_ENDPOINT_URL", require_https=False)
+
+    @field_validator('OPENAI_API_KEY', 'CYREX_API_KEY', 'LANGCHAIN_API_KEY')
+    @classmethod
+    def validate_api_keys(cls, v: Optional[str], info: ValidationInfo) -> Optional[str]:
+        if v is None:
+            return v
+        validator = ApiKeyValidator()
+        return validator.validate(v, field_name=info.field_name, required=False)
 
     model_config = ConfigDict(
         env_file=".env",
