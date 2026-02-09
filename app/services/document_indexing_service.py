@@ -353,6 +353,45 @@ class DocumentIndexingService:
             documents.append(Document(page_content=chunk, metadata=chunk_metadata))
         return documents
 
+    async def _generate_unique_document_id(self, title: str) -> str:
+        """
+        Generate a unique document_id from title, ensuring no duplicates.
+        
+        Args:
+            title: Document title
+            
+        Returns:
+            Unique document_id
+        """
+        import hashlib
+        import uuid
+        
+        # Base ID from title hash
+        base_id = f"doc_{hashlib.md5(title.encode()).hexdigest()[:12]}"
+        
+        # Check if this ID already exists
+        existing_chunks = self.vector_store.list_documents(
+            filters={"document_id": base_id},
+            limit=1
+        )
+        
+        if not existing_chunks:
+            # ID is unique, return it
+            return base_id
+        
+        # ID exists, append UUID suffix to ensure uniqueness
+        unique_suffix = uuid.uuid4().hex[:8]
+        unique_id = f"{base_id}_{unique_suffix}"
+        
+        logger.info(
+            "Document ID collision detected, using unique suffix",
+            base_id=base_id,
+            unique_id=unique_id,
+            title=title
+        )
+        
+        return unique_id
+
     async def _extract_metadata_automatically(
         self,
         text: str,
@@ -519,7 +558,7 @@ class DocumentIndexingService:
     async def index_file(
         self,
         file_path: str,
-        document_id: str,
+        document_id: Optional[str],
         title: str,
         doc_type: B2BDocumentType,
         industry: str,
@@ -533,7 +572,7 @@ class DocumentIndexingService:
         
         Args:
             file_path: Path to the file to index
-            document_id: Unique document identifier
+            document_id: Unique document identifier (will be generated if None)
             title: Document title
             doc_type: Document type (LEASE, CONTRACT, REGULATION, etc.)
             industry: Industry classification
@@ -555,10 +594,19 @@ class DocumentIndexingService:
             # Get file extension for return value
             file_ext = Path(file_path).suffix.lower().lstrip('.')
             
+            # Generate document_id if not provided, ensuring uniqueness
+            if not document_id or document_id is None:
+                document_id = await self._generate_unique_document_id(title)
+                logger.info(
+                    "Generated document_id from title",
+                    document_id=document_id,
+                    title=title
+                )
+            
             # Build base metadata
             full_metadata = metadata or {}
             full_metadata.update({
-                "document_id": document_id,
+                "document_id": document_id,  # Now always has a value
                 "title": title,
                 "doc_type": doc_type.value,
                 "industry": industry
@@ -638,6 +686,258 @@ class DocumentIndexingService:
                 exc_info=True  # Include stack trace
             )
             raise RuntimeError(f"Failed to index document: {str(e)}") from e
+
+    async def index_text(
+        self,
+        text: str,
+        document_id: Optional[str],
+        title: str,
+        doc_type: B2BDocumentType,
+        industry: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Index text content directly into Milvus for RAG retrieval.
+        
+        Similar to index_file but takes text directly instead of parsing a file.
+        
+        Args:
+            text: Text content to index
+            document_id: Unique document identifier (will be generated if None)
+            title: Document title
+            doc_type: Document type (LEASE, CONTRACT, REGULATION, etc.)
+            industry: Industry classification
+            metadata: Optional metadata dict (version, document-specific fields, etc.)
+        
+        Returns:
+            IndexingResult with document_id, title, chunk_count, and status.
+        
+        Raises:
+            RuntimeError: If indexing fails
+        """
+        try:
+            # Generate document_id if not provided, ensuring uniqueness
+            if not document_id or document_id is None:
+                document_id = await self._generate_unique_document_id(title)
+                logger.info(
+                    "Generated document_id from title",
+                    document_id=document_id,
+                    title=title
+                )
+            
+            # Build base metadata
+            full_metadata = metadata or {}
+            full_metadata.update({
+                "document_id": document_id,  # Now always has a value
+                "title": title,
+                "doc_type": doc_type.value,
+                "industry": industry
+            })
+            
+            # Automatically extract obligations and clauses if enabled
+            if self.enable_auto_extraction and doc_type in [B2BDocumentType.LEASE, B2BDocumentType.CONTRACT]:
+                try:
+                    full_metadata = await self._extract_metadata_automatically(
+                        text=text,
+                        doc_type=doc_type,
+                        metadata=full_metadata
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Auto-extraction failed, continuing with manual metadata",
+                        error=str(e)
+                    )
+                    # Continue with manual metadata only
+            
+            # Chunk document
+            documents = self._chunk_document(text, document_id, full_metadata)
+            
+            # Store in Milvus
+            self.vector_store.add_documents(documents)
+            
+            logger.info(
+                "Text indexed successfully",
+                document_id=document_id,
+                chunk_count=len(documents)
+            )
+            
+            return IndexingResult(
+                document_id=document_id,
+                title=title,
+                chunk_count=len(documents),
+                format=DocumentFormat.TXT,  # Text content is treated as TXT
+                file_size=len(text.encode('utf-8'))  # Approximate size in bytes
+            )
+            
+        except Exception as e:
+            logger.error(
+                "Failed to index text",
+                document_id=document_id,
+                title=title,
+                error=str(e),
+                exc_info=True
+            )
+            raise RuntimeError(f"Failed to index text: {str(e)}") from e
+
+    async def index_batch(
+        self,
+        files: List[Dict[str, Any]],
+        industry: str = "generic",
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Index multiple files in batch.
+        
+        Args:
+            files: List of file info dicts, each containing:
+                - file_path: Path to the file
+                - document_id: Optional document ID
+                - title: Document title
+                - doc_type: Document type (B2BDocumentType enum or string)
+                - metadata: Optional metadata dict
+            industry: Industry classification for all documents
+            chunk_size: Optional chunk size override
+            chunk_overlap: Optional chunk overlap override
+        
+        Returns:
+            Dict with:
+                - total: Total number of files
+                - success_count: Number of successfully indexed files
+                - failed_count: Number of failed files
+                - success_rate: Success rate (0.0 to 1.0)
+                - successful: List of successful indexing results
+                - failed: List of failed file info with errors
+        """
+        logger.info("Starting batch indexing", file_count=len(files), industry=industry)
+        
+        total = len(files)
+        successful = []
+        failed = []
+        
+        # Process files sequentially (can be parallelized later if needed)
+        for i, file_info in enumerate(files):
+            file_path = file_info.get("file_path")
+            document_id = file_info.get("document_id")
+            title = file_info.get("title", "Untitled Document")
+            doc_type = file_info.get("doc_type")
+            metadata = file_info.get("metadata", {})
+            
+            # Validate file_path
+            if not file_path:
+                failed.append({
+                    "file_info": file_info,
+                    "error": "file_path is required"
+                })
+                logger.warning("Skipping file: missing file_path", index=i)
+                continue
+            
+            # Convert doc_type string to enum if needed
+            if isinstance(doc_type, str):
+                try:
+                    doc_type_enum = B2BDocumentType(doc_type)
+                except ValueError:
+                    logger.warning(f"Unknown doc_type '{doc_type}', defaulting to LEGAL_DOCUMENT", file_path=file_path)
+                    doc_type_enum = B2BDocumentType.LEGAL_DOCUMENT
+            elif doc_type is None:
+                doc_type_enum = B2BDocumentType.LEGAL_DOCUMENT
+            elif isinstance(doc_type, B2BDocumentType):
+                doc_type_enum = doc_type
+            else:
+                # Fallback for any other type
+                doc_type_enum = B2BDocumentType.LEGAL_DOCUMENT
+            
+            # Merge metadata
+            full_metadata = {**metadata}
+            if not full_metadata.get("document_type"):
+                full_metadata["document_type"] = doc_type_enum.value
+            
+            try:
+                logger.info(
+                    "Indexing file in batch",
+                    index=i + 1,
+                    total=total,
+                    file_path=file_path,
+                    title=title
+                )
+                
+                # Index the file
+                result = await self.index_file(
+                    file_path=file_path,
+                    document_id=document_id,
+                    title=title,
+                    doc_type=doc_type_enum,
+                    industry=industry,
+                    metadata=full_metadata if full_metadata else None
+                )
+                
+                successful.append({
+                    "document_id": result.document_id,
+                    "title": result.title,
+                    "chunk_count": result.chunk_count,
+                    "format": result.format.value if hasattr(result.format, 'value') else str(result.format),
+                    "file_path": file_path
+                })
+                
+                logger.info(
+                    "File indexed successfully in batch",
+                    index=i + 1,
+                    total=total,
+                    document_id=result.document_id
+                )
+                
+            except FileNotFoundError as e:
+                error_msg = f"File not found: {file_path}"
+                failed.append({
+                    "file_path": file_path,
+                    "title": title,
+                    "error": error_msg
+                })
+                logger.error("File not found in batch", file_path=file_path, error=str(e))
+                
+            except ValueError as e:
+                error_msg = f"Invalid file format or parameter: {str(e)}"
+                failed.append({
+                    "file_path": file_path,
+                    "title": title,
+                    "error": error_msg
+                })
+                logger.error("Invalid file in batch", file_path=file_path, error=str(e))
+                
+            except Exception as e:
+                error_msg = f"Failed to index file: {str(e)}"
+                failed.append({
+                    "file_path": file_path,
+                    "title": title,
+                    "error": error_msg
+                })
+                logger.error(
+                    "Failed to index file in batch",
+                    file_path=file_path,
+                    error=str(e),
+                    exc_info=True
+                )
+        
+        success_count = len(successful)
+        failed_count = len(failed)
+        success_rate = success_count / total if total > 0 else 0.0
+        
+        logger.info(
+            "Batch indexing completed",
+            total=total,
+            success_count=success_count,
+            failed_count=failed_count,
+            success_rate=success_rate
+        )
+        
+        return {
+            "total": total,
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "success_rate": success_rate,
+            "successful": successful,
+            "failed": failed
+        }
 
     async def search(
         self,
@@ -841,19 +1141,73 @@ class DocumentIndexingService:
         Returns:
             True if deletion was successful, False otherwise
         """
+        logger.info("Starting delete operation", document_id=document_id)
         try:
-            # Delete all chunks with matching document_id in metadata
+            # Check if chunks exist with this document_id
+            test_docs = self.vector_store.list_documents(
+                filters={"document_id": document_id},
+                limit=10  # Get more to see what we're working with
+            )
+            
+            logger.info(
+                "Checked for chunks with document_id",
+                document_id=document_id,
+                chunks_found=len(test_docs)
+            )
+            
+            if not test_docs:
+                # Log what document_ids actually exist for debugging
+                all_docs_sample = self.vector_store.list_documents(limit=20)
+                sample_ids = set()
+                for doc in all_docs_sample:
+                    chunk_metadata = doc.get("metadata", {})
+                    if isinstance(chunk_metadata, str):
+                        try:
+                            import json
+                            chunk_metadata = json.loads(chunk_metadata)
+                        except:
+                            chunk_metadata = {}
+                    doc_id = chunk_metadata.get("document_id")
+                    if doc_id:
+                        sample_ids.add(doc_id)
+                
+                logger.warning(
+                    "Cannot delete: no chunks found with this document_id",
+                    document_id=document_id,
+                    sample_document_ids=list(sample_ids)[:10]  # Show first 10 for debugging
+                )
+                return False
+            
+            # Delete by document_id
+            logger.info(
+                "Deleting document by document_id",
+                document_id=document_id,
+                chunks_found=len(test_docs)
+            )
             result = await self.vector_store.adelete_by_filter(
                 filters={"document_id": document_id}
             )
+            logger.info("Delete operation completed", document_id=document_id, result=result)
             
-            deleted_count = result.get("deleted", 0)
-            logger.info(
-                "Document deleted",
-                document_id=document_id,
-                chunks_deleted=deleted_count
+            # Milvus delete operations are asynchronous - wait a bit for flush
+            import asyncio
+            await asyncio.sleep(1.5)  # Increased wait time for Milvus to flush
+            
+            # Verify deletion
+            verify_docs = self.vector_store.list_documents(
+                filters={"document_id": document_id},
+                limit=1
             )
             
+            if verify_docs:
+                logger.warning(
+                    "Delete may have failed: chunks still exist after deletion",
+                    document_id=document_id,
+                    remaining_chunks=len(verify_docs)
+                )
+                return False
+            
+            logger.info("Document deleted successfully", document_id=document_id)
             return True
             
         except Exception as e:
@@ -864,6 +1218,83 @@ class DocumentIndexingService:
                 exc_info=True
             )
             return False
+
+    async def clear_all_documents(self, confirm: bool = False) -> Dict[str, Any]:
+        """
+        Clear all documents from the vector store.
+        
+        WARNING: This will delete ALL indexed documents and cannot be undone!
+        
+        Args:
+            confirm: Must be True to actually perform the deletion
+            
+        Returns:
+            Dict with deletion statistics
+        """
+        if not confirm:
+            return {
+                "success": False,
+                "message": "Deletion not confirmed. Set confirm=True to proceed.",
+                "deleted": 0
+            }
+        
+        logger.warning("Clearing all documents from vector store")
+        
+        try:
+            # Get count before deletion
+            stats_before = await self.get_statistics()
+            total_before = stats_before.get("num_entities", 0)
+            
+            # Delete all documents by using a filter that matches everything
+            # Since Milvus doesn't support delete all directly, we'll delete in batches
+            # by getting all chunks and deleting them
+            
+            deleted_count = 0
+            batch_size = 1000
+            
+            while True:
+                # Get a batch of documents
+                chunks = self.vector_store.list_documents(limit=batch_size)
+                
+                if not chunks:
+                    break
+                
+                # Extract IDs
+                chunk_ids = [chunk.get("id") for chunk in chunks if chunk.get("id")]
+                
+                if chunk_ids:
+                    # Delete by IDs
+                    result = await self.vector_store.adelete(chunk_ids)
+                    deleted_count += len(chunk_ids)
+                    logger.info("Deleted batch", count=len(chunk_ids), total_deleted=deleted_count)
+                
+                # If we got fewer than batch_size, we're done
+                if len(chunks) < batch_size:
+                    break
+            
+            # Wait for deletions to complete
+            import asyncio
+            await asyncio.sleep(2.0)
+            
+            # Verify deletion
+            stats_after = await self.get_statistics()
+            total_after = stats_after.get("num_entities", 0)
+            
+            return {
+                "success": True,
+                "message": f"Cleared {deleted_count} document chunks",
+                "deleted": deleted_count,
+                "total_before": total_before,
+                "total_after": total_after
+            }
+            
+        except Exception as e:
+            logger.error("Failed to clear documents", error=str(e), exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "deleted": 0
+            }
 
     async def list_indexed_documents(
         self,
@@ -923,27 +1354,35 @@ class DocumentIndexingService:
                 else:
                     metadata = raw_metadata or {}
                 
-                # Log first few documents to debug metadata structure
+                # Log first few documents to debug metadata structure (use INFO so it shows up)
                 if i < 3:
-                    logger.debug(
+                    logger.info(
                         "Sample document metadata",
                         index=i,
                         metadata_keys=list(metadata.keys()) if isinstance(metadata, dict) else type(metadata),
                         metadata_preview=str(metadata)[:200] if metadata else None,
-                        doc_keys=list(doc.keys())
+                        doc_keys=list(doc.keys()),
+                        full_doc=str(doc)[:500]
                     )
                 
                 doc_id = metadata.get("document_id")
                 
-                if not doc_id:
-                    skipped_no_id += 1
-                    if skipped_no_id <= 3:  # Only log first few
-                        logger.debug(
-                            "Skipping document without document_id",
-                            metadata_keys=list(metadata.keys()) if isinstance(metadata, dict) else type(metadata),
-                            metadata_preview=str(metadata)[:200] if metadata else None
-                        )
-                    continue
+                # Only use stored document_id - don't generate new ones
+                # All new documents should have document_id stored in chunks
+                if not doc_id or doc_id is None:
+                    # Try alternative field names as fallback
+                    doc_id = metadata.get("doc_id") or metadata.get("id") or metadata.get("source")
+                    
+                    # If still no ID, skip this chunk (shouldn't happen for new documents)
+                    if not doc_id or doc_id is None:
+                        skipped_no_id += 1
+                        if skipped_no_id <= 3:  # Only log first few
+                            logger.warning(
+                                "Skipping chunk without document_id (should not happen for new documents)",
+                                metadata_keys=list(metadata.keys()) if isinstance(metadata, dict) else type(metadata),
+                                metadata_preview=str(metadata)[:200] if metadata else None
+                            )
+                        continue
                 
                 if doc_id not in document_map:
                     document_map[doc_id] = {
@@ -988,17 +1427,50 @@ class DocumentIndexingService:
         Get details about a specific indexed document.
         
         Args:
-            document_id: Unique document identifier
+            document_id: Unique document identifier (may be generated from title)
             
         Returns:
             Dictionary with document details or None if not found
         """
         try:
-            # Get all chunks for this document
-            all_docs = self.vector_store.list_documents(
-                filters={"document_id": document_id},
-                limit=1000  # Get all chunks
-            )
+            # Check if this is a generated document_id (starts with "doc_")
+            # Generated IDs are created from titles when document_id is None in metadata
+            if document_id.startswith("doc_"):
+                # This is a generated ID - need to find the title first
+                # List all documents to find the one with matching generated ID
+                all_docs_list = await self.list_indexed_documents(limit=1000)
+                matching_doc = None
+                for doc in all_docs_list.get("documents", []):
+                    if doc.get("document_id") == document_id:
+                        matching_doc = doc
+                        break
+                
+                if not matching_doc:
+                    logger.warning(
+                        "Cannot get document: document not found in list",
+                        document_id=document_id
+                    )
+                    return None
+                
+                title = matching_doc.get("title")
+                if not title:
+                    logger.warning(
+                        "Cannot get document: document has no title",
+                        document_id=document_id
+                    )
+                    return None
+                
+                # Get all chunks with this title (since actual metadata has document_id: None)
+                all_docs = self.vector_store.list_documents(
+                    filters={"title": title},
+                    limit=1000  # Get all chunks
+                )
+            else:
+                # Normal document_id - get by document_id
+                all_docs = self.vector_store.list_documents(
+                    filters={"document_id": document_id},
+                    limit=1000  # Get all chunks
+                )
             
             if not all_docs:
                 return None
@@ -1029,6 +1501,10 @@ class DocumentIndexingService:
             # Sort chunks by index
             chunks.sort(key=lambda x: x["chunk_index"])
             
+            # If this was a generated ID, use it in the result instead of None
+            if document_id.startswith("doc_"):
+                metadata["document_id"] = document_id
+            
             result = {
                 **metadata,
                 "chunk_count": len(chunks),
@@ -1046,6 +1522,225 @@ class DocumentIndexingService:
                 exc_info=True
             )
             return None
+
+    async def get_document_versions(self, document_id: str) -> Dict[str, Any]:
+        """
+        Get all versions of a document.
+        
+        Finds all documents that share the same contract_id, lease_id, or regulation_id
+        as the given document_id, and returns them sorted by version/date.
+        
+        Args:
+            document_id: Document ID to find versions for
+            
+        Returns:
+            Dictionary containing:
+            - base_document_id: The base identifier (contract_id, lease_id, etc.)
+            - versions: List of version documents sorted by version/date
+            - total_versions: Total number of versions found
+        """
+        try:
+            # First, get the base document to find its contract_id/lease_id/regulation_id
+            base_doc = await self.get_indexed_document(document_id)
+            if not base_doc:
+                logger.warning("Base document not found for versions", document_id=document_id)
+                return {
+                    "base_document_id": document_id,
+                    "versions": [],
+                    "total_versions": 0
+                }
+            
+            # Determine the base identifier (contract_id, lease_id, or regulation_id)
+            base_id = None
+            base_id_type = None
+            
+            if base_doc.get("contract_id"):
+                base_id = base_doc["contract_id"]
+                base_id_type = "contract_id"
+            elif base_doc.get("lease_id"):
+                base_id = base_doc["lease_id"]
+                base_id_type = "lease_id"
+            elif base_doc.get("regulation_id"):
+                base_id = base_doc["regulation_id"]
+                base_id_type = "regulation_id"
+            else:
+                # If no base_id found, return just this document
+                logger.info("No base_id found, returning single document", document_id=document_id)
+                return {
+                    "base_document_id": document_id,
+                    "versions": [{
+                        "document_id": document_id,
+                        "title": base_doc.get("title", "Unknown"),
+                        "version": base_doc.get("version", "1.0"),
+                        "version_date": base_doc.get("version_date"),
+                        "previous_version_id": base_doc.get("previous_version_id"),
+                        "chunk_count": base_doc.get("chunk_count", 0)
+                    }],
+                    "total_versions": 1
+                }
+            
+            # Query all documents and filter in Python (Milvus JSON filtering is unreliable)
+            # Get a large batch of documents to filter
+            all_docs_raw = self.vector_store.list_documents(
+                filters=None,  # Don't filter at Milvus level - JSON filtering doesn't work reliably
+                limit=10000  # Get a large batch
+            )
+            
+            # Filter in Python by base_id
+            all_docs = []
+            for doc in all_docs_raw:
+                chunk_metadata = doc.get("metadata", {})
+                if isinstance(chunk_metadata, str):
+                    try:
+                        import json
+                        chunk_metadata = json.loads(chunk_metadata)
+                    except:
+                        chunk_metadata = {}
+                
+                # Check if this chunk's metadata matches our base_id
+                if chunk_metadata.get(base_id_type) == base_id:
+                    all_docs.append(doc)
+            
+            # Deduplicate by document_id and extract version info
+            version_map = {}
+            for doc in all_docs:
+                chunk_metadata = doc.get("metadata", {})
+                if isinstance(chunk_metadata, str):
+                    try:
+                        import json
+                        chunk_metadata = json.loads(chunk_metadata)
+                    except:
+                        chunk_metadata = {}
+                
+                doc_id = chunk_metadata.get("document_id")
+                if not doc_id:
+                    continue
+                
+                if doc_id not in version_map:
+                    version_map[doc_id] = {
+                        "document_id": doc_id,
+                        "title": chunk_metadata.get("title", "Unknown"),
+                        "version": chunk_metadata.get("version", "1.0"),
+                        "version_date": chunk_metadata.get("version_date"),
+                        "previous_version_id": chunk_metadata.get("previous_version_id"),
+                        "chunk_count": 0
+                    }
+                
+                version_map[doc_id]["chunk_count"] += 1
+            
+            # Sort versions by version_date or version number
+            versions = list(version_map.values())
+            try:
+                # Try to sort by version_date first, then by version string
+                versions.sort(key=lambda v: (
+                    v.get("version_date") or "",
+                    v.get("version") or "0"
+                ))
+            except:
+                # Fallback: sort by version string
+                versions.sort(key=lambda v: v.get("version") or "0")
+            
+            logger.info(
+                "Retrieved document versions",
+                document_id=document_id,
+                base_id=base_id,
+                base_id_type=base_id_type,
+                version_count=len(versions)
+            )
+            
+            return {
+                "base_document_id": base_id,
+                "base_id_type": base_id_type,
+                "versions": versions,
+                "total_versions": len(versions)
+            }
+            
+        except Exception as e:
+            logger.error(
+                "Failed to get document versions",
+                document_id=document_id,
+                error=str(e),
+                exc_info=True
+            )
+            return {
+                "base_document_id": document_id,
+                "versions": [],
+                "total_versions": 0,
+                "error": str(e)
+            }
+
+    async def get_document_obligations(self, document_id: str) -> Dict[str, Any]:
+        """
+        Get obligations for a specific document.
+        
+        Extracts obligations from document metadata that were either:
+        - Manually provided during indexing
+        - Auto-extracted during indexing
+        
+        Args:
+            document_id: Document ID to get obligations for
+            
+        Returns:
+            Dictionary containing:
+            - document_id: The document ID
+            - title: Document title
+            - obligations: List of obligations
+            - total_obligations: Total number of obligations
+        """
+        try:
+            # Get the document
+            doc = await self.get_indexed_document(document_id)
+            if not doc:
+                logger.warning("Document not found for obligations", document_id=document_id)
+                return {
+                    "document_id": document_id,
+                    "title": None,
+                    "obligations": [],
+                    "total_obligations": 0
+                }
+            
+            # Extract obligations from metadata
+            obligations = doc.get("obligations", [])
+            
+            # If obligations is a string, try to parse it
+            if isinstance(obligations, str):
+                try:
+                    import json
+                    obligations = json.loads(obligations)
+                except:
+                    obligations = []
+            
+            # Ensure obligations is a list
+            if not isinstance(obligations, list):
+                obligations = []
+            
+            logger.info(
+                "Retrieved document obligations",
+                document_id=document_id,
+                obligation_count=len(obligations)
+            )
+            
+            return {
+                "document_id": document_id,
+                "title": doc.get("title", "Unknown"),
+                "obligations": obligations,
+                "total_obligations": len(obligations)
+            }
+            
+        except Exception as e:
+            logger.error(
+                "Failed to get document obligations",
+                document_id=document_id,
+                error=str(e),
+                exc_info=True
+            )
+            return {
+                "document_id": document_id,
+                "title": None,
+                "obligations": [],
+                "total_obligations": 0,
+                "error": str(e)
+            }
 
 # Singleton instance
 _document_indexing_service: Optional[DocumentIndexingService] = None

@@ -440,7 +440,27 @@ class MilvusVectorStore:
         if not self._connection.ensure_connection():
             return 0
 
-        return self.collection.num_entities
+        # Query the collection directly to get accurate count
+        # This is more reliable than collection.num_entities which can be stale
+        try:
+            # Query with a high limit to count actual entities
+            results = self.collection.query(
+                expr="id >= 0",  # Query all entities
+                output_fields=["id"],
+                limit=16384  # Milvus max limit
+            )
+            count = len(results)
+            logger.debug(f"Counted {count} entities via query")
+            return count
+        except Exception as e:
+            logger.warning(f"Failed to query count, falling back to num_entities: {e}")
+            # Fallback to num_entities if query fails
+            try:
+                self.collection.flush()
+                self.collection.load()
+            except Exception as load_error:
+                logger.debug(f"Load during count fallback failed (non-critical): {load_error}")
+            return self.collection.num_entities
 
     async def acount_documents(self, filters: Optional[Dict] = None) -> int:
         """Async count"""
@@ -468,11 +488,48 @@ class MilvusVectorStore:
         if not self._connection.ensure_connection():
             raise MilvusConnectionError("Cannot connect to Milvus")
 
-        expr = self._build_filter_expr(filters)
-        if expr:
-            self.collection.delete(expr)
+        # For JSON fields, Milvus delete doesn't support the same filter syntax as query
+        # So we need to query first to get IDs, then delete by IDs
+        try:
+            # Build filter expression for query (this works for queries)
+            expr = self._build_filter_expr(filters) if filters else ""
+            
+            if not expr:
+                logger.warning("No filter expression provided for delete")
+                return {"deleted": 0}
+            
+            # Query to get all matching document IDs
+            results = self.collection.query(
+                expr=expr,
+                output_fields=["id"],
+                limit=16384  # Milvus max limit
+            )
+            
+            if not results:
+                logger.info("No documents found matching filter")
+                return {"deleted": 0}
+            
+            # Extract IDs
+            ids_to_delete = [r.get("id") for r in results if r.get("id") is not None]
+            
+            if not ids_to_delete:
+                logger.warning("No valid IDs found to delete")
+                return {"deleted": 0}
+            
+            # Delete by IDs (this works reliably)
+            # Milvus delete expression: "id in [1, 2, 3, ...]"
+            ids_str = ", ".join(str(id_val) for id_val in ids_to_delete)
+            delete_expr = f"id in [{ids_str}]"
+            
+            self.collection.delete(delete_expr)
             self.collection.flush()
-        return {"deleted": "unknown"}  # Milvus doesn't return count
+            
+            logger.info(f"Deleted {len(ids_to_delete)} documents by IDs")
+            return {"deleted": len(ids_to_delete)}
+                
+        except Exception as e:
+            logger.error(f"Failed to delete by filter: {e}", exc_info=True)
+            raise
 
     async def adelete_by_filter(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """Async delete by filter"""
