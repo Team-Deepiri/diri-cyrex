@@ -185,112 +185,70 @@ class DocumentIndexingService:
             raise
     
     def _parse_pdf(self, file_path: str) -> str:
-        """Parse PDF file"""
-        import sys
-        import os
-        import importlib.util
-        
-        # Ensure site-packages is in the path (add it first for priority)
-        site_packages = '/opt/conda/lib/python3.11/site-packages'
-        if site_packages not in sys.path:
-            sys.path.insert(0, site_packages)
-            logger.debug("Added site-packages to sys.path", site_packages=site_packages)
-        
-        # Try multiple import strategies
+        """Parse PDF file with fallback to PyPDF2 if pdfplumber is not available"""
+        # Try pdfplumber first (preferred)
         pdfplumber = None
-        import_err = None
-        
-        # Strategy 1: Try direct importlib
         try:
-            import importlib
-            if 'pdfplumber' in sys.modules:
-                del sys.modules['pdfplumber']
-            pdfplumber = importlib.import_module('pdfplumber')
-            logger.debug("pdfplumber imported via importlib")
-        except Exception as e:
-            import_err = e
-            logger.debug("importlib import failed, trying spec loader", error=str(e))
-            
-            # Strategy 2: Try using spec loader (more explicit)
+            import pdfplumber
+            logger.debug("pdfplumber available, using for PDF parsing")
+        except ImportError:
+            logger.warning("pdfplumber not available, will try PyPDF2 fallback")
+            pdfplumber = None
+        
+        # If pdfplumber is available, use it
+        if pdfplumber is not None:
             try:
-                spec_path = os.path.join(site_packages, 'pdfplumber', '__init__.py')
-                if os.path.exists(spec_path):
-                    spec = importlib.util.spec_from_file_location("pdfplumber", spec_path)
-                    if spec and spec.loader:
-                        pdfplumber = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(pdfplumber)
-                        logger.debug("pdfplumber imported via spec loader")
-                    else:
-                        raise ImportError("Could not create spec for pdfplumber")
-                else:
-                    raise ImportError(f"pdfplumber __init__.py not found at {spec_path}")
-            except Exception as e2:
-                import_err = e2
-                logger.debug("spec loader import failed", error=str(e2))
+                with pdfplumber.open(file_path) as pdf:
+                    text_parts = []
+                    for page in pdf.pages:
+                        page_text = page.extract_text()
+                        if page_text:  # Only add non-None, non-empty text
+                            text_parts.append(page_text)
+                    text = "\n".join(text_parts)
+                
+                if not text or len(text.strip()) == 0:
+                    logger.warning("PDF extracted but contains no text", file_path=file_path)
+                    return ""
+                
+                logger.info("Extracted text from PDF using pdfplumber", file_path=file_path, length=len(text))
+                return text
+            except Exception as e:
+                logger.warning("pdfplumber parsing failed, trying PyPDF2 fallback", error=str(e))
+                # Fall through to PyPDF2
         
-        # If all strategies failed, log and raise
-        if pdfplumber is None:
-            logger.error(
-                "Failed to import pdfplumber",
-                error_type=type(import_err).__name__ if import_err else 'Unknown',
-                error_message=str(import_err) if import_err else 'All import strategies failed',
-                python_executable=sys.executable,
-                python_version=sys.version,
-                python_path=sys.path,
-                pythonpath_env=os.environ.get('PYTHONPATH', 'not set'),
-                site_packages_exists=os.path.exists(site_packages),
-                pdfplumber_dir_exists=os.path.exists(os.path.join(site_packages, 'pdfplumber')),
-                exc_info=True
-            )
-            raise ImportError(
-                f"pdfplumber not available. Error: {import_err}. "
-                f"Python: {sys.executable}, Path: {sys.path}, PYTHONPATH: {os.environ.get('PYTHONPATH', 'not set')}"
-            ) from import_err
-        
-        logger.debug("pdfplumber imported successfully", 
-                   pdfplumber_version=getattr(pdfplumber, '__version__', 'unknown'),
-                   python_executable=sys.executable)
-        
-        # Now try to parse the PDF
+        # Fallback to PyPDF2
         try:
-            with pdfplumber.open(file_path) as pdf:
+            import PyPDF2
+            logger.info("Using PyPDF2 as fallback for PDF parsing")
+            
+            with open(file_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
                 text_parts = []
-                for page in pdf.pages:
+                
+                for page_num in range(len(pdf_reader.pages)):
+                    page = pdf_reader.pages[page_num]
                     page_text = page.extract_text()
-                    if page_text:  # Only add non-None, non-empty text
+                    if page_text:
                         text_parts.append(page_text)
+                
                 text = "\n".join(text_parts)
-            
-            if not text or len(text.strip()) == 0:
-                logger.warning("PDF extracted but contains no text", file_path=file_path)
-                # Return empty string rather than raising error
-                return ""
-            
-            logger.info("Extracted text from PDF", file_path=file_path, length=len(text))
-            return text
+                
+                if not text or len(text.strip()) == 0:
+                    logger.warning("PDF extracted but contains no text (PyPDF2)", file_path=file_path)
+                    return ""
+                
+                logger.info("Extracted text from PDF using PyPDF2", file_path=file_path, length=len(text))
+                return text
+                
+        except ImportError:
+            error_msg = (
+                "Neither pdfplumber nor PyPDF2 is available. "
+                "Please install one of them: pip install pdfplumber OR pip install PyPDF2"
+            )
+            logger.error(error_msg)
+            raise ImportError(error_msg)
         except Exception as e:
-            # Check if this is actually an ImportError from a dependency
-            error_type = type(e).__name__
-            error_msg = str(e)
-            
-            # Check if the error mentions pdfplumber or a missing module
-            if "pdfplumber" in error_msg.lower() or "no module named" in error_msg.lower():
-                logger.error(
-                    "PDF parsing failed - possible import issue",
-                    error_type=error_type,
-                    error_message=error_msg,
-                    file_path=file_path,
-                    python_executable=sys.executable,
-                    python_path=sys.path,
-                    pythonpath_env=os.environ.get('PYTHONPATH', 'not set'),
-                    exc_info=True
-                )
-                raise ImportError(
-                    f"pdfplumber or its dependency not available: {error_msg}. "
-                    f"Python: {sys.executable}, Path: {sys.path}, PYTHONPATH: {os.environ.get('PYTHONPATH', 'not set')}"
-                ) from e
-            
-            logger.error("Failed to parse PDF", file_path=file_path, error=str(e), exc_info=True)
+            logger.error("Failed to parse PDF with both pdfplumber and PyPDF2", file_path=file_path, error=str(e), exc_info=True)
             raise
     
     def _parse_docx(self, file_path: str) -> str:
@@ -1531,7 +1489,7 @@ class DocumentIndexingService:
         as the given document_id, and returns them sorted by version/date.
         
         Args:
-            document_id: Document ID to find versions for
+            document_id: Document ID to find versions for (can be exact document_id or base contract_id/lease_id/regulation_id)
             
         Returns:
             Dictionary containing:
@@ -1540,44 +1498,102 @@ class DocumentIndexingService:
             - total_versions: Total number of versions found
         """
         try:
-            # First, get the base document to find its contract_id/lease_id/regulation_id
+            # First, try to get the base document by exact document_id match
             base_doc = await self.get_indexed_document(document_id)
-            if not base_doc:
-                logger.warning("Base document not found for versions", document_id=document_id)
-                return {
-                    "base_document_id": document_id,
-                    "versions": [],
-                    "total_versions": 0
-                }
             
-            # Determine the base identifier (contract_id, lease_id, or regulation_id)
+            # If exact match not found, try searching by contract_id/lease_id/regulation_id directly
             base_id = None
             base_id_type = None
             
-            if base_doc.get("contract_id"):
-                base_id = base_doc["contract_id"]
-                base_id_type = "contract_id"
-            elif base_doc.get("lease_id"):
-                base_id = base_doc["lease_id"]
-                base_id_type = "lease_id"
-            elif base_doc.get("regulation_id"):
-                base_id = base_doc["regulation_id"]
-                base_id_type = "regulation_id"
-            else:
-                # If no base_id found, return just this document
-                logger.info("No base_id found, returning single document", document_id=document_id)
-                return {
-                    "base_document_id": document_id,
-                    "versions": [{
-                        "document_id": document_id,
-                        "title": base_doc.get("title", "Unknown"),
-                        "version": base_doc.get("version", "1.0"),
-                        "version_date": base_doc.get("version_date"),
-                        "previous_version_id": base_doc.get("previous_version_id"),
-                        "chunk_count": base_doc.get("chunk_count", 0)
-                    }],
-                    "total_versions": 1
-                }
+            if not base_doc:
+                logger.info(
+                    "Exact document_id not found, trying to find by contract_id/lease_id/regulation_id",
+                    document_id=document_id
+                )
+                
+                # Get all documents and search for one with matching contract_id, lease_id, or regulation_id
+                all_docs_raw = self.vector_store.list_documents(
+                    filters=None,
+                    limit=10000
+                )
+                
+                # Find a document that has this as contract_id, lease_id, or regulation_id
+                found_doc_id = None
+                
+                for doc in all_docs_raw:
+                    chunk_metadata = doc.get("metadata", {})
+                    if isinstance(chunk_metadata, str):
+                        try:
+                            import json
+                            chunk_metadata = json.loads(chunk_metadata)
+                        except:
+                            chunk_metadata = {}
+                    
+                    # Check if this document has the input as contract_id, lease_id, or regulation_id
+                    if chunk_metadata.get("contract_id") == document_id:
+                        base_id_type = "contract_id"
+                        base_id = document_id
+                        found_doc_id = chunk_metadata.get("document_id")
+                        if found_doc_id:
+                            break
+                    elif chunk_metadata.get("lease_id") == document_id:
+                        base_id_type = "lease_id"
+                        base_id = document_id
+                        found_doc_id = chunk_metadata.get("document_id")
+                        if found_doc_id:
+                            break
+                    elif chunk_metadata.get("regulation_id") == document_id:
+                        base_id_type = "regulation_id"
+                        base_id = document_id
+                        found_doc_id = chunk_metadata.get("document_id")
+                        if found_doc_id:
+                            break
+                
+                # If found, get the full document to use as base_doc
+                if found_doc_id:
+                    base_doc = await self.get_indexed_document(found_doc_id)
+                    if base_doc:
+                        # Ensure base_doc has the correct base_id
+                        base_doc[base_id_type] = base_id
+                
+                # If still not found, return empty
+                if not base_doc:
+                    logger.warning(
+                        "Base document not found for versions (tried document_id and contract_id/lease_id/regulation_id)",
+                        document_id=document_id
+                    )
+                    return {
+                        "base_document_id": document_id,
+                        "versions": [],
+                        "total_versions": 0
+                    }
+            
+            # Determine the base identifier (contract_id, lease_id, or regulation_id)
+            if not base_id_type:
+                if base_doc.get("contract_id"):
+                    base_id = base_doc["contract_id"]
+                    base_id_type = "contract_id"
+                elif base_doc.get("lease_id"):
+                    base_id = base_doc["lease_id"]
+                    base_id_type = "lease_id"
+                elif base_doc.get("regulation_id"):
+                    base_id = base_doc["regulation_id"]
+                    base_id_type = "regulation_id"
+                else:
+                    # If no base_id found, return just this document
+                    logger.info("No base_id found, returning single document", document_id=document_id)
+                    return {
+                        "base_document_id": document_id,
+                        "versions": [{
+                            "document_id": document_id,
+                            "title": base_doc.get("title", "Unknown"),
+                            "version": base_doc.get("version", "1.0"),
+                            "version_date": base_doc.get("version_date"),
+                            "previous_version_id": base_doc.get("previous_version_id"),
+                            "chunk_count": base_doc.get("chunk_count", 0)
+                        }],
+                        "total_versions": 1
+                    }
             
             # Query all documents and filter in Python (Milvus JSON filtering is unreliable)
             # Get a large batch of documents to filter

@@ -68,15 +68,40 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - default
-    # Install pdfplumber if missing, then start server
+    # Verify PDF parsers are available, then start server
+    # Note: Packages should be installed during Docker build (as root)
+    # Runtime installation as non-root user (appuser) will fail due to permissions
     command:
       - /bin/bash
       - -c
       - |
-        if ! /opt/conda/bin/python -c "import pdfplumber" 2>/dev/null; then
-          echo "Installing pdfplumber..."
-          /opt/conda/bin/pip install --quiet --no-cache-dir pdfplumber>=0.10.0 python-docx>=1.1.0 pdfminer.six 2>&1 | grep -v "WARNING: Running pip as" || true
+        echo "Checking PDF parsing dependencies..."
+        HAS_PDFPLUMBER=false
+        HAS_PYPDF2=false
+        
+        if /opt/conda/bin/python -c "import pdfplumber" 2>/dev/null; then
+          HAS_PDFPLUMBER=true
+          echo "✓ pdfplumber is available"
+        else
+          echo "⚠ pdfplumber not available"
         fi
+        
+        if /opt/conda/bin/python -c "import PyPDF2" 2>/dev/null; then
+          HAS_PYPDF2=true
+          echo "✓ PyPDF2 is available"
+        else
+          echo "⚠ PyPDF2 not available"
+        fi
+        
+        if [ "$HAS_PDFPLUMBER" = "false" ] && [ "$HAS_PYPDF2" = "false" ]; then
+          echo "ERROR: Neither pdfplumber nor PyPDF2 is installed!" >&2
+          echo "Please rebuild the Docker image to install these packages:" >&2
+          echo "  docker-compose build backend" >&2
+          echo "Or ensure pdfplumber>=0.10.0 and PyPDF2>=3.0.0 are in requirements.txt" >&2
+          exit 1
+        fi
+        
+        echo "Starting server..."
         exec /usr/local/bin/docker-entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

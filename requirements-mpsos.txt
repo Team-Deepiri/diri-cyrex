@@ -97,7 +97,8 @@ llama-cpp-python>=0.2.0  # llama.cpp bindings (optional, for direct model loadin
 # For local development: pip install -e ../deepiri-modelkit
 
 # Document Processing
-pdfplumber>=0.10.0  # PDF text extraction
+pdfplumber>=0.10.0  # PDF text extraction (preferred)
+PyPDF2>=3.0.0  # PDF text extraction (fallback)
 python-docx>=1.1.0  # DOCX text extraction
 pytesseract>=0.3.10  # OCR for images (requires Tesseract binary)
 Pillow>=10.0.0  # Image processing
