@@ -62,6 +62,11 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   const [showToolCallsModal, setShowToolCallsModal] = useState(false);
   const [selectedAgentForToolCalls, setSelectedAgentForToolCalls] = useState<AgentChat | null>(null);
   const [toolCallsData, setToolCallsData] = useState<any[]>([]);
+  const [showGroupChatDialog, setShowGroupChatDialog] = useState(false);
+  const [newGroupChatName, setNewGroupChatName] = useState('');
+  const [selectedAgentsForGroup, setSelectedAgentsForGroup] = useState<string[]>([]);
+  const [groupChatAgentTypes, setGroupChatAgentTypes] = useState<string[]>(['conversational', 'conversational']);
+  const [agentNames, setAgentNames] = useState<string[]>(['Agent 1', 'Agent 2']);
 
   // Fetch agent chats
   useEffect(() => {
@@ -167,6 +172,84 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     setSelectedChat(null);
     setActiveView('group-chat');
     setMessages([]);
+  };
+
+  const createGroupChat = async () => {
+    if (!newGroupChatName.trim()) {
+      alert('Please enter a group chat name');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      let agentInstanceIds: string[] = [];
+
+      // If we have existing agents selected, use them
+      if (selectedAgentsForGroup.length >= 2) {
+        agentInstanceIds = selectedAgentsForGroup;
+      } else {
+        // Initialize new agents automatically
+        const agentsToCreate = groupChatAgentTypes.map((agentType, index) => ({
+          name: `${newGroupChatName} - ${agentNames[index] || `Agent ${index + 1}`}`,
+          agent_type: agentType || 'conversational',
+          model: selectedModel,
+          temperature: 0.7,
+          max_tokens: 2000,
+          tools: [],
+        }));
+
+        // Initialize multiple agents
+        const initResponse = await fetch(`${API_BASE}/api/agent/initialize-multiple`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agents: agentsToCreate }),
+        });
+
+        if (!initResponse.ok) {
+          throw new Error('Failed to initialize agents');
+        }
+
+        const initData = await initResponse.json();
+        agentInstanceIds = initData.instances.map((inst: any) => inst.instance_id);
+      }
+
+      // Create group chat
+      const response = await fetch(`${API_BASE}/api/agent/group-chat/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newGroupChatName,
+          agent_instance_ids: agentInstanceIds,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Refresh lists
+        await fetchGroupChats();
+        await fetchAgentChats();
+        // Close dialog and open the new group chat
+        setShowGroupChatDialog(false);
+        setNewGroupChatName('');
+        setSelectedAgentsForGroup([]);
+        setGroupChatAgentTypes(['conversational', 'conversational']);
+        setAgentNames(['Agent 1', 'Agent 2']);
+        const newGroupChat: GroupChat = {
+          groupChatId: data.group_chat_id,
+          name: data.name,
+          agentCount: data.agent_count,
+        };
+        await openGroupChat(newGroupChat);
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to create group chat: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to create group chat:', error);
+      alert('Failed to create group chat. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const createAgent = async () => {
@@ -562,12 +645,8 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
                 <FaPlus /> New Agent
               </button>
               <button className="btn-secondary btn-small" onClick={() => {
-                // Create group chat
-                const name = prompt('Enter group chat name:');
-                if (name) {
-                  // This would open a dialog to select agents
-                  alert('Group chat creation - select agents from playground');
-                }
+                setShowGroupChatDialog(true);
+                fetchAgentChats(); // Refresh to get latest agents
               }}>
                 <FaUsers /> New Group
               </button>
@@ -646,6 +725,204 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
                       disabled={isLoading || !newAgentName.trim()}
                     >
                       {isLoading ? 'Creating...' : 'Create Agent'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showGroupChatDialog && (
+              <div className="modal-overlay" onClick={() => {
+                setShowGroupChatDialog(false);
+                setNewGroupChatName('');
+                setSelectedAgentsForGroup([]);
+              }}>
+                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3><FaUsers /> Create Group Chat</h3>
+                    <button className="btn-icon" onClick={() => {
+                      setShowGroupChatDialog(false);
+                      setNewGroupChatName('');
+                      setSelectedAgentsForGroup([]);
+                      setGroupChatAgentTypes(['conversational', 'conversational']);
+                      setAgentNames(['Agent 1', 'Agent 2']);
+                    }}>
+                      <FaTimes />
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="form-group">
+                      <label>Group Chat Name</label>
+                      <input
+                        type="text"
+                        value={newGroupChatName}
+                        onChange={(e) => setNewGroupChatName(e.target.value)}
+                        placeholder="Enter group chat name..."
+                        className="form-input"
+                      />
+                    </div>
+                    
+                    {agentChats.length >= 2 ? (
+                      <div className="form-group">
+                        <label>Select Existing Agents (or leave empty to create new ones)</label>
+                        <div className="agents-selection" style={{
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '8px',
+                          padding: '8px',
+                          marginTop: '8px',
+                        }}>
+                          {agentChats.map(chat => (
+                            <label
+                              key={chat.instanceId}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                padding: '8px',
+                                cursor: 'pointer',
+                                borderRadius: '4px',
+                                marginBottom: '4px',
+                                background: selectedAgentsForGroup.includes(chat.instanceId)
+                                  ? 'rgba(255, 184, 77, 0.2)'
+                                  : 'transparent',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedAgentsForGroup.includes(chat.instanceId)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedAgentsForGroup([...selectedAgentsForGroup, chat.instanceId]);
+                                  } else {
+                                    setSelectedAgentsForGroup(
+                                      selectedAgentsForGroup.filter(id => id !== chat.instanceId)
+                                    );
+                                  }
+                                }}
+                                style={{ marginRight: '8px' }}
+                              />
+                              <FaRobot style={{ marginRight: '8px', color: '#FFB84D' }} />
+                              <span>{chat.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {selectedAgentsForGroup.length > 0 && (
+                          <p className="form-help" style={{ marginTop: '8px' }}>
+                            {selectedAgentsForGroup.length} agent(s) selected
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="form-group">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <label>Agent Types (will be initialized automatically)</label>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn-secondary btn-small"
+                              onClick={() => {
+                                setGroupChatAgentTypes([...groupChatAgentTypes, 'conversational']);
+                                setAgentNames([...agentNames, `Agent ${groupChatAgentTypes.length + 1}`]);
+                              }}
+                              title="Add agent"
+                              style={{ padding: '6px 12px', fontSize: '0.9rem' }}
+                            >
+                              <FaPlus /> Add Agent
+                            </button>
+                            {groupChatAgentTypes.length > 2 && (
+                              <button
+                                type="button"
+                                className="btn-secondary btn-small"
+                                onClick={() => {
+                                  setGroupChatAgentTypes(groupChatAgentTypes.slice(0, -1));
+                                  setAgentNames(agentNames.slice(0, -1));
+                                }}
+                                title="Remove agent"
+                                style={{ padding: '6px 12px', fontSize: '0.9rem', background: 'rgba(239, 68, 68, 0.2)' }}
+                              >
+                                <FaTimes /> Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto', padding: '8px' }}>
+                          {groupChatAgentTypes.map((agentType, index) => (
+                            <div 
+                              key={index} 
+                              style={{ 
+                                display: 'grid', 
+                                gridTemplateColumns: '1fr 2fr', 
+                                gap: '12px', 
+                                padding: '12px',
+                                background: 'rgba(255, 184, 77, 0.1)',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(255, 184, 77, 0.2)',
+                              }}
+                            >
+                              <div>
+                                <label style={{ fontSize: '0.85rem', marginBottom: '4px', display: 'block', color: '#FFB84D' }}>
+                                  Agent {index + 1} Name
+                                </label>
+                                <input
+                                  type="text"
+                                  value={agentNames[index] || `Agent ${index + 1}`}
+                                  onChange={(e) => {
+                                    const newNames = [...agentNames];
+                                    newNames[index] = e.target.value;
+                                    setAgentNames(newNames);
+                                  }}
+                                  className="form-input"
+                                  placeholder={`Agent ${index + 1}`}
+                                  style={{ fontSize: '0.85rem', padding: '6px' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: '0.85rem', marginBottom: '4px', display: 'block', color: '#FFB84D' }}>
+                                  Type
+                                </label>
+                                <select
+                                  value={agentType || 'conversational'}
+                                  onChange={(e) => {
+                                    const newTypes = [...groupChatAgentTypes];
+                                    newTypes[index] = e.target.value;
+                                    setGroupChatAgentTypes(newTypes);
+                                  }}
+                                  className="form-select"
+                                  style={{ fontSize: '0.85rem', padding: '6px' }}
+                                >
+                                  {agentTypes.map(type => (
+                                    <option key={type.id} value={type.id}>
+                                      {type.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="form-help" style={{ marginTop: '8px' }}>
+                          {groupChatAgentTypes.length} agent(s) will be automatically created for this group chat
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button className="btn-secondary" onClick={() => {
+                      setShowGroupChatDialog(false);
+                      setNewGroupChatName('');
+                      setSelectedAgentsForGroup([]);
+                      setGroupChatAgentTypes(['conversational', 'conversational']);
+                      setAgentNames(['Agent 1', 'Agent 2']);
+                    }}>
+                      Cancel
+                    </button>
+                    <button 
+                      className="btn-primary" 
+                      onClick={createGroupChat}
+                      disabled={isLoading || !newGroupChatName.trim()}
+                    >
+                      {isLoading ? 'Creating...' : 'Create Group Chat'}
                     </button>
                   </div>
                 </div>

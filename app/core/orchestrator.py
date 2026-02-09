@@ -5,6 +5,7 @@ Integrates LangChain, local LLMs, RAG, tools, and state management
 """
 from typing import Dict, List, Optional, Any, Iterator, Union
 import json
+import time
 from datetime import datetime
 from ..logging_config import get_logger
 
@@ -18,6 +19,7 @@ try:
     from langchain_core.output_parsers import JsonOutputParser, StrOutputParser
     from langchain_core.runnables import RunnablePassthrough, RunnableLambda
     from langchain_core.runnables.utils import Input, Output
+    from langchain_core.exceptions import OutputParserException
     HAS_LANGCHAIN = True
 except ImportError as e:
     logger.warning(f"LangChain core not available: {e}")
@@ -29,6 +31,7 @@ except ImportError as e:
     RunnableLambda = None
     Input = None
     Output = None
+    OutputParserException = Exception  # Fallback
 
 # Agent imports with graceful fallbacks (LangChain 0.2.x compatible)
 try:
@@ -55,18 +58,32 @@ try:
                 pass
     
     # Try to import agent creation functions
+    # In LangChain 1.x, create_react_agent is in langchain_classic.agents.react.agent
     try:
-        from langchain.agents import create_openai_functions_agent, create_react_agent
+        from langchain_classic.agents.react.agent import create_react_agent
+        logger.info("Successfully imported create_react_agent from langchain_classic.agents.react.agent")
     except ImportError:
-        # Try alternative paths
         try:
-            from langchain.agents.openai_functions import create_openai_functions_agent
+            from langchain_experimental.agents import create_react_agent
+            logger.info("Successfully imported create_react_agent from langchain_experimental.agents")
         except ImportError:
-            pass
-        try:
-            from langchain.agents.react import create_react_agent
-        except ImportError:
-            pass
+            try:
+                from langchain.agents import create_openai_functions_agent, create_react_agent
+                logger.info("Successfully imported create_react_agent from langchain.agents")
+            except ImportError as e:
+                logger.debug(f"Failed to import from langchain.agents: {e}")
+                # Try alternative paths
+                try:
+                    from langchain.agents.openai_functions import create_openai_functions_agent
+                    logger.debug("Successfully imported create_openai_functions_agent from langchain.agents.openai_functions")
+                except ImportError as e2:
+                    logger.debug(f"Failed to import from langchain.agents.openai_functions: {e2}")
+                try:
+                    from langchain.agents.react import create_react_agent
+                    logger.info("Successfully imported create_react_agent from langchain.agents.react")
+                except ImportError as e3:
+                    logger.warning(f"Failed to import create_react_agent from all locations: {e3}")
+                    logger.warning("Install langchain-experimental: pip install langchain-experimental")
     
     # Check if we have at least AgentExecutor
     if AgentExecutor is not None:
@@ -395,6 +412,7 @@ If a tool fails, explain what happened and suggest alternatives."""),
             if create_react_agent:
                 try:
                     # Try to pull ReAct prompt from hub with timeout, fallback to default
+                    # NOTE: For langchain_classic, we should use the default prompt from the hub if available
                     react_prompt = None
                     if HAS_HUB and hub:
                         # Use thread-based timeout to prevent hanging on network requests
@@ -419,46 +437,27 @@ If a tool fails, explain what happened and suggest alternatives."""),
                             react_prompt = None
                         elif not result_queue.empty():
                             react_prompt = result_queue.get()
+                            if react_prompt:
+                                self.logger.info("Using ReAct prompt from LangChain Hub - this should handle agent_scratchpad correctly")
                     
+                    # If we still don't have a prompt, try to use custom prompts from prompts folder
                     if not react_prompt:
-                        # Fallback prompt - use this by default to avoid network calls
-                        # Enhanced prompt for better tool usage with local LLMs
-                        # This prompt will be enhanced with system instructions if provided
-                        react_prompt = ChatPromptTemplate.from_messages([
-                            ("system", """You are a helpful AI assistant with access to tools. You MUST use tools when asked to perform actions.
-
-CRITICAL RULES:
-1. When the user asks you to edit, set, update, write, or change spreadsheet cells, you MUST use the spreadsheet_set_cell tool
-2. NEVER claim you did something unless you actually called the tool and got a result
-3. ALWAYS follow the Thought/Action/Action Input/Observation format below
-4. If you don't use a tool when asked to perform an action, you have FAILED
-
-Available tools: {tool_names}
-
-Use the following format EXACTLY:
-
-Question: the input question you must answer
-Thought: you should always think about what to do. If the user wants to edit cells, you MUST use the spreadsheet_set_cell tool.
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action (as a JSON string with the required parameters)
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer
-Final Answer: the final answer to the original input question
-
-Example for editing cells:
-Question: Edit J7 to 1.3
-Thought: The user wants me to edit cell J7 to have the value "1.3". I MUST use the spreadsheet_set_cell tool.
-Action: spreadsheet_set_cell
-Action Input: {{"cell_id": "J7", "value": "1.3"}}
-Observation: {{"success": true, "cell_id": "J7", "value": "1.3"}}
-Thought: I successfully set cell J7 to 1.3 using the tool.
-Final Answer: I've successfully set cell J7 to 1.3."""),
-                            ("human", "{input}"),
-                            MessagesPlaceholder(variable_name="agent_scratchpad"),
-                        ])
+                        # Try to use vendor fraud prompt if available, otherwise use default
+                        # Import ReAct prompt from prompts folder
+                        from app.agents.prompts import REACT_AGENT_SYSTEM_PROMPT
+                        from langchain_core.prompts import PromptTemplate
+                        
+                        # Use PromptTemplate instead of ChatPromptTemplate to reduce overhead
+                        # The delay is caused by ChatPromptTemplate processing multiple messages
+                        react_prompt = PromptTemplate.from_template(
+                            REACT_AGENT_SYSTEM_PROMPT + "\n\n{agent_scratchpad}\n\nQuestion: {input}"
+                        )
+                        self.logger.info("Using ReAct agent system prompt (optimized with PromptTemplate)")
                     
+                    # Create ReAct agent
+                    self.logger.info(f"Creating ReAct agent with {len(tools)} tools: {[t.name for t in tools]}")
                     agent = create_react_agent(llm, tools, react_prompt)
+                    self.logger.info("ReAct agent created successfully")
                     
                     # Custom error handler for parsing errors (helps with models that don't follow format perfectly)
                     def handle_parsing_error(error: Exception) -> str:
@@ -471,13 +470,14 @@ Final Answer: I've successfully set cell J7 to 1.3."""),
                     executor = AgentExecutor(
                         agent=agent,
                         tools=tools,
-                        verbose=self.logger.level <= 10,
-                        max_iterations=10,
+                        verbose=False,  # Disable verbose to reduce overhead
+                        max_iterations=10,  # Increased to 10 to allow multi-step tool usage
                         handle_parsing_errors=handle_parsing_error,  # Use custom handler
+                        max_execution_time=30.0,  # Reduced to 30s to fail faster if hanging
                         return_intermediate_steps=True,
                     )
                     
-                    self.logger.info(f"Created ReAct agent with {len(tools)} tools")
+                    self.logger.info(f"✅ Created ReAct agent executor with {len(tools)} tools")
                     return executor
                     
                 except ImportError as e:
@@ -487,7 +487,13 @@ Final Answer: I've successfully set cell J7 to 1.3."""),
                     self.logger.error(f"ReAct agent creation error: {e}", exc_info=True)
                     return None
             else:
-                self.logger.warning("ReAct agent creation not available")
+                if not HAS_AGENTS:
+                    self.logger.error("LangChain agents not available - AgentExecutor import failed")
+                if create_react_agent is None:
+                    self.logger.error("create_react_agent is None - import failed. Check LangChain installation.")
+                    self.logger.error("Try: pip install langchain langchain-community")
+                else:
+                    self.logger.warning("ReAct agent creation not available (unknown reason)")
                 return None
                 
         except Exception as e:
@@ -504,6 +510,7 @@ Final Answer: I've successfully set cell J7 to 1.3."""),
         use_langgraph: bool = False,
         max_tokens: Optional[int] = None,
         system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -517,6 +524,8 @@ Final Answer: I've successfully set cell J7 to 1.3."""),
             use_tools: Whether to allow tool usage
             use_langgraph: Whether to use LangGraph multi-agent workflow
             max_tokens: Maximum tokens to generate
+            system_prompt: Optional system prompt to prepend
+            model: Optional model name to use (overrides default)
             **kwargs: Additional parameters
         
         Returns:
@@ -524,6 +533,16 @@ Final Answer: I've successfully set cell J7 to 1.3."""),
         """
         start_time = datetime.now()
         request_id = workflow_id or f"req_{datetime.now().timestamp()}"
+        
+        # Temporarily switch model if specified
+        original_model = None
+        if model and self.llm_provider and hasattr(self.llm_provider, 'config'):
+            original_model = self.llm_provider.config.model_name
+            self.llm_provider.config.model_name = model
+            # Re-initialize LLM with new model
+            if hasattr(self.llm_provider, '_initialize_llm'):
+                self.llm_provider._initialize_llm()
+            self.logger.info(f"Switched model from {original_model} to {model} for this request")
         
         try:
             # Safety check
@@ -616,35 +635,130 @@ Final Answer: I've successfully set cell J7 to 1.3."""),
                 )
             
             # Generate response - use agent executor if tools are requested
+            agent_intermediate_steps = []  # Initialize to empty list
             if use_tools and self.agent_executor:
                 try:
                     # Use agent executor for tool-using requests
                     self.logger.info(f"Using agent executor with tools for request")
                     
-                    # Prepare input for agent (include context and system prompt if available)
-                    # For ReAct agents, we need to be very explicit about tool usage
+                    # Prepare input for agent (keep it SIMPLE to reduce overhead)
+                    # The system prompt is already in the ReAct prompt template, no need to repeat it here
                     input_text = user_input
-                    if system_prompt:
-                        # Prepend system prompt with strong tool usage reminder
-                        input_text = f"""IMPORTANT SYSTEM INSTRUCTIONS:
-{system_prompt}
-
-CRITICAL: When asked to perform actions (like editing spreadsheets), you MUST use the appropriate tools. Follow the Thought/Action/Action Input/Observation format.
-
-User Request: {user_input}
-
-Remember: You MUST use tools to perform actions. Do not just describe what you would do - actually call the tools."""
-                    elif context:
-                        input_text = f"Context:\n{context}\n\nQuestion: {user_input}\n\nAnswer:"
+                    if context and not system_prompt:
+                        # Only add context if there's no system prompt (to keep input short)
+                        input_text = f"Context:\n{context}\n\nQuestion: {user_input}"
                     
+                    # Agent input - AgentExecutor will handle agent_scratchpad internally
+                    # Passing it explicitly causes expensive processing overhead
                     agent_input = {
                         "input": input_text
+                        # Note: agent_scratchpad removed - let AgentExecutor handle it to avoid 35s delay
                     }
                     
                     self.logger.info(f"Agent input prepared with system_prompt={system_prompt is not None}, context={context is not None}")
+                    self.logger.debug(f"Agent input: {agent_input}, keys: {list(agent_input.keys())}, agent_scratchpad type: {type(agent_input.get('agent_scratchpad'))}")
                     
                     # Execute agent (using ainvoke instead of deprecated arun)
-                    result = await self.agent_executor.ainvoke(agent_input)
+                    # Set a timeout to prevent hanging
+                    import asyncio
+                    from datetime import datetime as dt
+                    
+                    invoke_start = dt.now()
+                    self.logger.info(f"⏱️ Starting agent_executor.ainvoke at {invoke_start.strftime('%H:%M:%S.%f')}")
+                    
+                    # Log input size for diagnostics
+                    input_str = str(agent_input.get('input', ''))
+                    tool_count = len(self.agent_executor.tools) if hasattr(self.agent_executor, 'tools') else 0
+                    self.logger.info(f"⏱️ Input length: {len(input_str)} chars, Tools available: {tool_count}")
+                    
+                    # Add detailed timing to find bottleneck
+                    t0 = time.time()
+                    self.logger.info(f"⏱️ [t+0.00s] About to call agent_executor.ainvoke")
+                    
+                    try:
+                        # Wrap the agent executor call to log when it actually starts processing
+                        self.logger.info(f"⏱️ [t+{time.time()-t0:.2f}s] Entering agent_executor.ainvoke")
+                        result = await asyncio.wait_for(
+                            self.agent_executor.ainvoke(agent_input),
+                            timeout=60.0  # Allow time for model loading (13s) + generation
+                        )
+                        self.logger.info(f"⏱️ [t+{time.time()-t0:.2f}s] agent_executor.ainvoke returned")
+                        
+                        invoke_end = dt.now()
+                        invoke_duration = (invoke_end - invoke_start).total_seconds()
+                        self.logger.info(f"⏱️ agent_executor.ainvoke completed in {invoke_duration:.2f}s")
+                    except asyncio.TimeoutError:
+                        self.logger.error("Agent executor timed out after 60 seconds - model may not be following ReAct format or executor is hanging")
+                        # Fallback to direct LLM call
+                        self.logger.warning("Falling back to direct LLM call without agent executor")
+                        response = await self.llm_provider.ainvoke(input_text)
+                        return {
+                            "success": True,
+                            "response": response,
+                            "request_id": request_id,
+                            "metadata": {
+                                "method": "direct_llm_fallback",
+                                "reason": "agent_executor_timeout"
+                            }
+                        }
+                    except OutputParserException as e:
+                        self.logger.error(f"Agent output parsing failed: {e}")
+                        self.logger.error(f"Raw model output: {e.llm_output if hasattr(e, 'llm_output') else 'N/A'}")
+                        # Try to extract any usable response
+                        error_msg = str(e)
+                        if "Final Answer:" in error_msg:
+                            # Extract the final answer from the error
+                            try:
+                                answer = error_msg.split("Final Answer:")[-1].strip()
+                                self.logger.info(f"Extracted answer from parsing error: {answer}")
+                                return {
+                                    "success": True,
+                                    "response": answer,
+                                    "request_id": request_id,
+                                    "metadata": {
+                                        "method": "extracted_from_error",
+                                        "parsing_error": str(e)
+                                    }
+                                }
+                            except:
+                                pass
+                        # Fallback to direct LLM
+                        self.logger.warning("Falling back to direct LLM call due to parsing error")
+                        response = await self.llm_provider.ainvoke(input_text)
+                        return {
+                            "success": True,
+                            "response": response,
+                            "request_id": request_id,
+                            "metadata": {
+                                "method": "direct_llm_fallback",
+                                "reason": "parsing_error",
+                                "error": str(e)
+                            }
+                        }
+                    except ValueError as e:
+                        if "agent_scratchpad" in str(e):
+                            self.logger.error(f"Agent executor agent_scratchpad error: {e}")
+                            self.logger.error(f"Agent input was: {agent_input}")
+                            # The AgentExecutor from langchain_classic has a bug where it converts agent_scratchpad to string
+                            # Try to work around it by not passing agent_scratchpad at all and letting it handle it
+                            self.logger.warning("Retrying without agent_scratchpad in input - letting AgentExecutor handle it internally")
+                            agent_input_no_scratchpad = {"input": input_text}
+                            try:
+                                result = await self.agent_executor.ainvoke(agent_input_no_scratchpad)
+                            except Exception as e2:
+                                self.logger.error(f"Retry also failed: {e2}")
+                                raise ValueError(f"Agent executor agent_scratchpad format error. This is a known compatibility issue with langchain_classic. Error: {e}")
+                        else:
+                            raise
+                    
+                    # Log raw agent result for debugging
+                    self.logger.info(f"Agent executor returned: {type(result)} with keys: {result.keys() if isinstance(result, dict) else 'N/A'}")
+                    if isinstance(result, dict):
+                        self.logger.debug(f"Agent output: {result.get('output', 'NO OUTPUT KEY')}")
+                        # Log ALL keys to see what we're getting
+                        self.logger.debug(f"Full result keys: {list(result.keys())}")
+                        if "intermediate_steps" in result:
+                            self.logger.info(f"Found intermediate_steps in result: {len(result['intermediate_steps'])} steps")
                     
                     # Extract response from agent result
                     if isinstance(result, dict):
@@ -657,8 +771,12 @@ Remember: You MUST use tools to perform actions. Do not just describe what you w
                     else:
                         response = str(result)
                     
-                    # Log tool usage
+                    # Extract intermediate_steps - CRITICAL for tool call tracking
                     intermediate_steps = result.get("intermediate_steps", []) if isinstance(result, dict) else []
+                    # Update agent_intermediate_steps for return value
+                    agent_intermediate_steps = intermediate_steps
+                    
+                    # Log tool usage
                     tool_calls = len(intermediate_steps)
                     if tool_calls > 0:
                         self.logger.info(f"Agent executor completed with {tool_calls} tool calls")
@@ -752,15 +870,24 @@ Remember: You MUST use tools to perform actions. Do not just describe what you w
                 # Get model version (default to "latest" if not available)
                 model_version = getattr(self.llm_provider, 'version', 'latest') if self.llm_provider else 'latest'
                 
-                await self._event_publisher.publish_inference(
-                    model_name=model_name,
-                    version=model_version,
-                    latency_ms=duration_ms,
-                    user_id=user_id,
-                    request_id=request_id,
-                    tokens_used=len(response.split()),
-                    confidence=output_safety.score if hasattr(output_safety, 'score') else None
-                )
+                # Create InferenceEvent and publish it
+                try:
+                    from deepiri_modelkit.contracts.events import InferenceEvent
+                    inference_event = InferenceEvent(
+                        event="inference-complete",
+                        source="cyrex",
+                        model_name=model_name or "unknown",
+                        version=model_version or "latest",
+                        user_id=user_id or "anonymous",
+                        request_id=request_id or "unknown",
+                        latency_ms=duration_ms or 0,
+                        tokens_used=len(response.split()) if response else 0,
+                        cost=0.0,  # Cost not available for local models - use 0.0 instead of None
+                        confidence=output_safety.score if hasattr(output_safety, 'score') and output_safety.score is not None else 1.0
+                    )
+                    await self._event_publisher.publish_inference_event(inference_event)
+                except Exception as e:
+                    self.logger.warning(f"Failed to publish inference event: {e}", exc_info=True)
             except Exception as e:
                 self.logger.warning(f"Failed to publish inference event: {e}", exc_info=True)
             
@@ -770,6 +897,7 @@ Remember: You MUST use tools to perform actions. Do not just describe what you w
                 "request_id": request_id,
                 "context_sources": len(context_docs),
                 "duration_ms": duration_ms,
+                "intermediate_steps": agent_intermediate_steps,  # Include tool call steps
                 "safety_checks": {
                     "input_score": safety_result.score,
                     "output_score": output_safety.score,
@@ -785,6 +913,13 @@ Remember: You MUST use tools to perform actions. Do not just describe what you w
                 "error": str(e),
                 "request_id": request_id,
             }
+        finally:
+            # Restore original model if it was changed
+            if original_model and self.llm_provider and hasattr(self.llm_provider, 'config'):
+                self.llm_provider.config.model_name = original_model
+                if hasattr(self.llm_provider, '_initialize_llm'):
+                    self.llm_provider._initialize_llm()
+                self.logger.info(f"Restored model to {original_model}")
     
     async def execute_workflow(
         self,

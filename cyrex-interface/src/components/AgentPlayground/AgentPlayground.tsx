@@ -38,6 +38,75 @@ import {
 import { LiveSpreadsheet, LiveSpreadsheetRef } from './LiveSpreadsheet';
 import './AgentPlayground.css';
 
+// Existing Sessions Component
+function ExistingSessionsList({ onSelectSession }: { onSelectSession: (instanceId: string) => void }) {
+  const [sessions, setSessions] = useState<Array<{ instance_id: string; name: string; status: string; started_at: string }>>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    const API_BASE = import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
+    fetch(`${API_BASE}/api/agent/instances`)
+      .then(res => res.json())
+      .then(data => {
+        setSessions(data);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error('Failed to fetch sessions:', err);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) {
+    return <div style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8' }}>Loading sessions...</div>;
+  }
+
+  if (sessions.length === 0) {
+    return (
+      <div style={{ padding: '1rem', textAlign: 'center', color: '#94a3b8' }}>
+        <FaMemory size={24} style={{ marginBottom: '0.5rem', opacity: 0.5 }} />
+        <p>No existing sessions. Create a new agent session below.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: '8px', maxHeight: '200px', overflowY: 'auto' }}>
+      {sessions.map(session => (
+        <div
+          key={session.instance_id}
+          onClick={() => onSelectSession(session.instance_id)}
+          style={{
+            padding: '10px',
+            background: 'rgba(255, 184, 77, 0.1)',
+            border: '1px solid rgba(255, 184, 77, 0.3)',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'rgba(255, 184, 77, 0.2)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'rgba(255, 184, 77, 0.1)';
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <div style={{ fontWeight: '600', color: '#FFB84D' }}>{session.name}</div>
+              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>
+                {session.instance_id.slice(0, 8)}... • {session.status}
+              </div>
+            </div>
+            <FaPlay size={14} style={{ color: '#FFB84D' }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // Types
 interface AgentConfig {
   agentId: string;
@@ -132,7 +201,7 @@ export function AgentPlayground() {
     temperature: 0.7,
     maxTokens: 2000,
     systemPrompt: 'You are a helpful AI assistant.',
-    tools: ['search_memory', 'store_memory', 'spreadsheet_set_cell', 'spreadsheet_get_cell', 'spreadsheet_sum_range'],
+    tools: [],
   });
   const [agentInstance, setAgentInstance] = useState<AgentInstance | null>(null);
   const [events, setEvents] = useState<AgentEvent[]>([]);
@@ -378,6 +447,21 @@ export function AgentPlayground() {
       });
     }
   }, []);
+
+  // Auto-refresh models when component mounts or when navigating to configure tab
+  useEffect(() => {
+    // Auto-refresh on mount and when switching to configure tab
+    if (activeTab === 'configure') {
+      checkOllamaStatus();
+      fetchAvailableModels();
+    }
+  }, [activeTab, checkOllamaStatus, fetchAvailableModels]); // Refresh when tab changes
+
+  // Initial load on component mount
+  useEffect(() => {
+    checkOllamaStatus();
+    fetchAvailableModels();
+  }, [checkOllamaStatus, fetchAvailableModels]); // Run once on mount
 
   // Add event
   const addEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
@@ -972,6 +1056,42 @@ export function AgentPlayground() {
     <div className="config-panel">
       <h3><FaCog /> Agent Configuration</h3>
       
+      {/* Existing Sessions Section */}
+      <div className="config-section" style={{ marginBottom: '2rem', padding: '1rem', background: 'rgba(15, 23, 42, 0.3)', borderRadius: '8px' }}>
+        <label style={{ marginBottom: '0.75rem', display: 'block' }}>
+          <FaMemory /> Existing Agent Sessions
+        </label>
+        <ExistingSessionsList 
+          onSelectSession={(instanceId) => {
+            // Load session and switch to test tab
+            fetch(`${API_BASE}/api/agent/instances`)
+              .then(res => res.json())
+              .then(instances => {
+                const instance = instances.find((inst: any) => inst.instance_id === instanceId);
+                if (instance) {
+                  setAgentConfig(prev => ({
+                    ...prev,
+                    agentId: instance.agent_id,
+                    agentType: instance.agent_type || prev.agentType,
+                    name: instance.name || prev.name,
+                    model: instance.model || prev.model,
+                  }));
+                  setAgentInstance({
+                    instanceId: instance.instance_id,
+                    agentId: instance.agent_id,
+                    status: instance.status as AgentInstance['status'],
+                    startedAt: instance.started_at,
+                    metrics: { tokensUsed: 0, responseTime: 0, toolCalls: 0 },
+                  });
+                  setActiveTab('test');
+                  loadConversationHistory(instance.instance_id);
+                }
+              })
+              .catch(err => console.error('Failed to load session:', err));
+          }}
+        />
+      </div>
+      
       <div className="config-section">
         <label>Agent Type</label>
         <div className="agent-type-grid">
@@ -1095,7 +1215,39 @@ export function AgentPlayground() {
       </div>
 
       <div className="config-section">
-        <label>Tools</label>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+          <label>Tools</label>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              const allToolIds = AVAILABLE_TOOLS.map(tool => tool.id);
+              const allSelected = allToolIds.every(toolId => agentConfig.tools.includes(toolId));
+              
+              setAgentConfig(prev => ({
+                ...prev,
+                tools: allSelected ? [] : allToolIds
+              }));
+            }}
+            style={{ 
+              padding: '0.4rem 0.8rem', 
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem'
+            }}
+          >
+            {AVAILABLE_TOOLS.every(tool => agentConfig.tools.includes(tool.id)) ? (
+              <>
+                <FaExclamationCircle /> Deselect All Tools
+              </>
+            ) : (
+              <>
+                <FaCheckCircle /> Select All Tools
+              </>
+            )}
+          </button>
+        </div>
         <div className="tools-grid">
           {AVAILABLE_TOOLS.map(tool => (
             <label key={tool.id} className="tool-checkbox">
