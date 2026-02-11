@@ -21,6 +21,7 @@ from ..core.orchestrator import get_orchestrator
 from ..core.tool_registry import get_tool_registry, ToolCategory
 from ..integrations.ollama_container import get_ollama_client, ChatMessage, GenerationOptions
 from ..integrations.realtime_streaming import get_stream_publisher
+from ..integrations.messaging_service_client import get_messaging_client
 from ..agents.base_agent import BaseAgent, AgentResponse
 from ..agents.agent_factory import create_agent
 from ..agents.tools.enhanced_memory_tools import EnhancedMemoryTools
@@ -58,7 +59,7 @@ class AgentConfigRequest(BaseModel):
     agent_id: Optional[str] = None
     agent_type: str = "conversational"
     name: str = "Test Agent"
-    model: str = "llama3:8b"
+    model: str = "mistral:7b"  # Default model changed to Mistral
     temperature: float = 0.7
     max_tokens: int = 2000
     system_prompt: str = """You are a helpful, intelligent AI assistant with access to tools. Your goal is to provide accurate, useful, and contextually appropriate responses.
@@ -127,7 +128,7 @@ _group_chats: Dict[str, Dict[str, Any]] = {}  # Group chat ID -> group chat data
 async def _register_spreadsheet_tools_for_instance(instance_id: str):
     """Register spreadsheet tools for a specific instance with the ToolRegistry"""
     try:
-        from langchain_core.tools import Tool
+        from langchain_core.tools import Tool, StructuredTool
         from ..agents.tools.spreadsheet_tools import (
             _get_spreadsheet_data,
             _save_spreadsheet_data,
@@ -135,6 +136,10 @@ async def _register_spreadsheet_tools_for_instance(instance_id: str):
         import asyncio
         
         tool_registry = get_tool_registry()
+        
+        # Capture the running event loop so sync wrappers can schedule
+        # coroutines on it (required for asyncpg connection pool access)
+        _main_loop = asyncio.get_running_loop()
         
         # Create instance-aware tool functions
         async def set_cell_tool(cell_id: str, value: str) -> str:
@@ -165,9 +170,9 @@ async def _register_spreadsheet_tools_for_instance(instance_id: str):
                 return json.dumps({"success": False, "error": str(e)})
         
         def set_cell_sync(cell_id: str, value: str) -> str:
-            """Sync wrapper for set_cell"""
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(set_cell_tool(cell_id, value))
+            """Sync wrapper for set_cell - runs on the main event loop where asyncpg lives"""
+            future = asyncio.run_coroutine_threadsafe(set_cell_tool(cell_id, value), _main_loop)
+            return future.result(timeout=30)
         
         async def get_cell_tool(cell_id: str) -> str:
             """Get a cell value from the spreadsheet"""
@@ -185,9 +190,9 @@ async def _register_spreadsheet_tools_for_instance(instance_id: str):
                 return json.dumps({"success": False, "error": str(e)})
         
         def get_cell_sync(cell_id: str) -> str:
-            """Sync wrapper for get_cell"""
-            loop = asyncio.get_event_loop()
-            return loop.run_until_complete(get_cell_tool(cell_id))
+            """Sync wrapper for get_cell - runs on the main event loop where asyncpg lives"""
+            future = asyncio.run_coroutine_threadsafe(get_cell_tool(cell_id), _main_loop)
+            return future.result(timeout=30)
         
         # Register tools - these are instance-aware via closure
         # Note: If multiple instances register, the last one wins, but that's OK since
@@ -200,20 +205,22 @@ async def _register_spreadsheet_tools_for_instance(instance_id: str):
         if existing_get_cell:
             logger.debug(f"Tool spreadsheet_get_cell already registered, overwriting for instance {instance_id}")
         
+        # Use StructuredTool so LangGraph gets proper argument schemas
+        # (Tool() treats everything as single string input, which breaks native tool calling)
         tool_registry.register_tool(
-            Tool(
-                name="spreadsheet_set_cell",
-                description="Set a cell value in the spreadsheet. Use cell_id like 'A1', 'B2', 'J7', etc. Value can be a number or formula starting with =. ALWAYS use this tool when asked to edit or set cell values.",
+            StructuredTool.from_function(
                 func=set_cell_sync,
+                name="spreadsheet_set_cell",
+                description="Set a cell value in the spreadsheet. cell_id: cell reference like 'A1', 'B2', 'J7'. value: the value to set (number, text, or formula starting with =).",
             ),
             category=ToolCategory.DATA,
         )
         
         tool_registry.register_tool(
-            Tool(
-                name="spreadsheet_get_cell",
-                description="Get a cell value from the spreadsheet. Use cell_id like 'A1', 'B2', 'J7', etc.",
+            StructuredTool.from_function(
                 func=get_cell_sync,
+                name="spreadsheet_get_cell",
+                description="Get a cell value from the spreadsheet. cell_id: cell reference like 'A1', 'B2', 'J7'.",
             ),
             category=ToolCategory.DATA,
         )
@@ -316,43 +323,65 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
             logger.warning(f"Ollama not healthy: {health}")
             # Continue anyway for testing
         
+        # Get orchestrator for tool initialization
+        orchestrator = get_orchestrator()
+        
+        # Initialize agent tools from app/agents/tools (once per orchestrator)
+        try:
+            await orchestrator.initialize_agent_tools()
+            logger.info("Agent tools initialized from app/agents/tools")
+        except Exception as e:
+            logger.warning(f"Failed to initialize agent tools: {e}")
+        
+        # Load specialized prompt based on agent_type
+        from ..core.agent_integration import load_prompt_for_agent_type
+        
         # Map agent_type to prompt template if provided
         final_config = config.model_dump()
         if config.agent_type and config.agent_type != "conversational":
-            template_manager = get_prompt_template_manager()
-            
-            # Map agent_type to template key
-            type_to_template = {
-                "task_decomposer": "task_decomposition",
-                "code_generator": "code_generation",
-                "data_analyst": "data_analysis",
-                "vendor_fraud": "vendor_fraud",
-                "document_processing": "document_processing",
-                "automation": "automation",
-                "tool_use": "tool_use",
-                "rag_query": "rag_query",
-            }
-            
-            template_key = type_to_template.get(config.agent_type)
-            if template_key:
-                template = template_manager.get_template(template_key)
-                if template:
-                    # Use template's system prompt and settings
-                    # Render with default variables (empty dict for now, can be customized)
-                    rendered = template.render({})
-                    final_config["system_prompt"] = rendered["system"]
-                    
-                    # Use template's temperature and max_tokens if not overridden
-                    if config.temperature == 0.7:  # Default value
-                        final_config["temperature"] = template.temperature
-                    if config.max_tokens == 2000:  # Default value
-                        final_config["max_tokens"] = template.max_tokens
-                    
-                    # Add tools from template if not already specified
-                    if not config.tools and template.tools:
-                        final_config["tools"] = [tool.name for tool in template.tools]
-                    
-                    logger.info(f"Using prompt template '{template_key}' for agent type '{config.agent_type}'")
+            # Try to load specialized prompt from app/agents/prompts first
+            if config.system_prompt == "You are a helpful AI assistant.":
+                specialized_prompt = load_prompt_for_agent_type(
+                    config.agent_type,
+                    fallback_prompt=config.system_prompt
+                )
+                final_config["system_prompt"] = specialized_prompt
+                logger.info(f"Loaded specialized prompt for agent_type: {config.agent_type}")
+            else:
+                # User provided custom prompt, check template manager as fallback
+                template_manager = get_prompt_template_manager()
+                
+                # Map agent_type to template key
+                type_to_template = {
+                    "task_decomposer": "task_decomposition",
+                    "code_generator": "code_generation",
+                    "data_analyst": "data_analysis",
+                    "vendor_fraud": "vendor_fraud",
+                    "document_processing": "document_processing",
+                    "automation": "automation",
+                    "tool_use": "tool_use",
+                    "rag_query": "rag_query",
+                }
+                
+                template_key = type_to_template.get(config.agent_type)
+                if template_key:
+                    template = template_manager.get_template(template_key)
+                    if template:
+                        # Use template's system prompt and settings
+                        rendered = template.render({})
+                        final_config["system_prompt"] = rendered["system"]
+                        
+                        # Use template's temperature and max_tokens if not overridden
+                        if config.temperature == 0.7:  # Default value
+                            final_config["temperature"] = template.temperature
+                        if config.max_tokens == 2000:  # Default value
+                            final_config["max_tokens"] = template.max_tokens
+                        
+                        # Add tools from template if not already specified
+                        if not config.tools and template.tools:
+                            final_config["tools"] = [tool.name for tool in template.tools]
+                        
+                        logger.info(f"Using prompt template '{template_key}' for agent type '{config.agent_type}'")
         
         # Load existing conversation history from database
         conversation_history = await load_conversation_history(instance_id)
@@ -361,17 +390,7 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
         # This ensures the orchestrator's agent executor can use them
         if any(tool.startswith("spreadsheet_") for tool in final_config.get("tools", [])):
             await _register_spreadsheet_tools_for_instance(instance_id)
-            # Recreate agent executor to include new tools
-            orchestrator = get_orchestrator()
-            if orchestrator.llm_provider:
-                try:
-                    llm = orchestrator.llm_provider.get_llm()
-                    tools = orchestrator.tool_registry.get_tools()
-                    if tools:
-                        orchestrator.agent_executor = orchestrator._create_agent_executor(llm, tools)
-                        logger.info(f"Recreated agent executor with {len(tools)} tools including spreadsheet tools")
-                except Exception as e:
-                    logger.warning(f"Failed to recreate agent executor: {e}", exc_info=True)
+            logger.info(f"Registered spreadsheet tools for instance {instance_id}")
         
         # Store agent configuration
         _active_agents[instance_id] = {
@@ -392,13 +411,24 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
         try:
             logger.info(f"⚡ Pre-warming model {final_config['model']}...")
             import asyncio
+            from datetime import datetime as dt
+            
+            warmup_start = dt.now()
             # Make a minimal LLM call to load the model into memory
-            warmup_start = asyncio.get_event_loop().time()
-            _ = await orchestrator.llm_provider._llm.ainvoke("Hi")
-            warmup_duration = asyncio.get_event_loop().time() - warmup_start
-            logger.info(f"✅ Model pre-warmed in {warmup_duration:.2f}s")
+            # Use a very short prompt to minimize generation time
+            try:
+                response = await asyncio.wait_for(
+                    orchestrator.llm_provider._llm.ainvoke("Hi"),
+                    timeout=30.0  # Allow up to 30s for model loading
+                )
+                warmup_duration = (dt.now() - warmup_start).total_seconds()
+                logger.info(f"✅ Model pre-warmed in {warmup_duration:.2f}s (response: {str(response)[:50]})")
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ Model pre-warming timed out after 30s - model may load slowly on first request")
+            except Exception as warmup_err:
+                logger.warning(f"⚠️ Model pre-warming failed: {warmup_err} - model will load on first request")
         except Exception as e:
-            logger.warning(f"Failed to pre-warm model: {e}")
+            logger.warning(f"Failed to pre-warm model: {e}", exc_info=True)
         
         # Publish event
         try:
@@ -566,15 +596,37 @@ async def invoke_agent(request: AgentInvokeRequest):
     agent_data["status"] = "processing"
     
     try:
+        # Extract chat_room_id from context if provided
+        chat_room_id = request.context.get("chat_room_id") if request.context else None
+        
         if request.stream:
             return StreamingResponse(
-                stream_agent_response(instance_id, request.input, config),
+                stream_agent_response(instance_id, request.input, config, chat_room_id),
                 media_type="text/event-stream",
             )
         else:
             # Non-streaming response
             response = await generate_agent_response(instance_id, request.input, config)
             agent_data["status"] = "idle"
+            
+            # If chat_room_id is provided in context, send response to messaging service
+            chat_room_id = request.context.get("chat_room_id")
+            if chat_room_id and response.get("success"):
+                try:
+                    messaging_client = get_messaging_client()
+                    await messaging_client.send_agent_message(
+                        chat_room_id=chat_room_id,
+                        content=response.get("response", ""),
+                        agent_instance_id=instance_id,
+                        message_type="TEXT",
+                        metadata={
+                            "tokens_used": response.get("tokens_used", 0),
+                            "tool_calls": response.get("tool_calls", []),
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send response to messaging service: {e}")
+            
             return response
     except Exception as e:
         agent_data["status"] = "error"
@@ -586,12 +638,11 @@ async def stream_agent_response(
     instance_id: str,
     user_input: str,
     config: AgentConfigRequest,
+    chat_room_id: Optional[str] = None,
 ):
     """Stream agent response token by token"""
     try:
-        ollama = await get_ollama_client()
-        # Force reload guardrails to ensure latest patterns (hot-reload support)
-        guardrails = await get_advanced_guardrails(force_reload=True)
+        guardrails = await get_advanced_guardrails()
         
         agent_data = _active_agents.get(instance_id, {})
         conversation = agent_data.get("conversation", [])
@@ -639,9 +690,11 @@ async def stream_agent_response(
         tools_available = orchestrator.tool_registry.get_tools()
         logger.info(f"Tools in registry: {[t.name for t in tools_available]}")
         logger.info(f"Config tools requested: {config.tools}")
-        logger.info(f"Agent executor available: {orchestrator.agent_executor is not None}")
+        langgraph_ok = getattr(orchestrator, '_langgraph_agent_available', False)
+        executor_ok = getattr(orchestrator, 'agent_executor', None) is not None
+        logger.info(f"LangGraph agent available: {langgraph_ok}, legacy executor: {executor_ok}")
         
-        use_tools = len(config.tools) > 0 and orchestrator.agent_executor is not None
+        use_tools = len(config.tools) > 0 and (langgraph_ok or executor_ok)
         full_response = ""
         tool_calls_count = 0
         
@@ -654,10 +707,11 @@ async def stream_agent_response(
                 result = await orchestrator.process_request(
                     user_input=user_input,
                     use_tools=True,
-                    use_rag=False,  # Disable RAG for playground for now
+                    use_rag=False,
                     max_tokens=config.max_tokens,
-                    system_prompt=config.system_prompt,  # Pass system prompt to orchestrator
-                    model=config.model,  # Pass model selection from playground config
+                    system_prompt=config.system_prompt,
+                    model=config.model,
+                    temperature=config.temperature,
                 )
                 
                 response_text = result.get("response", "")
@@ -673,32 +727,26 @@ async def stream_agent_response(
                 
                 # Emit tool call and result events
                 for step in intermediate_steps:
-                    if isinstance(step, tuple) and len(step) >= 2:
-                        # LangChain intermediate_steps format: (AgentAction, observation)
-                        # AgentAction has: tool, tool_input, log
-                        # observation is the tool result
+                    tool_name = "unknown"
+                    parameters = {}
+                    observation = None
+
+                    if isinstance(step, dict):
+                        # LangGraph format: {"tool": "...", "output": "..."}
+                        tool_name = step.get("tool", "unknown")
+                        observation = step.get("output", "")
+                    elif isinstance(step, tuple) and len(step) >= 2:
+                        # Legacy AgentExecutor format: (AgentAction, observation)
                         action = step[0]
                         observation = step[1]
-                        
-                        # Extract tool name and parameters
-                        tool_name = "unknown"
-                        tool_input = {}
-                        
                         if hasattr(action, 'tool'):
                             tool_name = action.tool
                         elif isinstance(action, dict):
                             tool_name = action.get('tool', str(action))
-                            tool_input = action.get('tool_input', {})
-                        else:
-                            # Try to extract from string representation
-                            tool_name = str(action)
-                        
-                        # Extract parameters from tool_input
-                        parameters = {}
                         if hasattr(action, 'tool_input'):
                             parameters = action.tool_input if isinstance(action.tool_input, dict) else {}
-                        elif isinstance(action, dict):
-                            parameters = action.get('tool_input', {})
+                    else:
+                        continue
                         
                         # Emit tool_call event
                         yield json.dumps({
@@ -707,21 +755,20 @@ async def stream_agent_response(
                             "parameters": parameters,
                         }) + "\n"
                         
-                        # Parse observation if it's a JSON string (tools return JSON strings)
-                        parsed_result = observation
-                        if isinstance(observation, str):
-                            try:
-                                parsed_result = json.loads(observation)
-                            except (json.JSONDecodeError, TypeError):
-                                # Not JSON, keep as string
-                                parsed_result = observation
-                        
+                    # Parse observation if JSON string
+                    parsed_result = observation
+                    if isinstance(observation, str):
+                        try:
+                            parsed_result = json.loads(observation)
+                        except (json.JSONDecodeError, TypeError):
+                            parsed_result = observation
+
                         # Emit tool_result event
                         yield json.dumps({
                             "type": "tool_result",
                             "tool": tool_name,
                             "parameters": parameters,
-                            "result": parsed_result if parsed_result is not None else {},
+                        "result": parsed_result if parsed_result is not None else {},
                         }) + "\n"
                 
                 # Stream response in chunks
@@ -810,7 +857,11 @@ async def stream_agent_response(
             agent_id=agent_data.get("agent_id", ""),
             role="assistant",
             content=full_response,
-            tool_calls=[{"tool_calls_count": tool_calls_count}] if tool_calls_count > 0 else None,
+            tool_calls=[
+                {"tool": s.get("tool", "unknown"), "output": s.get("output", "")}
+                if isinstance(s, dict) else {"tool": "unknown"}
+                for s in intermediate_steps
+            ] if tool_calls_count > 0 else None,
         )
         
         # Update metrics
@@ -828,6 +879,23 @@ async def stream_agent_response(
             }) + "\n"
         
         yield json.dumps({"type": "done", "total_tokens": len(full_response)}) + "\n"
+        
+        # If chat_room_id is provided, send final response to messaging service
+        if chat_room_id:
+            try:
+                messaging_client = get_messaging_client()
+                await messaging_client.send_agent_message(
+                    chat_room_id=chat_room_id,
+                    content=full_response,
+                    agent_instance_id=instance_id,
+                    message_type="TEXT",
+                    metadata={
+                        "tool_calls": tool_calls_count > 0,
+                        "intermediate_steps_count": tool_calls_count,
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send streaming response to messaging service: {e}")
     
     except Exception as e:
         error_msg = f"Failed to process request: {str(e)}"
@@ -843,32 +911,10 @@ async def generate_agent_response(
     user_input: str,
     config: AgentConfigRequest,
 ) -> Dict[str, Any]:
-    """Generate non-streaming agent response"""
+    """Generate non-streaming agent response (uses orchestrator with LangGraph tool calling)"""
     try:
-        ollama = await get_ollama_client()
-        guardrails = await get_advanced_guardrails()
-        
         agent_data = _active_agents.get(instance_id, {})
         conversation = agent_data.get("conversation", [])
-        
-        # Safety check
-        safety_result = await guardrails.check_input(user_input)
-        # Only block if action is BLOCK, allow WARN actions to pass through
-        if not safety_result.passed and safety_result.action == GuardrailAction.BLOCK:
-            return {
-                "success": False,
-                "error": f"Input blocked: {safety_result.message}",
-            }
-        
-        # Build messages
-        messages = [
-            ChatMessage(role="system", content=config.system_prompt),
-        ]
-        
-        for msg in conversation[-10:]:
-            messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
-        
-        messages.append(ChatMessage(role="user", content=user_input))
         
         # Add to conversation
         conversation.append({
@@ -877,30 +923,44 @@ async def generate_agent_response(
             "timestamp": datetime.utcnow().isoformat(),
         })
         
-        # Generate response
-        options = GenerationOptions(
+        # Use the orchestrator (same path as streaming) so tools actually get called
+        orchestrator = get_orchestrator()
+        has_tools = bool(config.tools)
+        result = await orchestrator.process_request(
+            user_input=user_input,
+            use_tools=has_tools,
+            use_rag=False,
+            max_tokens=config.max_tokens,
+            system_prompt=config.system_prompt,
+            model=config.model,
             temperature=config.temperature,
-            num_predict=config.max_tokens,
         )
         
-        result = await ollama.chat(messages, model=config.model, options=options)
+        response_text = result.get("response", "")
+        intermediate_steps = result.get("intermediate_steps", [])
         
         # Add to conversation
         conversation.append({
             "role": "assistant",
-            "content": result.response,
+            "content": response_text,
             "timestamp": datetime.utcnow().isoformat(),
         })
         
         # Update metrics
-        agent_data["metrics"]["tokens_used"] += result.eval_count
+        agent_data["metrics"]["tokens_used"] += len(response_text.split())
         agent_data["metrics"]["messages"] += 2
         
         return {
-            "success": True,
-            "response": result.response,
-            "tokens_used": result.eval_count,
-            "duration_ms": result.total_duration / 1_000_000,  # Convert ns to ms
+            "success": result.get("success", True),
+            "response": response_text,
+            "tokens_used": len(response_text.split()),
+            "duration_ms": result.get("duration_ms", 0),
+            "tool_calls": [
+                {"tool": s.get("tool", "unknown"), "output": s.get("output", "")}
+                if isinstance(s, dict) else {"tool": "unknown"}
+                for s in intermediate_steps
+            ],
+            "intermediate_steps": intermediate_steps,
         }
     
     except Exception as e:
@@ -934,8 +994,8 @@ async def stop_agent(instance_id: str) -> Dict[str, Any]:
     
     # Remove from active agents
     try:
-       del _active_agents[instance_id]
-       logger.debug(f"Stopped agent instance: {instance_id}")
+        del _active_agents[instance_id]
+        logger.debug(f"Stopped agent instance: {instance_id}")
     except KeyError:
         # Already deleted (race condition) - that's fine
         logger.info(f"Agent instance {instance_id} already removed")
@@ -1729,6 +1789,7 @@ class GroupChatMessageRequest(BaseModel):
     """Request to send a message to a group chat"""
     message: str
     stream: bool = True
+    max_rounds: int = Field(default=0, description="Maximum conversation rounds (0 = single response, >0 = agents continue talking)")
 
 
 @router.post("/group-chat/create")
@@ -1831,32 +1892,122 @@ async def send_group_chat_message(
         raise HTTPException(status_code=400, detail="Group chat has no agents")
     
     if request.stream:
-        return StreamingResponse(
-            stream_group_chat_response(group_chat_id, request.message),
-            media_type="text/event-stream",
-        )
+        # If max_rounds > 0, use conversation loop for multi-round agent-to-agent communication
+        if request.max_rounds > 0:
+            return StreamingResponse(
+                stream_group_chat_conversation_loop(
+                    group_chat_id,
+                    request.message,
+                    max_rounds=request.max_rounds
+                ),
+                media_type="text/event-stream",
+            )
+        else:
+            # Single round: all agents respond once
+            return StreamingResponse(
+                stream_group_chat_response(group_chat_id, request.message),
+                media_type="text/event-stream",
+            )
     else:
-        # Non-streaming: collect all responses
+        # Non-streaming: collect all responses with agent-to-agent communication
+        group_chat = _group_chats[group_chat_id]
+        
+        # Create agent name mapping
+        agent_name_map = {info["instance_id"]: info["name"] for info in agent_instances}
+        
+        # Save user message
+        group_chat["messages"].append({
+            "role": "user",
+            "content": request.message,
+            "sender": "user",
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        
+        # Build shared context from group chat messages
+        shared_context = []
+        for msg in group_chat["messages"][-20:]:
+            if msg.get("role") == "user":
+                shared_context.append({
+                    "role": "user",
+                    "content": f"[User]: {msg['content']}",
+                })
+            elif msg.get("role") == "assistant" and "agent_name" in msg:
+                agent_name = msg["agent_name"]
+                content = msg["content"]
+                shared_context.append({
+                    "role": "assistant",
+                    "content": f"[{agent_name}]: {content}",
+                })
+        
         responses = []
         for agent_info in agent_instances:
             instance_id = agent_info["instance_id"]
             if instance_id in _active_agents:
                 agent_data = _active_agents[instance_id]
                 config = AgentConfigRequest(**agent_data["config"])
+                
+                # Build enhanced system prompt
+                enhanced_system_prompt = f"""{config.system_prompt}
+
+You are participating in a group chat with other AI agents. You can see messages from:
+{', '.join([name for inst_id, name in agent_name_map.items() if inst_id != instance_id])}
+
+When responding, you can:
+- Respond to the user's message
+- Respond to or reference what other agents have said
+- Engage in conversation with other agents
+- Build upon previous messages in the conversation
+
+The conversation history below shows messages from all participants in the group chat."""
+                
                 try:
+                    # Build context string from shared messages
+                    context_string = ""
+                    if shared_context and len(shared_context) > 0:
+                        context_string = "\n\nPrevious messages in this group chat:\n"
+                        for ctx_msg in shared_context[-10:]:
+                            context_string += f"{ctx_msg['content']}\n"
+                        context_string += "\n"
+                    
+                    # Combine user message with context
+                    if context_string:
+                        user_input_with_context = f"{context_string}[User]: {request.message}"
+                    else:
+                        user_input_with_context = request.message
+                    
+                    # Temporarily update system prompt for this request
+                    original_prompt = config.system_prompt
+                    config.system_prompt = enhanced_system_prompt
+                    
                     response = await generate_agent_response(
                         instance_id,
-                        request.message,
+                        user_input_with_context,
                         config,
                     )
+                    
+                    # Restore original prompt
+                    config.system_prompt = original_prompt
+                    
+                    response_text = response.get("response", "")
+                    
+                    # Save to group chat history
+                    group_chat["messages"].append({
+                        "role": "assistant",
+                        "content": response_text,
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "instance_id": instance_id,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                    
                     responses.append({
                         "agent_id": agent_info["agent_id"],
                         "agent_name": agent_info["name"],
-                        "response": response.get("response", ""),
+                        "response": response_text,
                         "success": response.get("success", False),
                     })
                 except Exception as e:
-                    logger.error(f"Agent {agent_info['name']} failed: {e}")
+                    logger.error(f"Agent {agent_info['name']} failed: {e}", exc_info=True)
                     responses.append({
                         "agent_id": agent_info["agent_id"],
                         "agent_name": agent_info["name"],
@@ -1872,17 +2023,39 @@ async def send_group_chat_message(
 
 
 async def stream_group_chat_response(group_chat_id: str, user_message: str):
-    """Stream responses from all agents in a group chat"""
+    """Stream responses from all agents in a group chat with agent-to-agent communication"""
     try:
         group_chat = _group_chats[group_chat_id]
         agent_instances = group_chat["agent_instances"]
         
-        # Save user message
+        # Create a mapping of instance_id to agent name for context
+        agent_name_map = {info["instance_id"]: info["name"] for info in agent_instances}
+        
+        # Save user message to group chat history
         group_chat["messages"].append({
             "role": "user",
             "content": user_message,
+            "sender": "user",
             "timestamp": datetime.utcnow().isoformat(),
         })
+        
+        # Build shared conversation context from group chat messages
+        # This allows agents to see what other agents have said
+        shared_context = []
+        for msg in group_chat["messages"][-20:]:  # Last 20 messages for context
+            if msg.get("role") == "user":
+                shared_context.append({
+                    "role": "user",
+                    "content": f"[User]: {msg['content']}",
+                })
+            elif msg.get("role") == "assistant" and "agent_name" in msg:
+                # Format agent messages so other agents know who said what
+                agent_name = msg["agent_name"]
+                content = msg["content"]
+                shared_context.append({
+                    "role": "assistant",
+                    "content": f"[{agent_name}]: {content}",
+                })
         
         # Process each agent sequentially and stream responses
         for agent_info in agent_instances:
@@ -1901,33 +2074,150 @@ async def stream_group_chat_response(group_chat_id: str, user_message: str):
             }) + "\n"
             
             try:
-                # Get agent response
+                # Build enhanced system prompt that includes group chat awareness
+                enhanced_system_prompt = f"""{config.system_prompt}
+
+You are participating in a group chat with other AI agents. You can see messages from:
+{', '.join([name for inst_id, name in agent_name_map.items() if inst_id != instance_id])}
+
+When responding, you can:
+- Respond to the user's message
+- Respond to or reference what other agents have said
+- Engage in conversation with other agents
+- Build upon previous messages in the conversation
+
+The conversation history below shows messages from all participants in the group chat."""
+                
+                # Build messages with shared context
+                messages = [ChatMessage(role="system", content=enhanced_system_prompt)]
+                
+                # Add shared conversation context (messages from all agents)
+                for ctx_msg in shared_context:
+                    messages.append(ChatMessage(role=ctx_msg["role"], content=ctx_msg["content"]))
+                
+                # Add the current user message
+                messages.append(ChatMessage(role="user", content=f"[User]: {user_message}"))
+                
+                # Use orchestrator for tool support and better response generation
+                orchestrator = get_orchestrator()
+                has_tools = bool(config.tools)
+                
+                if has_tools and (getattr(orchestrator, '_langgraph_agent_available', False) or getattr(orchestrator, 'agent_executor', None) is not None):
+                    # Use orchestrator with tools
+                    # Build context string from shared messages for orchestrator
+                    context_string = ""
+                    if shared_context and len(shared_context) > 0:
+                        context_string = "\n\nPrevious messages in this group chat:\n"
+                        for ctx_msg in shared_context[-10:]:  # Last 10 for context
+                            context_string += f"{ctx_msg['content']}\n"
+                        context_string += "\n"
+                    
+                    # Combine user message with context
+                    if context_string:
+                        user_input_with_context = f"{context_string}[User]: {user_message}"
+                    else:
+                        user_input_with_context = user_message
+                    
+                    full_response = ""
+                    tool_calls_count = 0
+                    
+                    result = await orchestrator.process_request(
+                        user_input=user_input_with_context,
+                        use_tools=has_tools,
+                        use_rag=False,
+                        max_tokens=config.max_tokens,
+                        system_prompt=enhanced_system_prompt,
+                        model=config.model,
+                        temperature=config.temperature,
+                    )
+                    
+                    response_text = result.get("response", "")
+                    intermediate_steps = result.get("intermediate_steps", [])
+                    tool_calls_count = len(intermediate_steps)
+                    
+                    # Stream the response token by token (simulate streaming)
+                    words = response_text.split()
+                    for i, word in enumerate(words):
+                        token = word + (" " if i < len(words) - 1 else "")
+                        full_response += token
+                        yield json.dumps({
+                            "type": "token",
+                            "agent_id": agent_info["agent_id"],
+                            "agent_name": agent_info["name"],
+                            "content": token,
+                        }) + "\n"
+                    
+                    # Emit tool call events if any
+                    if tool_calls_count > 0:
+                        for step in intermediate_steps:
+                            tool_name = "unknown"
+                            parameters = {}
+                            observation = None
+                            
+                            if isinstance(step, dict):
+                                tool_name = step.get("tool", "unknown")
+                                observation = step.get("output", "")
+                            elif isinstance(step, tuple) and len(step) >= 2:
+                                action = step[0]
+                                observation = step[1]
+                                if hasattr(action, 'tool'):
+                                    tool_name = action.tool
+                                if hasattr(action, 'tool_input'):
+                                    parameters = action.tool_input if isinstance(action.tool_input, dict) else {}
+                            
+                            yield json.dumps({
+                                "type": "tool_call",
+                                "agent_id": agent_info["agent_id"],
+                                "agent_name": agent_info["name"],
+                                "tool": tool_name,
+                                "parameters": parameters,
+                            }) + "\n"
+                            
+                            parsed_result = observation
+                            if isinstance(observation, str):
+                                try:
+                                    parsed_result = json.loads(observation)
+                                except (json.JSONDecodeError, TypeError):
+                                    parsed_result = observation
+                            
+                            yield json.dumps({
+                                "type": "tool_result",
+                                "agent_id": agent_info["agent_id"],
+                                "agent_name": agent_info["name"],
+                                "tool": tool_name,
+                                "parameters": parameters,
+                                "result": parsed_result if parsed_result is not None else {},
+                            }) + "\n"
+                else:
+                    # Fallback to direct Ollama call if no tools
+                    ollama = await get_ollama_client()
+                    options = GenerationOptions(
+                        temperature=config.temperature,
+                        num_predict=config.max_tokens,
+                    )
+                    
+                    full_response = ""
+                    async for token in ollama.chat_stream(messages, model=config.model, options=options):
+                        full_response += token
+                        yield json.dumps({
+                            "type": "token",
+                            "agent_id": agent_info["agent_id"],
+                            "agent_name": agent_info["name"],
+                            "content": token,
+                        }) + "\n"
+                
+                # Save agent's response to group chat history (so other agents can see it)
+                group_chat["messages"].append({
+                    "role": "assistant",
+                    "content": full_response,
+                    "agent_id": agent_info["agent_id"],
+                    "agent_name": agent_info["name"],
+                    "instance_id": instance_id,
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                
+                # Also save to agent's own conversation history
                 conversation = agent_data.get("conversation", [])
-                messages = [ChatMessage(role="system", content=config.system_prompt)]
-                
-                for msg in conversation[-10:]:
-                    messages.append(ChatMessage(role=msg["role"], content=msg["content"]))
-                
-                messages.append(ChatMessage(role="user", content=user_message))
-                
-                # Generate response
-                ollama = await get_ollama_client()
-                options = GenerationOptions(
-                    temperature=config.temperature,
-                    num_predict=config.max_tokens,
-                )
-                
-                full_response = ""
-                async for token in ollama.chat_stream(messages, model=config.model, options=options):
-                    full_response += token
-                    yield json.dumps({
-                        "type": "token",
-                        "agent_id": agent_info["agent_id"],
-                        "agent_name": agent_info["name"],
-                        "content": token,
-                    }) + "\n"
-                
-                # Save response
                 conversation.append({
                     "role": "user",
                     "content": user_message,
@@ -1947,7 +2237,7 @@ async def stream_group_chat_response(group_chat_id: str, user_message: str):
                 }) + "\n"
                 
             except Exception as e:
-                logger.error(f"Error from agent {agent_info['name']}: {e}")
+                logger.error(f"Error from agent {agent_info['name']}: {e}", exc_info=True)
                 yield json.dumps({
                     "type": "agent_error",
                     "agent_id": agent_info["agent_id"],
@@ -1964,4 +2254,215 @@ async def stream_group_chat_response(group_chat_id: str, user_message: str):
             "type": "error",
             "content": f"Failed to process group chat: {str(e)}",
         }) + "\n"
+
+
+async def stream_group_chat_conversation_loop(
+    group_chat_id: str,
+    initial_message: str,
+    max_rounds: int = 3,
+):
+    """Allow agents to continue conversing with each other for multiple rounds"""
+    try:
+        group_chat = _group_chats[group_chat_id]
+        agent_instances = group_chat["agent_instances"]
+        agent_name_map = {info["instance_id"]: info["name"] for info in agent_instances}
+        
+        # Save initial user message
+        group_chat["messages"].append({
+            "role": "user",
+            "content": initial_message,
+            "sender": "user",
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+        
+        # First round: all agents respond to user
+        yield json.dumps({"type": "round_start", "round": 1, "trigger": "user"}) + "\n"
+        
+        async for event in stream_group_chat_response(group_chat_id, initial_message):
+            yield event
+        
+        # Subsequent rounds: agents respond to each other
+        for round_num in range(2, max_rounds + 1):
+            # Get the last messages from agents
+            recent_agent_messages = [
+                msg for msg in group_chat["messages"][-len(agent_instances):]
+                if msg.get("role") == "assistant" and "agent_name" in msg
+            ]
+            
+            if not recent_agent_messages:
+                break
+            
+            # Each agent responds to the most recent messages from other agents
+            yield json.dumps({
+                "type": "round_start",
+                "round": round_num,
+                "trigger": "agent_conversation"
+            }) + "\n"
+            
+            # Create a summary of recent agent messages for context
+            other_agents_summary = "\n".join([
+                f"{msg['agent_name']}: {msg['content'][:200]}"
+                for msg in recent_agent_messages[-3:]  # Last 3 agent messages
+            ])
+            
+            # Each agent responds to the conversation
+            for agent_info in agent_instances:
+                instance_id = agent_info["instance_id"]
+                if instance_id not in _active_agents:
+                    continue
+                
+                agent_data = _active_agents[instance_id]
+                config = AgentConfigRequest(**agent_data["config"])
+                
+                # Build context-aware prompt
+                conversation_prompt = f"""The other agents in the group chat have been discussing:
+
+{other_agents_summary}
+
+Please respond to the conversation. You can:
+- Add your thoughts or opinions
+- Ask questions
+- Build upon what others have said
+- Provide additional information
+- Continue the discussion naturally"""
+                
+                yield json.dumps({
+                    "type": "agent_start",
+                    "agent_id": agent_info["agent_id"],
+                    "agent_name": agent_info["name"],
+                    "round": round_num,
+                }) + "\n"
+                
+                try:
+                    # Use orchestrator for response
+                    orchestrator = get_orchestrator()
+                    result = await orchestrator.process_request(
+                        user_input=conversation_prompt,
+                        use_tools=bool(config.tools),
+                        use_rag=False,
+                        max_tokens=config.max_tokens,
+                        system_prompt=config.system_prompt,
+                        model=config.model,
+                        temperature=config.temperature,
+                    )
+                    
+                    response_text = result.get("response", "")
+                    
+                    # Stream response
+                    words = response_text.split()
+                    for i, word in enumerate(words):
+                        token = word + (" " if i < len(words) - 1 else "")
+                        yield json.dumps({
+                            "type": "token",
+                            "agent_id": agent_info["agent_id"],
+                            "agent_name": agent_info["name"],
+                            "content": token,
+                            "round": round_num,
+                        }) + "\n"
+                    
+                    # Save to group chat
+                    group_chat["messages"].append({
+                        "role": "assistant",
+                        "content": response_text,
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "instance_id": instance_id,
+                        "round": round_num,
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                    
+                    yield json.dumps({
+                        "type": "agent_done",
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "round": round_num,
+                    }) + "\n"
+                    
+                except Exception as e:
+                    logger.error(f"Error from agent {agent_info['name']} in round {round_num}: {e}")
+                    yield json.dumps({
+                        "type": "agent_error",
+                        "agent_id": agent_info["agent_id"],
+                        "agent_name": agent_info["name"],
+                        "round": round_num,
+                        "error": str(e),
+                    }) + "\n"
+            
+            yield json.dumps({"type": "round_done", "round": round_num}) + "\n"
+        
+        yield json.dumps({"type": "conversation_complete", "total_rounds": max_rounds}) + "\n"
+        
+    except Exception as e:
+        logger.error(f"Conversation loop error: {e}", exc_info=True)
+        yield json.dumps({
+            "type": "error",
+            "content": f"Failed to process conversation loop: {str(e)}",
+        }) + "\n"
+
+
+# ============================================================================
+# Cache Management Endpoints (for performance optimization)
+# ============================================================================
+
+@router.get("/cache/stats")
+async def get_cache_stats():
+    """
+    Get cache statistics for LLM instances and agent executors
+    Useful for monitoring cache performance and hit rates
+    """
+    try:
+        orchestrator = get_orchestrator()
+        stats = await orchestrator.get_cache_stats()
+        return {
+            "success": True,
+            "stats": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cache/clear")
+async def clear_caches():
+    """
+    Clear all caches (LLM instances and agent executors)
+    Useful for debugging or freeing memory
+    """
+    try:
+        orchestrator = get_orchestrator()
+        result = await orchestrator.clear_caches()
+        return {
+            "success": True,
+            "message": result["message"],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to clear caches: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ModelWarmRequest(BaseModel):
+    """Request to warm (pre-load) models"""
+    model_names: List[str] = Field(..., description="List of model names to pre-load")
+
+
+@router.post("/cache/warm")
+async def warm_models(request: ModelWarmRequest):
+    """
+    Pre-warm (pre-load) models into cache
+    This loads models into memory before they're needed, reducing first-request latency
+    Call this on startup or during idle time for best results
+    """
+    try:
+        orchestrator = get_orchestrator()
+        result = await orchestrator.warm_models(request.model_names)
+        return {
+            "success": True,
+            "result": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to warm models: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
