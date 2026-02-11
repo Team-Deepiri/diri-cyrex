@@ -253,9 +253,31 @@ class MilvusVectorStore:
         return documents
 
     async def asimilarity_search(self, query: str, k: int = 5, filters: Optional[Dict] = None) -> List[Document]:
-        """Async similarity search"""
+        """
+        Async similarity search with optimized thread pool.
+        
+        OPTIMIZATION: Uses dedicated thread pool executor for better concurrency
+        and reduced event loop blocking.
+        """
         import asyncio
-        return await asyncio.to_thread(self.similarity_search, query, k, filters)
+        import concurrent.futures
+        
+        # Use dedicated thread pool for vector operations (optimization)
+        # This prevents blocking the main event loop
+        loop = asyncio.get_event_loop()
+        if not hasattr(loop, '_vector_thread_pool'):
+            loop._vector_thread_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=4,  # Tune based on CPU cores
+                thread_name_prefix="vector_store"
+            )
+        
+        return await loop.run_in_executor(
+            loop._vector_thread_pool,
+            self.similarity_search,
+            query,
+            k,
+            filters
+        )
 
     def get_retriever(self, k: int = 5, filters: Optional[Dict] = None):
         """
