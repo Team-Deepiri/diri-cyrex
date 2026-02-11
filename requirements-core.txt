@@ -49,3 +49,28 @@ optuna>=3.5.0  # For hyperparameter optimization
 hyperopt>=0.2.7  # For hyperparameter optimization
 tensorboard>=2.15.0  # For visualization
 
+# LangChain for AI orchestration and RAG
+langchain==0.2.12
+langchain-core==0.2.43
+langchain-community==0.2.10
+langchain-text-splitters==0.2.2
+langchain-openai==0.1.22
+langchain-milvus==0.1.4
+langchain-huggingface==0.0.3
+langchain-ollama==0.1.0
+langchain-classic>=0.0.20
+langchain-experimental>=0.4.0
+langsmith>=0.1.0
+
+# LangGraph for tool-calling agents and multi-agent workflows
+langgraph>=0.2.0,<0.3.0
+langgraph-checkpoint-redis>=0.2.0
+
+# Graph Analysis and Compression
+networkx>=3.2  # For dependency graphs
+zstandard>=0.22.0  # Fast compression (zstd)
+brotli>=1.1.0  # Alternative compression (brotli)
+
+# Local LLM Support
+ollama>=0.1.0
+
