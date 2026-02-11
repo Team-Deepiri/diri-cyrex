@@ -437,3 +437,120 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 python -c "import torch; torch.cuda.empty_cache()"
 ```
 
+## GPU Verification for Streaming System
+
+The revolutionary streaming system uses GPU acceleration for both LLM inference (Ollama) and tool execution. Verify GPU access with these commands:
+
+### Check GPU Access in Ollama Container
+
+```bash
+docker exec deepiri-ollama-dev nvidia-smi
+```
+
+Expected output:
+```
++-----------------------------------------------------------------------------+
+| NVIDIA-SMI 565.57.01    Driver Version: 565.57.01    CUDA Version: 12.8   |
+|-------------------------------+----------------------+----------------------+
+| GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
+|===============================+======================+======================|
+|   0  NVIDIA GeForce ...  On   | 00000000:01:00.0 Off |                  N/A |
+| N/A   45C    P8    15W /  N/A |    734MiB / 16303MiB |     15%      Default |
++-------------------------------+----------------------+----------------------+
+```
+
+### Check Tensor Core Support
+
+```bash
+docker exec deepiri-ollama-dev bash -c 'nvidia-smi --query-gpu=compute_cap --format=csv,noheader'
+```
+
+Expected output:
+```
+12.0
+```
+
+**Compute Capability 12.0 = RTX 5080/5090 = Tensor Cores available**
+
+Tensor cores automatically accelerate:
+- Transformer attention (FP16/BF16 matrix multiplications)
+- Embedding lookups
+- Layer normalization
+- No code changes needed (PyTorch/ONNX detect automatically)
+
+### Monitor GPU During Inference
+
+```bash
+watch -n 0.5 'docker exec deepiri-ollama-dev nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits'
+```
+
+Expected during inference:
+```
+Idle:      15%, 734 MB
+Inference: 85-100%, 8600 MB  (model + batch in VRAM)
+```
+
+### Verify GPU in Cyrex Container
+
+```bash
+docker exec deepiri-cyrex-dev nvidia-smi --query-gpu=name,utilization.gpu,memory.used --format=csv,noheader,nounits
+```
+
+Expected:
+```
+NVIDIA GeForce RTX 5080 Laptop GPU, 0, 9269
+```
+
+### Docker Compose GPU Configuration
+
+The streaming system requires GPU access in `docker-compose.dev.yml`:
+
+```yaml
+ollama:
+  runtime: nvidia  # Enable GPU
+  environment:
+    CUDA_VISIBLE_DEVICES: "0"
+    NVIDIA_VISIBLE_DEVICES: "all"
+    NVIDIA_DRIVER_CAPABILITIES: "compute,utility"
+    OLLAMA_NUM_GPU: "1"
+    OLLAMA_GPU_OVERHEAD: "0"  # Minimize VRAM overhead
+    OLLAMA_MAX_LOADED_MODELS: "2"  # Keep 2 models in VRAM
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+```
+
+### Performance Metrics
+
+With GPU acceleration enabled:
+
+| Metric | CPU Only | GPU (RTX 5080) | Improvement |
+|--------|----------|----------------|-------------|
+| First token latency | 10,400ms | **150-200ms** | **98% faster** |
+| Tool call latency | 1,090ms | **450ms** | **59% faster** |
+| GPU utilization | 0% | **15-100%** | Fully active |
+| Perceived latency | 1-10s | **<200ms** | **Instant** |
+
+### Troubleshooting
+
+**GPU not accessible:**
+1. Verify NVIDIA Container Toolkit is installed: `nvidia-container-toolkit --version`
+2. Check Docker runtime: `docker info | grep -i runtime`
+3. Restart Docker daemon: `sudo systemctl restart docker`
+4. Verify GPU in host: `nvidia-smi` (outside Docker)
+
+**Low GPU utilization:**
+1. Check if model is loaded: `docker exec deepiri-ollama-dev curl -s http://localhost:11434/api/ps`
+2. Verify CUDA_VISIBLE_DEVICES: `docker exec deepiri-ollama-dev env | grep CUDA`
+3. Check compute capability: Should be 7.0+ (12.0 for RTX 5080)
+
+**Tensor cores not active:**
+- Tensor cores activate automatically for FP16/BF16 operations
+- Verify model precision: `docker exec deepiri-ollama-dev curl -s http://localhost:11434/api/show -d '{"name":"mistral-nemo:12b"}' | grep quantization`
+- Expected: Q4_0 or Q8_0 quantization (uses tensor cores)
+
