@@ -12,6 +12,8 @@ from ..core.langgraph_integration import get_langgraph_manager
 from ..core.enhanced_guardrails import get_enhanced_guardrails
 from ..integrations.api_bridge import get_api_bridge
 from ..integrations.synapse_broker import get_synapse_broker
+from ..core.realtime_data_pipeline import get_realtime_pipeline
+from ..core.pipeline_auto_capture import get_auto_capture
 from ..logging_config import get_logger
 
 logger = get_logger("cyrex.system_initializer")
@@ -145,7 +147,16 @@ class SystemInitializer:
             from ..integrations.company_data_automation import get_automation_service
             await get_lora_service()
             await get_automation_service()
-            # 5. Initialize vector store collections
+            
+            # 6. Initialize real-time data pipeline (dual-route: Helox + Cyrex)
+            self.logger.info("Initializing real-time data pipeline...")
+            await get_realtime_pipeline()
+            
+            # 7. Initialize auto-capture middleware (hooks orchestrator → pipeline)
+            self.logger.info("Initializing pipeline auto-capture...")
+            await get_auto_capture()
+            
+            # 8. Initialize vector store collections
             await self._initialize_vector_collections()
             self.initialized = True
             self.logger.info("System initialization complete!")
@@ -159,6 +170,11 @@ class SystemInitializer:
         self.logger.info("Shutting down systems...")
         
         try:
+            # Shutdown real-time data pipeline (drain buffer)
+            from ..core.realtime_data_pipeline import _pipeline
+            if _pipeline:
+                await _pipeline.shutdown()
+            
             # Close API bridge clients
             from ..integrations.api_bridge import _api_bridge
             if _api_bridge:
@@ -197,6 +213,8 @@ class SystemInitializer:
             health["systems"]["synapse_broker"] = {"healthy": True}
             health["systems"]["lora_service"] = {"healthy": True}
             health["systems"]["automation_service"] = {"healthy": True}
+            health["systems"]["realtime_pipeline"] = {"healthy": True}
+            health["systems"]["auto_capture"] = {"healthy": True}
             
         except Exception as e:
             health["error"] = str(e)

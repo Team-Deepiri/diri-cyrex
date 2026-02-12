@@ -760,8 +760,8 @@ if [ "$MODEL_COUNT" -eq 0 ]; then
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "⚠️  IMPORTANT: This project uses llama3:8b as the DEFAULT model"
-echo "   It is recommended to install llama3:8b for compatibility with this project"
+echo "⚠️  IMPORTANT: This project uses mistral:7b as the DEFAULT model"
+echo "   It is recommended to install mistral:7b for compatibility with this project"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -775,7 +775,8 @@ echo ""
 # - Check Ollama's model library for latest: https://ollama.com/library
 #
 declare -a MODEL_LIST=(
-    "llama3:8b|4.7GB|⭐ DEFAULT - Used by this project"
+    "mistral:7b|4.1GB|⭐ DEFAULT - Used by this project"
+    "llama3:8b|4.7GB|Alternative model"
     "llama3.2:1b|1.3GB|Small, fast"
     "llama3.2:3b|2.0GB|Balanced"
     "llama3.1:8b|4.7GB|Latest Llama 3.1"

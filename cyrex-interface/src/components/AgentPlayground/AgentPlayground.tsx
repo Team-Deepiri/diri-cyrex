@@ -1216,7 +1216,7 @@ export function AgentPlayground() {
 
       <div className="config-section">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-          <label>Tools</label>
+        <label>Tools</label>
           <button
             type="button"
             className="btn-secondary"

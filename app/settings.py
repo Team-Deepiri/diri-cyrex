@@ -12,9 +12,9 @@ class Settings(BaseSettings):
     # Default to api-gateway service name for Docker, fallback to localhost for local dev
     NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
-
-    # Authentication Configuration
-    JWT_SECRET: Optional[str] = None
+    
+    # Messaging Service Configuration
+    MESSAGING_SERVICE_URL: str = "http://messaging-service:5009"
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     
     # Local LLM Configuration
     LOCAL_LLM_BACKEND: str = "ollama"  # "ollama", "llama_cpp", or "transformers"
-    LOCAL_LLM_MODEL: str = "llama3:8b"  # Model name/identifier
+    LOCAL_LLM_MODEL: str = "mistral:7b"  # Model name/identifier (Mistral as default)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
     
