@@ -47,6 +47,8 @@ def setup_test_env(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("LOCAL_LLM_BACKEND", "ollama")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "llama3:8b")
+    # Add secure test JWT_SECRET
+    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-minimum-32-characters-long-for-testing")
     # Disable LangSmith tracing during tests
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     monkeypatch.setenv("LANGSMITH_API_KEY", "")
