@@ -746,8 +746,6 @@ If a tool fails, explain what happened and suggest alternatives."""),
                     self.vector_store.asimilarity_search(user_input, k=4)
                 )
                 self.logger.debug("RAG retrieval started in parallel with LLM preparation")
-            else:
-                context = ""
             
             # Check LLM provider
             if not self.llm_provider:
@@ -756,6 +754,19 @@ If a tool fails, explain what happened and suggest alternatives."""),
                     "error": "LLM provider not initialized. Please configure local LLM (Ollama) or set OPENAI_API_KEY.",
                     "request_id": request_id,
                 }
+            
+            # Await RAG task if it was started (now we need the context)
+            if rag_task is not None:
+                try:
+                    context_docs = await rag_task
+                    rag_duration = (time.time() - rag_start) * 1000
+                    self.logger.debug(f"RAG retrieval completed in {rag_duration:.0f}ms (was running in parallel)")
+                    if context_docs:
+                        context = "\n\n".join([doc.page_content for doc in context_docs])
+                except Exception as e:
+                    self.logger.warning(f"RAG retrieval failed: {e}", exc_info=True)
+                    context_docs = []
+                    context = ""
             
             # Build prompt
             if context:

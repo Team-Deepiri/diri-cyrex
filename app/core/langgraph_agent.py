@@ -20,6 +20,8 @@ import os
 import time
 import asyncio
 from ..logging_config import get_logger
+# Note: Connection pooling for ChatOllama is limited - ChatOllama creates its own httpx.AsyncClient
+# The OllamaConnectionPool exists for direct API calls, but ChatOllama manages its own connections internally
 
 logger = get_logger("cyrex.langgraph_agent")
 
@@ -127,6 +129,9 @@ def create_chat_model(
         # Ensure keep_alive is always set to prevent model unloading
         if not params.get("keep_alive"):
             params["keep_alive"] = "30m"
+        # Note: ChatOllama creates its own httpx.AsyncClient internally
+        # Connection pooling optimization is limited - ChatOllama manages its own connections
+        # The connection pool (OllamaConnectionPool) is available for direct API calls if needed
         return ChatOllama(**params)
 
     elif HAS_CHAT_OPENAI:
@@ -241,10 +246,10 @@ def _build_pdge_graph(llm_with_tools: Any, tools: List[Any], pdge: PDGEngine):
         node_start = time.time()
         logger.debug(f"Agent node: invoking LLM with {len(messages)} messages")
         try:
-        response = await llm_with_tools.ainvoke(messages)
+            response = await llm_with_tools.ainvoke(messages)
             node_duration = (time.time() - node_start) * 1000
             logger.info(f"Agent node LLM call completed in {node_duration:.0f}ms")
-        return {"messages": [response]}
+            return {"messages": [response]}
         except Exception as e:
             node_duration = (time.time() - node_start) * 1000
             logger.error(f"Agent node LLM call failed after {node_duration:.0f}ms: {e}")

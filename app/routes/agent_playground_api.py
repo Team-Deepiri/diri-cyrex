@@ -407,28 +407,6 @@ async def initialize_agent(config: AgentConfigRequest) -> Dict[str, Any]:
             },
         }
         
-        # 🔥 PRE-WARM THE MODEL: Load it into memory immediately
-        try:
-            logger.info(f"⚡ Pre-warming model {final_config['model']}...")
-            import asyncio
-            from datetime import datetime as dt
-            
-            warmup_start = dt.now()
-            # Make a minimal LLM call to load the model into memory
-            # Use a very short prompt to minimize generation time
-            try:
-                response = await asyncio.wait_for(
-                    orchestrator.llm_provider._llm.ainvoke("Hi"),
-                    timeout=30.0  # Allow up to 30s for model loading
-                )
-                warmup_duration = (dt.now() - warmup_start).total_seconds()
-                logger.info(f"✅ Model pre-warmed in {warmup_duration:.2f}s (response: {str(response)[:50]})")
-            except asyncio.TimeoutError:
-                logger.warning(f"⚠️ Model pre-warming timed out after 30s - model may load slowly on first request")
-            except Exception as warmup_err:
-                logger.warning(f"⚠️ Model pre-warming failed: {warmup_err} - model will load on first request")
-        except Exception as e:
-            logger.warning(f"Failed to pre-warm model: {e}", exc_info=True)
         
         # Publish event
         try:

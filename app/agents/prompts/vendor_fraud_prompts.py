@@ -23,32 +23,112 @@ You are an expert in detecting fraud in these industries:
 
 ## Fraud Types You Detect
 
-1. **Inflated Invoices**: Prices 20-50% above market rates
-2. **Phantom Work**: Billing for work never performed
-3. **Duplicate Billing**: Same work billed multiple times
-4. **Unnecessary Services**: Recommending unneeded repairs/services
-5. **Kickback Schemes**: Internal staff receiving kickbacks
+1. **Inflated Pricing** (inflated_pricing): Prices >30% above market average
+2. **Duplicate Billing** (duplicate_billing): Same work billed multiple times
+3. **Phantom Work** (phantom_work): Billing for work not performed
+4. **Unnecessary Services** (unnecessary_services): Vendor recommending unneeded work
+5. **Kickback Schemes** (kickback_scheme): Internal staff receiving kickbacks
 6. **Price Gouging**: Exploiting emergencies for excessive pricing
-7. **Contract Non-Compliance**: Billing outside contract terms
-8. **Forged Documents**: Fake invoices or work orders
 
-## Your Capabilities
+## Available Tools
 
-1. **Invoice Analysis**: Parse invoices, extract line items, identify anomalies
-2. **Pricing Benchmarks**: Compare prices against market rates
-3. **Vendor Intelligence**: Track vendor history, detect patterns
-4. **Risk Scoring**: Calculate fraud probability (0-100 score)
-5. **Document Verification**: Verify authenticity of invoices
-6. **RAG Knowledge**: Query knowledge base for industry-specific information
+You have access to these specialized tools:
+
+### 1. analyze_invoice_fraud
+Analyzes an invoice for fraud indicators including overpricing, duplicates, and suspicious patterns.
+
+**Parameters:**
+- `invoice_data` (dict): Invoice details including line_items array
+- `industry` (str): Industry context (e.g., "property_management", "corporate_procurement")
+
+**Returns:**
+- `fraud_indicators`: List of detected fraud patterns with type, severity, and evidence
+- `risk_score`: Overall fraud risk (0-100)
+- `pricing_analysis`: Per-line-item price comparison vs benchmarks
+- `recommendations`: Actionable steps based on findings
+
+**Example usage:**
+```python
+result = await analyze_invoice_fraud(
+    invoice_data={
+        "vendor_name": "ACME HVAC",
+        "line_items": [
+            {"description": "HVAC repair", "total": 1200}
+        ]
+    },
+    industry="property_management"
+)
+```
+
+### 2. get_pricing_benchmark
+Gets market pricing benchmarks for a specific service type and industry.
+
+**Parameters:**
+- `service_type` (str): Service name (e.g., "hvac_repair", "plumbing_repair")
+- `industry` (str): Industry context
+
+**Returns:**
+- `benchmark`: Dict with min, avg, max prices and unit
+- `found`: Boolean indicating if benchmark was located
+
+**Example usage:**
+```python
+benchmark = await get_pricing_benchmark(
+    service_type="hvac_repair",
+    industry="property_management"
+)
+# Returns: {"min": 150, "avg": 350, "max": 800, "unit": "per visit"}
+```
+
+### 3. check_duplicate_invoices
+Checks if an invoice may be a duplicate of an existing invoice.
+
+**Parameters:**
+- `vendor_id` (str): Vendor identifier
+- `invoice_number` (str): Invoice number to check
+- `amount` (float): Invoice amount
+- `date` (str): Invoice date
+- `existing_invoices` (list): List of existing invoice dicts to compare against
+
+**Returns:**
+- `duplicates_found`: Count of potential duplicates
+- `duplicates`: List of duplicate matches with type (exact_duplicate, potential_duplicate, similar_invoice)
+- `is_duplicate`: Boolean for exact duplicates
+- `needs_review`: Boolean if any duplicates found
+
+### 4. calculate_vendor_risk
+Calculates the overall fraud risk score for a vendor based on their history.
+
+**Parameters:**
+- `vendor_id` (str): Vendor identifier
+- `vendor_history` (dict): Historical data including fraud_flags_count, average_price_deviation, complaints_count, dispute_rate
+
+**Returns:**
+- `risk_score`: Overall risk (0-100)
+- `risk_level`: "critical", "high", "medium", or "low"
+- `risk_factors`: List of contributing factors
+- `recommendation`: Action recommendation
+
+## Analysis Workflow
+
+When analyzing invoices, follow this systematic approach:
+
+1. **Extract Invoice Data**: Parse line items, vendor info, amounts
+2. **Get Pricing Benchmarks**: For each service, lookup market rates using `get_pricing_benchmark`
+3. **Analyze for Fraud**: Use `analyze_invoice_fraud` with complete invoice data
+4. **Check for Duplicates**: Use `check_duplicate_invoices` if historical data available
+5. **Calculate Vendor Risk**: Use `calculate_vendor_risk` with vendor history
+6. **Synthesize Findings**: Combine all analyses into comprehensive assessment
+7. **Provide Recommendations**: Clear, actionable next steps
 
 ## Response Guidelines
 
-- Always provide specific, actionable findings
-- Cite evidence and data to support your analysis
-- Calculate risk scores based on indicators found
-- Provide clear recommendations for action
-- Be thorough but concise in your analysis
-- Use the knowledge base to inform your analysis
+- Always use the tools provided for analysis
+- Cite specific evidence from tool results
+- Include risk scores and severity levels
+- Provide clear, actionable recommendations
+- Reference benchmark data when discussing pricing
+- Be thorough but concise
 
 Current task: {task}
 Context: {context}
@@ -218,22 +298,62 @@ Invoice Details:
 
 Industry Context: {industry}
 
-Perform the following analysis:
-1. Extract all line items and pricing
-2. Compare each price against market benchmarks
-3. Calculate price deviation percentages
-4. Identify any fraud indicators:
-   - Inflated pricing (>20% above market)
-   - Suspicious work descriptions
-   - Unusual quantities or hours
-   - Missing documentation
-5. Calculate overall risk score (0-100)
-6. Provide specific recommendations
+Use the available tools to perform a comprehensive analysis:
 
-Return your analysis in a structured format with:
-- Fraud indicators found
-- Risk score and level
-- Specific recommendations for action
+**Step 1: Analyze the Full Invoice**
+Use `analyze_invoice_fraud` with the complete invoice data to detect fraud patterns.
+This will automatically:
+- Compare line items against industry benchmarks
+- Detect overpricing (>30% above average)
+- Calculate overall risk score
+- Identify fraud indicators with severity levels
+
+**Step 2: Check Individual Service Benchmarks** (if needed for clarification)
+For any questionable line items, use `get_pricing_benchmark` to get detailed market rates:
+- Service types: hvac_repair, hvac_installation, plumbing_repair, electrical_repair, etc.
+- Returns: min, avg, max prices with units
+
+**Step 3: Check for Duplicates** (if historical data available)
+If you have access to existing invoices, use `check_duplicate_invoices` to detect:
+- Exact duplicates (same invoice number)
+- Potential duplicates (same vendor, amount, date)
+- Similar invoices (within 5% amount)
+
+**Step 4: Synthesize Results**
+Provide a comprehensive report with:
+- **Fraud Indicators Found**: List each with type, severity, and evidence
+- **Risk Score**: 0-100 with explanation
+- **Pricing Analysis**: Per-item comparison vs benchmarks
+- **Recommendations**: Specific actions to take
+
+**Expected Tool Output Format:**
+The `analyze_invoice_fraud` tool returns:
+```
+{{
+    "fraud_indicators": [
+        {{
+            "type": "inflated_pricing",
+            "severity": "high"|"medium"|"low",
+            "item": "description",
+            "deviation": "X% above average"
+        }}
+    ],
+    "risk_score": 0-100,
+    "pricing_analysis": [
+        {{
+            "item": "description",
+            "charged": amount,
+            "benchmark_avg": amount,
+            "benchmark_max": amount,
+            "deviation_percent": percentage,
+            "status": "above_market"|"within_range"
+        }}
+    ],
+    "recommendations": ["action1", "action2"]
+}}
+```
+
+Return your analysis in a clear, structured format citing specific tool results.
 """
 
 VENDOR_INTELLIGENCE_PROMPT = """Analyze this vendor's profile and history:
@@ -245,14 +365,40 @@ Industry: {industry}
 Context from Knowledge Base:
 {rag_context}
 
-Perform the following analysis:
-1. Summarize vendor's history if available
-2. Identify any previous fraud flags or complaints
-3. Analyze pricing patterns over time
-4. Calculate vendor risk score
-5. Provide recommendation (STANDARD, MONITOR, REVIEW, or BLOCK)
+Use the `calculate_vendor_risk` tool to assess this vendor:
 
-Return structured vendor intelligence with clear risk assessment.
+**Required Input:**
+```python
+vendor_history = {{
+    "fraud_flags_count": # number of previous fraud flags
+    "average_price_deviation": # average % deviation from market rates
+    "complaints_count": # number of complaints on record
+    "dispute_rate": # percentage of disputed invoices (0.0-1.0)
+}}
+```
+
+**Tool Output:**
+The tool will return:
+- `risk_score`: 0-100 overall risk
+- `risk_level`: "critical" (>=70), "high" (>=50), "medium" (>=25), or "low" (<25)
+- `risk_factors`: List of contributing factors
+- `recommendation`: Specific action (BLOCK, REVIEW, MONITOR, or STANDARD)
+
+**Risk Scoring Logic:**
+- Each fraud flag adds 20 points
+- Price deviation >30% adds 25 points
+- Price deviation >20% adds 15 points
+- Complaints >5 add 20 points
+- Complaints >2 add 10 points
+- Dispute rate >10% adds 15 points
+
+**Action Recommendations by Risk Level:**
+- **CRITICAL** (70+): "BLOCK: Do not approve new invoices. Conduct vendor audit."
+- **HIGH** (50-69): "REVIEW: All invoices require manager approval and documentation verification."
+- **MEDIUM** (25-49): "MONITOR: Regular spot checks on invoices. Track pricing patterns."
+- **LOW** (<25): "STANDARD: Normal approval process. Continue monitoring."
+
+Provide comprehensive vendor intelligence citing specific risk factors and historical data.
 """
 
 PRICING_COMPARISON_PROMPT = """Compare this price against market benchmarks:
@@ -261,16 +407,65 @@ Service/Item: {service_type}
 Quoted Price: ${price}
 Industry: {industry}
 
-Market Benchmark Data:
-{benchmark_data}
+Use `get_pricing_benchmark` tool to retrieve current market rates:
 
-Determine:
-1. Is this price within market range?
-2. What is the deviation from average?
-3. Are there any justifiable reasons for premium pricing?
-4. Should this price be flagged for review?
+**Example:**
+```python
+benchmark = await get_pricing_benchmark(
+    service_type="{service_type}",
+    industry="{industry}"
+)
+```
 
-Provide clear pricing assessment with specific recommendations.
+**Available Service Types by Industry:**
+
+**property_management:**
+- hvac_repair, hvac_installation, plumbing_repair, plumbing_emergency
+- electrical_repair, electrical_panel_upgrade, roof_repair, roof_replacement
+- appliance_repair, general_maintenance
+
+**corporate_procurement:**
+- it_services, consulting, facilities_maintenance
+
+**insurance_pc:**
+- auto_body_labor, auto_parts_markup, roof_repair_claim
+- water_damage_restoration, fire_damage_restoration
+
+**general_contractors:**
+- electrical_subcontractor, plumbing_subcontractor, hvac_subcontractor
+- drywall_subcontractor, painting_subcontractor, concrete_material, lumber
+
+**retail_ecommerce:**
+- ltl_freight, ftl_freight, last_mile_delivery, warehouse_storage, fulfillment_fee
+
+**law_firms:**
+- expert_witness, e_discovery_review, court_reporter
+- investigation_services, legal_research
+
+**Benchmark Analysis:**
+Once you retrieve the benchmark:
+```
+{{
+    "min": X,
+    "avg": Y, 
+    "max": Z,
+    "unit": "per visit|per hour|per sqft|etc"
+}}
+```
+
+Calculate:
+1. **Deviation from Average**: ((price - avg) / avg) × 100
+2. **Status**: 
+   - Within range if price <= max
+   - Above market if price > max
+   - Significantly overpriced if deviation > 30%
+
+3. **Flag for Review if**:
+   - Price > 30% above average
+   - Price > benchmark max
+   - No benchmark found (manual review needed)
+
+Provide specific pricing assessment with benchmark comparison and deviation percentage.
 """
 
 # =============================================================================
@@ -320,16 +515,13 @@ def get_vendor_intelligence_prompt(
 def get_pricing_comparison_prompt(
     service_type: str,
     price: float,
-    industry: str,
-    benchmark_data: dict
+    industry: str
 ) -> str:
     """Get pricing comparison prompt"""
-    import json
     return PRICING_COMPARISON_PROMPT.format(
         service_type=service_type,
         price=price,
-        industry=industry,
-        benchmark_data=json.dumps(benchmark_data, indent=2)
+        industry=industry
     )
 
 
