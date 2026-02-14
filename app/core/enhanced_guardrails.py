@@ -5,6 +5,7 @@ Comprehensive safety, content filtering, and policy enforcement
 from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
 import re
+import asyncio
 from ..database.postgres import get_postgres_manager
 from ..logging_config import get_logger
 import json
@@ -101,32 +102,148 @@ class EnhancedGuardrails:
         self.logger.info("Enhanced guardrails initialized")
     
     async def _load_default_rules(self):
-        """Load default safety rules"""
+        """Load default safety rules with comprehensive, up-to-date patterns"""
         default_rules = [
+            # Prompt Injection Detection
             {
-                "rule_id": "profanity_1",
-                "name": "Profanity Filter",
-                "pattern": r"\b(fuck|shit|damn|bitch|asshole)\b",
+                "rule_id": "prompt_injection_1",
+                "name": "Prompt Injection - Ignore Instructions",
+                "pattern": r"ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+(?:instructions?|prompts?|rules?|directives?)",
                 "action": "block",
-                "severity": "medium",
-                "description": "Blocks profane language",
+                "severity": "critical",
+                "description": "Detects attempts to ignore previous instructions",
             },
             {
-                "rule_id": "pii_1",
-                "name": "PII Detection",
-                # Email addresses removed - commonly shared in business contexts
-                "pattern": r"\b\d{3}-\d{2}-\d{4}|\b\d{16}\b",
+                "rule_id": "prompt_injection_2",
+                "name": "Prompt Injection - System Override",
+                "pattern": r"(?:system|assistant|user)\s*:\s*|<\s*\|?(?:system|assistant|user)\s*\|?\s*>",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects system prompt override attempts",
+            },
+            {
+                "rule_id": "prompt_injection_3",
+                "name": "Prompt Injection - New Instructions",
+                "pattern": r"new\s+(?:system\s+)?(?:instructions?|prompts?|rules?)\s*:",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects attempts to inject new instructions",
+            },
+            {
+                "rule_id": "prompt_injection_4",
+                "name": "Prompt Injection - Jailbreak",
+                "pattern": r"(?:jailbreak|bypass|override|unrestricted|unfiltered|developer\s+mode|DAN\s+mode|evil\s+mode)",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects jailbreak attempts",
+            },
+            {
+                "rule_id": "prompt_injection_5",
+                "name": "Prompt Injection - Roleplay Bypass",
+                "pattern": r"(?:pretend|act|roleplay|simulate)\s+(?:you\s+are|to\s+be|as)\s+(?:an?\s+)?(?:evil|malicious|unrestricted|unfiltered)",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects roleplay-based bypass attempts",
+            },
+            {
+                "rule_id": "prompt_injection_6",
+                "name": "Prompt Injection - Encoding Bypass",
+                "pattern": r"(?:base64|hex|unicode|url\s+encode|decode|obfuscate)",
                 "action": "warn",
                 "severity": "high",
-                "description": "Detects potential PII (SSN, credit card) - email addresses excluded",
+                "description": "Detects potential encoding-based bypass attempts",
+            },
+            # PII Detection (Email addresses excluded - commonly shared in business contexts)
+            {
+                "rule_id": "pii_ssn",
+                "name": "PII Detection - SSN",
+                "pattern": r"\b\d{3}-\d{2}-\d{4}\b",
+                "action": "warn",
+                "severity": "high",
+                "description": "Detects Social Security Numbers",
             },
             {
-                "rule_id": "toxicity_1",
-                "name": "Toxicity Detection",
-                "pattern": r"\b(kill|die|hate|stupid|idiot|moron)\b",
+                "rule_id": "pii_credit_card",
+                "name": "PII Detection - Credit Card",
+                "pattern": r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b",
+                "action": "warn",
+                "severity": "high",
+                "description": "Detects credit card numbers",
+            },
+            {
+                "rule_id": "pii_phone",
+                "name": "PII Detection - Phone Number",
+                "pattern": r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
                 "action": "warn",
                 "severity": "medium",
+                "description": "Detects phone numbers",
+            },
+            {
+                "rule_id": "pii_api_key",
+                "name": "PII Detection - API Keys",
+                "pattern": r"\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|bearer\s+token)\s*[:=]\s*\S+",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects exposed API keys or tokens",
+            },
+            {
+                "rule_id": "pii_password",
+                "name": "PII Detection - Passwords",
+                "pattern": r"\b(?:password|passwd|pwd|pass)\s*[:=]\s*\S+",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects exposed passwords",
+            },
+            # Content Safety
+            {
+                "rule_id": "harmful_content_1",
+                "name": "Harmful Content - Violence",
+                "pattern": r"\b(?:how\s+to\s+)?(?:make|create|build|synthesize)\s+(?:a\s+)?(?:bomb|weapon|explosive|poison)",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects instructions for creating harmful items",
+            },
+            {
+                "rule_id": "harmful_content_2",
+                "name": "Harmful Content - Harm Instructions",
+                "pattern": r"\b(?:how\s+to\s+)?(?:harm|hurt|kill|attack|assassinate)\s+(?:someone|people|person)",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects instructions to harm others",
+            },
+            {
+                "rule_id": "harmful_content_3",
+                "name": "Harmful Content - Illegal Drugs",
+                "pattern": r"\b(?:synthesize|produce|make|create)\s+(?:drugs?|narcotics?|illegal\s+substances?)",
+                "action": "block",
+                "severity": "critical",
+                "description": "Detects instructions for illegal drug production",
+            },
+            # Toxicity
+            {
+                "rule_id": "toxicity_1",
+                "name": "Toxicity Detection - Hate Speech",
+                "pattern": r"\b(?:hate|discriminate|racist|sexist|bigot)\b",
+                "action": "warn",
+                "severity": "high",
                 "description": "Detects potentially toxic language",
+            },
+            {
+                "rule_id": "toxicity_2",
+                "name": "Toxicity Detection - Profanity",
+                "pattern": r"\b(?:fuck|shit|damn|bitch|asshole|bastard)\b",
+                "action": "warn",
+                "severity": "medium",
+                "description": "Detects profane language",
+            },
+            # Ethical Guidelines
+            {
+                "rule_id": "ethical_1",
+                "name": "Ethical - Illegal Activities",
+                "pattern": r"\b(?:illegal|fraudulent|scam|phishing)\s+(?:activity|scheme|operation)",
+                "action": "block",
+                "severity": "high",
+                "description": "Detects references to illegal activities",
             },
         ]
         

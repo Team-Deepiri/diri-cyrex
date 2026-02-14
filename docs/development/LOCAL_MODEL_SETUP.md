@@ -21,14 +21,43 @@ ollama serve
 **Windows:**
 Download from https://ollama.com/download
 
-### 2. Pull a Model
+### 2. Install Models
+
+**Option A: Pre-pull During Docker Build (Recommended - Fastest First Request)**
+
+The Docker setup automatically pre-pulls multiple models during build, eliminating the first-request penalty (1.2-3.3s):
 
 ```bash
-# Recommended models (pick one):
-ollama pull llama3:8b          # Fast, good quality (8GB RAM)
-ollama pull llama3:70b         # Better quality (40GB RAM)
-ollama pull mistral:7b         # Fast alternative
-ollama pull codellama:7b       # Code-focused
+# Default models (mistral:7b, llama3:8b, codellama:7b) are pre-pulled automatically
+docker-compose build ollama
+
+# Or customize which models to pre-pull (space-separated)
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b gemma2:2b" ollama
+
+# To disable pre-pull and use script instead
+docker-compose build --build-arg PRE_PULL_MODELS=false ollama
+```
+
+**Default Models Pre-pulled:**
+- **mistral:7b** (4.1GB) - Default model, efficient and high quality
+- **llama3:8b** (4.7GB) - Alternative general-purpose model
+- **codellama:7b** (3.8GB) - Specialized for coding tasks
+
+**Option B: Use Installation Script (Flexible Runtime Installation)**
+
+```bash
+# Interactive script to install models based on your hardware
+./scripts/llm/check-ollama-models.sh
+```
+
+**Option C: Manual Installation**
+
+```bash
+# Recommended models (pick one or more):
+ollama pull mistral:7b         # Default, fast, good quality (4.1GB)
+ollama pull llama3:8b          # Alternative general-purpose (4.7GB)
+ollama pull codellama:7b       # Code-focused (3.8GB)
+ollama pull llama3:70b         # Better quality (40GB RAM, requires 48GB+ VRAM)
 ```
 
 ### 3. Configure Environment
@@ -38,7 +67,7 @@ Create/update `.env` file:
 ```env
 # Local LLM Configuration
 LOCAL_LLM_BACKEND=ollama
-LOCAL_LLM_MODEL=llama3:8b
+LOCAL_LLM_MODEL=mistral:7b  # Default model (changed from llama3:8b)
 OLLAMA_BASE_URL=http://localhost:11434
 
 # Milvus (for vector store)
@@ -151,10 +180,52 @@ POST /orchestration/workflow
 GET /orchestration/status
 ```
 
+## Model Customization
+
+### Pre-pulling Models During Docker Build
+
+The Docker setup supports pre-pulling multiple models during the build process, which:
+- ✅ Eliminates first-request penalty (1.2-3.3s model loading time)
+- ✅ Models are baked into the image (no runtime download)
+- ✅ Works even on fresh deployments
+
+**Configuration in `docker-compose.dev.yml`:**
+```yaml
+ollama:
+  build:
+    context: ./docker/ollama
+    dockerfile: Dockerfile
+    args:
+      PRE_PULL_MODELS: "true"  # Set to "false" to disable
+      MODELS: "mistral:7b llama3:8b codellama:7b"  # Space-separated list
+```
+
+**Customizing Models:**
+```bash
+# Build with default models (mistral:7b, llama3:8b, codellama:7b)
+docker-compose build ollama
+
+# Build with custom models (space-separated)
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b" ollama
+
+# Add more models
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b gemma2:2b phi3:mini" ollama
+
+# Disable pre-pull (use check-ollama-models.sh script instead)
+docker-compose build --build-arg PRE_PULL_MODELS=false ollama
+```
+
+**Default Models:**
+- **mistral:7b** (4.1GB) - Default model, efficient and high quality
+- **llama3:8b** (4.7GB) - Alternative general-purpose model
+- **codellama:7b** (3.8GB) - Specialized for coding tasks
+
+**See `docker/ollama/README.md` for detailed documentation on model customization.**
+
 ## Model Comparison
 
 ### Ollama (Recommended for Start)
-- **Pros**: Easy setup, good performance, many models
+- **Pros**: Easy setup, good performance, many models, pre-pull support
 - **Cons**: Requires Ollama service running
 - **Best for**: Development and production
 
@@ -213,7 +284,28 @@ ollama serve
 ollama list
 
 # Pull missing model
-ollama pull llama3:8b
+ollama pull mistral:7b  # Default model
+ollama pull llama3:8b    # Alternative
+ollama pull codellama:7b # Coding model
+
+# Or use the installation script
+./scripts/llm/check-ollama-models.sh
+```
+
+### Models not pre-pulled during build
+```bash
+# Check if models are in the image
+docker exec deepiri-ollama-dev ollama list
+
+# If models are missing, either:
+# 1. Rebuild with pre-pull enabled
+docker-compose build --build-arg PRE_PULL_MODELS=true ollama
+
+# 2. Or install at runtime using the script
+./scripts/llm/check-ollama-models.sh
+
+# 3. Or manually pull
+docker exec deepiri-ollama-dev ollama pull mistral:7b
 ```
 
 ### Milvus connection failed

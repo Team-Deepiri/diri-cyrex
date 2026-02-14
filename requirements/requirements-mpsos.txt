@@ -1,6 +1,6 @@
 fastapi==0.112.2
 uvicorn[standard]==0.30.6
-pydantic==2.8.2
+pydantic>=2.9.0  # Required for langchain-ollama>=1.0.0 and ollama>=0.6.0
 watchdog>=3.0.0  # For custom file watcher in development
 psutil>=5.9.0  # For process management and port cleanup
 python-multipart>=0.0.6  # Required for FastAPI file uploads (File, Form)
@@ -15,14 +15,14 @@ structlog==24.1.0
 python-json-logger==2.0.7
 prometheus-client==0.20.0
 redis[hiredis]>=5.0.1  # Includes hiredis for better async performance
-pydantic-settings==2.2.1
+pydantic-settings>=2.10.1  # Required for langchain-community 0.3.29+ and langchain-core 1.x
 
-# AI Training Dependencies (CPU-only versions)
-torch>=2.0.0  # CPU version
+# AI Training Dependencies (MPS/macOS - Metal Performance Shaders)
+torch>=2.0.0  # MPS support included in PyTorch 2.0+
 transformers>=4.35.0
 datasets>=2.14.0
 accelerate>=0.24.0
-# deepspeed>=0.12.0  # GPU-only, excluded for CPU builds
+# deepspeed>=0.12.0  # GPU-only, not available for MPS
 mlflow>=2.7.0
 wandb>=0.15.0
 jupyter>=1.0.0
@@ -36,9 +36,9 @@ seaborn>=0.12.0
 tqdm>=4.65.0
 ipython>=8.0.0
 
-# New AI Service Dependencies (CPU-compatible)
+# New AI Service Dependencies (MPS-compatible)
 peft>=0.7.0  # For LoRA adapters
-# bitsandbytes>=0.41.0  # GPU-only quantization, excluded for CPU builds
+# bitsandbytes>=0.41.0  # GPU-only quantization, not available for MPS
 gymnasium>=0.29.0  # For RL environment
 stable-baselines3>=2.2.0  # For RL algorithms (optional)
 
@@ -66,32 +66,33 @@ tensorboard>=2.15.0  # For visualization (optional)
 sentence-transformers>=2.2.0
 
 # LangChain for AI orchestration and RAG
-# Note: Using compatible version set that works together (tested and verified)
-# langchain-core must be >= 0.2.33 to satisfy langchain-openai 0.1.22 requirement
-# All packages require: langchain-core >= 0.2.33 and < 0.3.0
-# IMPORTANT: langchain-ollama 0.1.x is compatible with langchain-core 0.2.x
-# Do NOT upgrade to langchain-ollama 0.2.x+ as it requires langchain-core >= 0.3.x
-langchain==0.2.12
-langchain-core==0.2.43  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
-langchain-community==0.2.10
-langchain-text-splitters==0.2.2
-langchain-openai==0.1.22
-langchain-milvus==0.1.4
-langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
-langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
-langchain-classic>=0.0.20  # Provides deprecated AgentExecutor and other legacy functionality for LangChain 0.2.x
+# Note: Upgraded to 1.x ecosystem to support langgraph-checkpoint-redis and langchain-classic
+# BREAKING CHANGES: This upgrade requires Python >=3.9 and Pydantic 2.x
+# All packages require: langchain-core >= 1.0.0
+# IMPORTANT: This is a major version upgrade - test your code thoroughly after upgrading
+langchain>=1.0.0
+langchain-core>=1.0.0  # Required for langgraph 1.0+ and langchain-classic compatibility
+langchain-community>=0.3.29  # Requires langchain-core 1.x and pydantic-settings>=2.10.1
+langchain-text-splitters>=0.3.0
+langchain-openai>=0.2.0  # Updated for langchain-core 1.x compatibility
+langchain-milvus>=0.1.4
+langchain-huggingface>=0.0.3
+langchain-ollama>=1.0.0  # Updated for langchain-core 1.x compatibility (requires pydantic>=2.9 and ollama>=0.6.0)
+langchain-classic>=1.0.0  # Provides deprecated AgentExecutor and other legacy functionality (REQUIRES langchain-core 1.x)
+langchain-experimental>=0.4.0  # Experimental agent functionality
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
-# LangGraph for multi-agent workflows and stateful orchestration
-# Compatible with langchain-core 0.2.x
-langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows
-langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
+# LangGraph for tool-calling agents and multi-agent workflows
+# The primary agent execution path uses langgraph.prebuilt.create_react_agent
+# which provides native tool calling via ChatOllama (no ReAct text parsing needed)
+langgraph>=1.0.0  # Graph-based agent workflows with native tool calling (compatible with langchain-core 1.x)
+langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence (requires langgraph 1.0+)
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
-ollama>=0.1.0  # Ollama API client for local models
+ollama>=0.6.0  # Ollama API client for local models (required by langchain-ollama>=1.0.0)
 llama-cpp-python>=0.2.0  # llama.cpp bindings (optional, for direct model loading)
 # Note: Install llama-cpp-python separately with: pip install llama-cpp-python
-# For CPU only: pip install llama-cpp-python
+# For macOS MPS: Use default installation (MPS support is automatic)
 
 # Deepiri ModelKit (shared contracts and utilities)
 # Installed from /app/deepiri-modelkit in Dockerfile

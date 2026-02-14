@@ -123,32 +123,53 @@ class RedisStreamsBroker:
         self.logger = logger
     
     async def connect(self) -> bool:
-        """Connect to Redis"""
-        try:
-            if self.redis_url:
-                self._redis = await aioredis.from_url(
-                    self.redis_url,
-                    decode_responses=True,
-                    socket_connect_timeout=5.0
-                )
-            else:
-                self._redis = aioredis.Redis(
-                    host=settings.REDIS_HOST,
-                    port=settings.REDIS_PORT,
-                    password=settings.REDIS_PASSWORD,
-                    db=settings.REDIS_DB,
-                    decode_responses=True,
-                    socket_connect_timeout=5.0,
-                )
-            
-            # Test connection
-            await self._redis.ping()
-            self._running = True
-            self.logger.info("Connected to Redis for streams broker")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to connect to Redis: {e}")
-            return False
+        """Connect to Redis with retry logic"""
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                if self.redis_url:
+                    self._redis = await aioredis.from_url(
+                        self.redis_url,
+                        decode_responses=True,
+                        socket_connect_timeout=10.0,  # Increased from 5s to 10s
+                        socket_timeout=10.0,  # Add socket timeout
+                        retry_on_timeout=True,  # Retry on timeout
+                        health_check_interval=30,  # Health check every 30s
+                    )
+                else:
+                    self._redis = aioredis.Redis(
+                        host=settings.REDIS_HOST,
+                        port=settings.REDIS_PORT,
+                        password=settings.REDIS_PASSWORD,
+                        db=settings.REDIS_DB,
+                        decode_responses=True,
+                        socket_connect_timeout=10.0,  # Increased from 5s to 10s
+                        socket_timeout=10.0,  # Add socket timeout
+                        retry_on_timeout=True,  # Retry on timeout
+                        health_check_interval=30,  # Health check every 30s
+                    )
+                
+                # Test connection with timeout
+                await asyncio.wait_for(self._redis.ping(), timeout=5.0)
+                self._running = True
+                self.logger.info("Connected to Redis for streams broker")
+                return True
+            except asyncio.TimeoutError:
+                self.logger.warning(f"Redis connection attempt {attempt + 1}/{max_retries} timed out")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+            except Exception as e:
+                self.logger.warning(f"Redis connection attempt {attempt + 1}/{max_retries} failed: {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    self.logger.error(f"Failed to connect to Redis after {max_retries} attempts: {e}")
+        
+        return False
     
     async def disconnect(self):
         """Disconnect from Redis"""
@@ -169,9 +190,23 @@ class RedisStreamsBroker:
         self.logger.info("Disconnected from Redis")
     
     async def _ensure_connected(self):
-        """Ensure Redis connection is active"""
-        if not self._redis:
+        """Ensure Redis connection is active, reconnect if needed"""
+        if not self._redis or not self._running:
             await self.connect()
+        else:
+            # Test connection health
+            try:
+                await asyncio.wait_for(self._redis.ping(), timeout=2.0)
+            except (asyncio.TimeoutError, Exception):
+                # Connection lost, reconnect
+                self.logger.warning("Redis connection lost, reconnecting...")
+                if self._redis:
+                    try:
+                        await self._redis.close()
+                    except:
+                        pass
+                self._redis = None
+                await self.connect()
     
     # ========================================================================
     # Publishing
@@ -186,41 +221,51 @@ class RedisStreamsBroker:
         recipient: Optional[str] = None,
         priority: MessagePriority = MessagePriority.NORMAL,
         ttl: Optional[int] = None,
-    ) -> str:
+    ) -> Optional[str]:
         """
         Publish a message to a stream
         
         Returns:
-            Redis stream entry ID
+            Redis stream entry ID, or None if failed
         """
-        await self._ensure_connected()
-        
-        message = StreamMessage(
-            stream=stream,
-            event_type=event_type,
-            sender=sender,
-            recipient=recipient,
-            priority=priority,
-            payload=payload,
-            ttl=ttl,
-        )
-        
-        # Add to stream with automatic trimming
-        entry_id = await self._redis.xadd(
-            stream,
-            message.to_dict(),
-            maxlen=self.max_stream_length,
-        )
-        
-        # Notify in-memory subscribers
-        await self._notify_subscribers(stream, message)
-        
-        self.logger.debug(
-            f"Published message to {stream}: {message.message_id}",
-            event_type=event_type.value
-        )
-        
-        return entry_id
+        try:
+            await self._ensure_connected()
+            
+            if not self._redis:
+                self.logger.warning("Redis not connected, cannot publish message")
+                return None
+            
+            message = StreamMessage(
+                stream=stream,
+                event_type=event_type,
+                sender=sender,
+                recipient=recipient,
+                priority=priority,
+                payload=payload,
+                ttl=ttl,
+            )
+            
+            # Add to stream with automatic trimming
+            entry_id = await self._redis.xadd(
+                stream,
+                message.to_dict(),
+                maxlen=self.max_stream_length,
+            )
+            
+            # Notify in-memory subscribers
+            await self._notify_subscribers(stream, message)
+            
+            self.logger.debug(
+                f"Published message to {stream}: {message.message_id}",
+                event_type=event_type.value
+            )
+            
+            return entry_id
+        except Exception as e:
+            self.logger.warning(f"Failed to publish message to Redis: {e}")
+            # Try to reconnect for next time
+            self._redis = None
+            return None
     
     async def publish_batch(
         self,

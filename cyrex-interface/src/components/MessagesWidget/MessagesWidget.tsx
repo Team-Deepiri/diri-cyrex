@@ -470,33 +470,50 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
                       if (currentAgentId) {
                         agentResponses[currentAgentId] = '';
                       }
-                    } else if (data.type === 'token' && currentAgentId) {
-                      const agentId = currentAgentId;
-                      agentResponses[agentId] = (agentResponses[agentId] || '') + data.content;
-                      // Update messages with agent responses
-                      setMessages(prev => {
-                        const updated = [...prev];
-                        // Find or create agent message
-                        let agentMsgIdx = updated.findIndex(
-                          (m: any) => m.role === 'assistant' && m.agentId === agentId
-                        );
-                        if (agentMsgIdx === -1) {
-                          updated.push({
-                            id: `msg-${Date.now()}-${agentId}`,
-                            role: 'assistant',
-                            agentId: agentId,
-                            agentName: data.agent_name,
-                            content: agentResponses[agentId] || '',
-                            timestamp: new Date().toISOString(),
-                          });
-                        } else {
-                          updated[agentMsgIdx] = {
-                            ...updated[agentMsgIdx],
-                            content: agentResponses[agentId] || '',
-                          };
-                        }
-                        return updated;
-                      });
+                    } else if (data.type === 'token') {
+                      const agentId = data.agent_id || currentAgentId;
+                      if (agentId) {
+                        agentResponses[agentId] = (agentResponses[agentId] || '') + data.content;
+                        // Update messages with agent responses
+                        setMessages(prev => {
+                          const updated = [...prev];
+                          // Find or create agent message
+                          let agentMsgIdx = updated.findIndex(
+                            (m: any) => m.role === 'assistant' && m.agentId === agentId
+                          );
+                          if (agentMsgIdx === -1) {
+                            updated.push({
+                              id: `msg-${Date.now()}-${agentId}`,
+                              role: 'assistant',
+                              agentId: agentId,
+                              agentName: data.agent_name,
+                              content: agentResponses[agentId] || '',
+                              timestamp: new Date().toISOString(),
+                            });
+                          } else {
+                            updated[agentMsgIdx] = {
+                              ...updated[agentMsgIdx],
+                              content: agentResponses[agentId] || '',
+                            };
+                          }
+                          return updated;
+                        });
+                      }
+                    } else if (data.type === 'agent_done') {
+                      // Agent finished responding
+                      currentAgentId = null;
+                    } else if (data.type === 'agent_error') {
+                      // Handle agent errors
+                      setMessages(prev => [...prev, {
+                        id: `error-${Date.now()}-${data.agent_id}`,
+                        role: 'system',
+                        content: `Error from ${data.agent_name || 'Agent'}: ${data.error || 'Unknown error'}`,
+                        agentId: data.agent_id,
+                        timestamp: new Date().toISOString(),
+                      }]);
+                    } else if (data.type === 'done') {
+                      // All agents done
+                      setIsStreaming(false);
                     }
                   } catch {
                     // Non-JSON line, ignore

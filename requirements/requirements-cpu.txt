@@ -1,0 +1,117 @@
+fastapi==0.112.2
+uvicorn[standard]==0.30.6
+pydantic==2.8.2
+watchdog>=3.0.0  # For custom file watcher in development
+psutil>=5.9.0  # For process management and port cleanup
+python-multipart>=0.0.6  # Required for FastAPI file uploads (File, Form)
+openai==1.109.1
+python-dotenv==1.0.1
+httpx==0.27.2
+pytest==8.3.2
+pytest-asyncio==0.23.5
+pytest-cov==4.1.0
+pytest-timeout==2.3.1
+structlog==24.1.0
+python-json-logger==2.0.7
+prometheus-client==0.20.0
+redis[hiredis]>=5.0.1  # Includes hiredis for better async performance
+pydantic-settings==2.2.1
+
+# AI Training Dependencies (CPU-only versions)
+torch>=2.0.0  # CPU version
+transformers>=4.35.0
+datasets>=2.14.0
+accelerate>=0.24.0
+# deepspeed>=0.12.0  # GPU-only, excluded for CPU builds
+mlflow>=2.7.0
+wandb>=0.15.0
+jupyter>=1.0.0
+notebook>=6.5.0
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+# Training pipeline visualization and utilities
+matplotlib>=3.7.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+ipython>=8.0.0
+
+# New AI Service Dependencies (CPU-compatible)
+peft>=0.7.0  # For LoRA adapters
+# bitsandbytes>=0.41.0  # GPU-only quantization, excluded for CPU builds
+gymnasium>=0.29.0  # For RL environment
+stable-baselines3>=2.2.0  # For RL algorithms (optional)
+
+# Database Dependencies
+asyncpg>=0.29.0  # Async PostgreSQL driver for connection pooling (required for postgres.py)
+pymilvus>=2.3.0  # For Milvus vector database
+pinecone-client>=3.0.0  # For Pinecone (optional)
+weaviate-client>=4.0.0  # For Weaviate (optional)
+
+# Time-Series Analytics
+influxdb-client>=1.38.0  # For InfluxDB
+
+# Graph Analysis
+networkx>=3.2  # For obligation dependency graphs
+
+# Compression for tool result streaming
+zstandard>=0.22.0  # Fast compression (zstd)
+brotli>=1.1.0  # Alternative compression (brotli)
+
+# MLOps Dependencies
+kubernetes>=28.1.0  # For Kubernetes deployment
+
+# Additional ML Libraries
+optuna>=3.5.0  # For hyperparameter optimization (optional)
+hyperopt>=0.2.7  # For hyperparameter optimization (optional)
+tensorboard>=2.15.0  # For visualization (optional)
+
+# Sentence Transformers for embeddings
+sentence-transformers>=2.2.0
+
+# LangChain for AI orchestration and RAG
+# Note: Using compatible version set that works together (tested and verified)
+# langchain-core must be >= 0.2.33 to satisfy langchain-openai 0.1.22 requirement
+# All packages require: langchain-core >= 0.2.33 and < 0.3.0
+# IMPORTANT: langchain-ollama 0.1.x is compatible with langchain-core 0.2.x
+# Do NOT upgrade to langchain-ollama 0.2.x+ as it requires langchain-core >= 0.3.x
+langchain==0.2.12
+langchain-core==0.2.43  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
+langchain-community==0.2.10
+langchain-text-splitters==0.2.2
+langchain-openai==0.1.22
+langchain-milvus==0.1.4
+langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
+langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
+langchain-classic>=0.0.20  # Provides deprecated AgentExecutor and other legacy functionality for LangChain 0.2.x
+langchain-experimental>=0.4.0  # Experimental agent functionality
+langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
+
+# LangGraph for tool-calling agents and multi-agent workflows
+# The primary agent execution path uses langgraph.prebuilt.create_react_agent
+# which provides native tool calling via ChatOllama (no ReAct text parsing needed)
+langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows with native tool calling
+langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
+
+# Local LLM Support (Cost-effective alternatives to OpenAI)
+ollama>=0.1.0  # Ollama API client for local models
+llama-cpp-python>=0.2.0  # llama.cpp bindings (optional, for direct model loading)
+# Note: Install llama-cpp-python separately with: pip install llama-cpp-python
+# For CPU only: pip install llama-cpp-python
+
+# Deepiri ModelKit (shared contracts and utilities)
+# Installed from /app/deepiri-modelkit in Dockerfile
+# For local development: pip install -e ../deepiri-modelkit
+
+# Document Processing
+pdfplumber>=0.10.0  # PDF text extraction
+python-docx>=1.1.0  # DOCX text extraction
+pytesseract>=0.3.10  # OCR for images (requires Tesseract binary)
+Pillow>=10.0.0  # Image processing
+pdf2image>=1.16.0  # PDF to image conversion for OCR
+beautifulsoup4>=4.12.0  # HTML parsing
+openpyxl>=3.1.0  # Excel file reading/writing
+# docling>=1.0.0  # DocLayNet for advanced layout detection (optional, install separately if needed)
+
+
+
