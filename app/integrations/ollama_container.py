@@ -130,15 +130,23 @@ class OllamaContainerClient:
     
     async def connect(self) -> bool:
         """Test connection to Ollama container"""
-        urls_to_try = [
-            self.base_url,
-            "http://ollama:11434",  # Docker Compose service name (most common)
-            "http://deepiri-ollama-dev:11434",  # Container name
-            "http://host.docker.internal:11434",
-            "http://localhost:11434",
-            "http://localhost:11435",  # External port if accessing from host
-            "http://172.17.0.1:11434",
-        ]
+        # In Docker, prioritize service name first
+        is_docker = os.path.exists("/.dockerenv") or os.path.exists("/proc/1/cgroup")
+        
+        if is_docker:
+            # Docker environment - try service name first
+            urls_to_try = [
+                "http://ollama:11434",  # Docker Compose service name (most common) - try FIRST
+                "http://deepiri-ollama-dev:11434",  # Container name
+                self.base_url,
+            ]
+        else:
+            # Local development
+            urls_to_try = [
+                self.base_url,
+                "http://localhost:11435",  # External port
+                "http://localhost:11434",
+            ]
         
         # Remove duplicates while preserving order
         urls_to_try = list(dict.fromkeys(urls_to_try))
@@ -147,8 +155,8 @@ class OllamaContainerClient:
             try:
                 self.logger.info(f"Trying to connect to Ollama at {url}")
                 # Use longer timeout for connection - Ollama can be slow
-                async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
-                    response = await client.get(f"{url}/api/tags", timeout=15.0)
+                async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
+                    response = await client.get(f"{url}/api/tags", timeout=20.0)
                     if response.status_code == 200:
                         self.base_url = url
                         self._is_connected = True
@@ -214,14 +222,15 @@ class OllamaContainerClient:
             return self._available_models
         
         # No cache or not connected - do parallel discovery
-        # Shorter timeout per URL, but parallel execution = fast total time
-        request_timeout = 5.0
-        connect_timeout = 2.0
+        # Increased timeout for Ollama which can be slow to respond
+        request_timeout = 10.0
+        connect_timeout = 5.0
         
         # Priority order: most likely first
+        # In Docker, try service name first (most reliable)
         urls_to_try = [
+            "http://ollama:11434",  # Docker Compose service name (most common) - try FIRST
             self.base_url,
-            "http://ollama:11434",  # Docker Compose service name (most common)
             "http://deepiri-ollama-dev:11434",  # Container name
         ]
         # Remove duplicates while preserving order

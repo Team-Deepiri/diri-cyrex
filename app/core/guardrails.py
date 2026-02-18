@@ -30,54 +30,101 @@ class SafetyCheckResult:
     details: Dict[str, Any] = None
 
 
+@dataclass
+class SafetyThresholds:
+    """Configurable safety thresholds"""
+    # Safety level thresholds (0.0 to 1.0)
+    critical_threshold: float = 0.8
+    blocked_threshold: float = 0.6
+    warning_threshold: float = 0.3
+    
+    # Prompt injection scoring
+    injection_base_score: float = 0.5
+    injection_increment: float = 0.1
+    injection_max_score: float = 0.9
+    
+    # Blocked content scoring
+    content_base_score: float = 0.4
+    content_increment: float = 0.2
+    content_max_score: float = 0.8
+    content_blocked_threshold: float = 0.6
+    
+    # PII scoring
+    pii_base_score: float = 0.3
+    pii_increment: float = 0.2
+    pii_max_score: float = 0.7
+    
+    # Output validation scoring
+    output_length_score: float = 0.5
+    output_json_invalid_score: float = 0.3
+    output_blocked_threshold: float = 0.6
+    output_warning_threshold: float = 0.3
+
+
 class SafetyGuardrails:
     """
     Comprehensive safety guardrails for AI interactions
     Detects prompt injection, toxic content, PII, and validates outputs
     """
     
-    def __init__(self):
+    def __init__(self, thresholds: Optional[SafetyThresholds] = None):
         self.logger = logger
+        self.thresholds = thresholds or SafetyThresholds()
         self.blocked_patterns = self._load_blocked_patterns()
         self.pii_patterns = self._load_pii_patterns()
         self.injection_patterns = self._load_injection_patterns()
     
     def _load_blocked_patterns(self) -> List[re.Pattern]:
-        """Load patterns for blocked content"""
+        """Load patterns for blocked content (Updated 2024)"""
         patterns = [
             # Explicit content
-            re.compile(r'\b(?:explicit|nsfw|adult)\b', re.IGNORECASE),
+            re.compile(r'\b(?:explicit|nsfw|adult|pornographic)\b', re.IGNORECASE),
             # Violence
-            re.compile(r'\b(?:violence|harm|kill|attack)\b', re.IGNORECASE),
+            re.compile(r'\b(?:violence|harm|kill|attack|assassinate|murder)\b', re.IGNORECASE),
+            re.compile(r'\b(?:how\s+to\s+)?(?:make|create|build)\s+(?:a\s+)?(?:bomb|weapon|explosive)', re.IGNORECASE),
             # Hate speech indicators
-            re.compile(r'\b(?:hate|discriminate|slur)\b', re.IGNORECASE),
+            re.compile(r'\b(?:hate|discriminate|slur|racist|sexist|bigot)\b', re.IGNORECASE),
+            # Illegal activities
+            re.compile(r'\b(?:illegal|fraudulent|scam|phishing)\s+(?:activity|scheme)', re.IGNORECASE),
+            # Self-harm
+            re.compile(r'\b(?:how\s+to\s+)?(?:commit\s+suicide|kill\s+myself|end\s+my\s+life)', re.IGNORECASE),
         ]
         return patterns
     
     def _load_pii_patterns(self) -> List[Tuple[re.Pattern, str]]:
-        """Load patterns for PII detection"""
+        """Load patterns for PII detection (Updated 2024) - Email addresses excluded"""
         patterns = [
-            # Email addresses excluded - commonly shared in business contexts
             # Phone (US format)
             (re.compile(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b'), 'phone'),
             # SSN
             (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), 'ssn'),
             # Credit card
             (re.compile(r'\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b'), 'credit_card'),
+            # API keys and tokens
+            (re.compile(r'\b(?:api[_-]?key|secret[_-]?key|access[_-]?token|bearer\s+token)\s*[:=]\s*\S+', re.IGNORECASE), 'api_key'),
+            # Passwords
+            (re.compile(r'\b(?:password|passwd|pwd|pass)\s*[:=]\s*\S+', re.IGNORECASE), 'password'),
         ]
         return patterns
     
     def _load_injection_patterns(self) -> List[re.Pattern]:
-        """Load patterns for prompt injection detection"""
+        """Load patterns for prompt injection detection (Updated 2024)"""
         patterns = [
             # Ignore previous instructions
-            re.compile(r'ignore\s+(?:previous|all|above)\s+instructions?', re.IGNORECASE),
+            re.compile(r'ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+(?:instructions?|prompts?|rules?|directives?)', re.IGNORECASE),
+            re.compile(r'disregard\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?)', re.IGNORECASE),
+            re.compile(r'forget\s+(?:everything|all|what)\s+(?:above|before|you\s+were\s+told)', re.IGNORECASE),
             # System override
-            re.compile(r'system\s*:\s*', re.IGNORECASE),
+            re.compile(r'system\s*:\s*|<\s*\|?(?:system|assistant|user)\s*\|?\s*>', re.IGNORECASE),
             # New instructions
-            re.compile(r'new\s+instructions?', re.IGNORECASE),
+            re.compile(r'new\s+(?:system\s+)?(?:instructions?|prompts?|rules?)\s*:', re.IGNORECASE),
             # Jailbreak attempts
-            re.compile(r'jailbreak|bypass|override', re.IGNORECASE),
+            re.compile(r'jailbreak|bypass|override|unrestricted|unfiltered', re.IGNORECASE),
+            re.compile(r'DAN\s+mode|developer\s+mode|evil\s+mode', re.IGNORECASE),
+            # Roleplay-based bypasses
+            re.compile(r'(?:pretend|act|roleplay|simulate)\s+(?:you\s+are|to\s+be|as)\s+(?:an?\s+)?(?:evil|malicious|unrestricted)', re.IGNORECASE),
+            # Encoding attempts
+            re.compile(r'(?:base64|hex|unicode|url\s+encode|decode|obfuscate)\s+(?:this|the|your)', re.IGNORECASE),
         ]
         return patterns
     
@@ -106,12 +153,12 @@ class SafetyGuardrails:
         checks.append(pii_result)
         max_score = max(max_score, pii_result.score)
         
-        # Determine overall level
-        if max_score >= 0.8:
+        # Determine overall level using configurable thresholds
+        if max_score >= self.thresholds.critical_threshold:
             level = SafetyLevel.CRITICAL
-        elif max_score >= 0.6:
+        elif max_score >= self.thresholds.blocked_threshold:
             level = SafetyLevel.BLOCKED
-        elif max_score >= 0.3:
+        elif max_score >= self.thresholds.warning_threshold:
             level = SafetyLevel.WARNING
         else:
             level = SafetyLevel.SAFE
@@ -138,7 +185,10 @@ class SafetyGuardrails:
                 matches.append(pattern.pattern)
         
         if matches:
-            score = min(0.9, 0.5 + len(matches) * 0.1)
+            score = min(
+                self.thresholds.injection_max_score,
+                self.thresholds.injection_base_score + len(matches) * self.thresholds.injection_increment
+            )
             return SafetyCheckResult(
                 level=SafetyLevel.BLOCKED,
                 message=f"Potential prompt injection detected: {len(matches)} patterns matched",
@@ -161,9 +211,13 @@ class SafetyGuardrails:
                 matches.append(pattern.pattern)
         
         if matches:
-            score = min(0.8, 0.4 + len(matches) * 0.2)
+            score = min(
+                self.thresholds.content_max_score,
+                self.thresholds.content_base_score + len(matches) * self.thresholds.content_increment
+            )
+            level = SafetyLevel.WARNING if score < self.thresholds.content_blocked_threshold else SafetyLevel.BLOCKED
             return SafetyCheckResult(
-                level=SafetyLevel.WARNING if score < 0.6 else SafetyLevel.BLOCKED,
+                level=level,
                 message=f"Blocked content patterns detected: {len(matches)} matches",
                 score=score,
                 details={"matched_patterns": matches}
@@ -189,7 +243,10 @@ class SafetyGuardrails:
                 })
         
         if found_pii:
-            score = min(0.7, 0.3 + len(found_pii) * 0.2)
+            score = min(
+                self.thresholds.pii_max_score,
+                self.thresholds.pii_base_score + len(found_pii) * self.thresholds.pii_increment
+            )
             return SafetyCheckResult(
                 level=SafetyLevel.WARNING,
                 message=f"PII detected: {len(found_pii)} types",
@@ -225,9 +282,9 @@ class SafetyGuardrails:
             checks.append(SafetyCheckResult(
                 level=SafetyLevel.WARNING,
                 message=f"Output exceeds max length: {len(output)} > {max_length}",
-                score=0.5,
+                score=self.thresholds.output_length_score,
             ))
-            max_score = 0.5
+            max_score = self.thresholds.output_length_score
         
         # Check for blocked content in output
         content_result = self._check_blocked_content(output)
@@ -243,14 +300,14 @@ class SafetyGuardrails:
                 checks.append(SafetyCheckResult(
                     level=SafetyLevel.WARNING,
                     message="Output is not valid JSON",
-                    score=0.3,
+                    score=self.thresholds.output_json_invalid_score,
                 ))
-                max_score = max(max_score, 0.3)
+                max_score = max(max_score, self.thresholds.output_json_invalid_score)
         
-        # Determine level
-        if max_score >= 0.6:
+        # Determine level using configurable thresholds
+        if max_score >= self.thresholds.output_blocked_threshold:
             level = SafetyLevel.BLOCKED
-        elif max_score >= 0.3:
+        elif max_score >= self.thresholds.output_warning_threshold:
             level = SafetyLevel.WARNING
         else:
             level = SafetyLevel.SAFE

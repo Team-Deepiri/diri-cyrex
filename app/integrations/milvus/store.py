@@ -265,9 +265,68 @@ class MilvusVectorStore:
         return documents
 
     async def asimilarity_search(self, query: str, k: int = 5, filters: Optional[Dict] = None) -> List[Document]:
-        """Async similarity search"""
+        """
+        Async similarity search with optimized thread pool.
+        
+        OPTIMIZATION: Uses dedicated thread pool executor for better concurrency
+        and reduced event loop blocking.
+        """
         import asyncio
-        return await asyncio.to_thread(self.similarity_search, query, k, filters)
+        import concurrent.futures
+        
+        # Use dedicated thread pool for vector operations (optimization)
+        # This prevents blocking the main event loop
+        loop = asyncio.get_event_loop()
+        if not hasattr(loop, '_vector_thread_pool'):
+            loop._vector_thread_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=4,  # Tune based on CPU cores
+                thread_name_prefix="vector_store"
+            )
+        
+        return await loop.run_in_executor(
+            loop._vector_thread_pool,
+            self.similarity_search,
+            query,
+            k,
+            filters
+        )
+
+    def get_retriever(self, k: int = 5, filters: Optional[Dict] = None):
+        """
+        Get a LangChain-compatible retriever for this vector store.
+        
+        Args:
+            k: Number of documents to retrieve (default: 5)
+            filters: Optional metadata filters
+            
+        Returns:
+            A LangChain BaseRetriever instance
+        """
+        try:
+            from langchain_core.retrievers import BaseRetriever
+            
+            # Capture vector_store, k, and filters in closure to avoid Pydantic issues
+            vector_store_ref = self
+            k_value = k
+            filters_value = filters
+            
+            class MilvusRetriever(BaseRetriever):
+                """LangChain retriever wrapper for MilvusVectorStore"""
+                
+                def _get_relevant_documents(self, query: str) -> List[Document]:
+                    """Retrieve relevant documents for a query"""
+                    # Use closure variables instead of instance attributes
+                    return vector_store_ref.similarity_search(query, k=k_value, filters=filters_value)
+                
+                async def _aget_relevant_documents(self, query: str) -> List[Document]:
+                    """Async retrieve relevant documents for a query"""
+                    # Use closure variables instead of instance attributes
+                    return await vector_store_ref.asimilarity_search(query, k=k_value, filters=filters_value)
+            
+            return MilvusRetriever()
+        except ImportError:
+            logger.warning("langchain_core.retrievers not available, cannot create retriever")
+            raise RuntimeError("LangChain core must be installed to use get_retriever()")
 
     def get_document_by_id(self, doc_id: str) -> Optional[Dict[str, Any]]:
         """

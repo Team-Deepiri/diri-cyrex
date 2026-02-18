@@ -34,8 +34,11 @@ bash scripts/llm/check-ollama-models.sh
 - Detects GPU and drivers
 - Checks Ollama container status
 - Lists available models
-- Prompts to pull models if none exist
+- Prompts to pull models if none exist (interactive menu)
+- Recommends models based on your hardware
 - Configures NVIDIA Container Toolkit if needed
+
+**Note:** This script is useful when you disable model pre-pull during Docker build (`PRE_PULL_MODELS=false`). By default, models are pre-pulled during build for faster first requests.
 
 ### `test-ollama-connection.sh`
 Quick script to test Ollama connection and list models.
@@ -81,8 +84,30 @@ bash scripts/llm/test-ollama-connection.sh
 ```
 
 ### Pull a Model
+
+**Option 1: Pre-pull During Docker Build (Recommended)**
 ```bash
+# Default models (mistral:7b, llama3:8b, codellama:7b) are pre-pulled automatically
+docker-compose build ollama
+
+# Customize which models to pre-pull
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b" ollama
+```
+
+**Option 2: Use Installation Script**
+```bash
+# Interactive script with hardware-based recommendations
+bash scripts/llm/check-ollama-models.sh
+```
+
+**Option 3: Manual Pull**
+```bash
+# Pull default model
+ollama pull mistral:7b
+
+# Pull alternative models
 ollama pull llama3:8b
+ollama pull codellama:7b
 ```
 
 ### List Models
@@ -100,7 +125,33 @@ Once Ollama is running, you can access:
 
 ## Docker Integration
 
-Ollama can run in Docker with GPU support:
+### Using Docker Compose (Recommended)
+
+The project includes a custom Dockerfile that pre-pulls models during build:
+
+```bash
+# Build with default models (mistral:7b, llama3:8b, codellama:7b)
+docker-compose build ollama
+
+# Customize models to pre-pull
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b" ollama
+
+# Disable pre-pull (use check-ollama-models.sh script instead)
+docker-compose build --build-arg PRE_PULL_MODELS=false ollama
+```
+
+**Configuration in `docker-compose.dev.yml`:**
+```yaml
+ollama:
+  build:
+    context: ./docker/ollama
+    dockerfile: Dockerfile
+    args:
+      PRE_PULL_MODELS: "true"  # Enable/disable pre-pull
+      MODELS: "mistral:7b llama3:8b codellama:7b"  # Space-separated list
+```
+
+### Manual Docker Run
 
 ```bash
 # With GPU (Linux)
@@ -109,6 +160,15 @@ docker run -d --gpus all -p 11434:11434 --name ollama ollama/ollama
 # CPU only
 docker run -d -p 11434:11434 --name ollama ollama/ollama
 ```
+
+### Model Customization
+
+**Default Models:**
+- `mistral:7b` (4.1GB) - Default model, efficient and high quality
+- `llama3:8b` (4.7GB) - Alternative general-purpose model
+- `codellama:7b` (3.8GB) - Specialized for coding tasks
+
+**See `docker/ollama/README.md` for detailed documentation on model customization.**
 
 ## Troubleshooting
 

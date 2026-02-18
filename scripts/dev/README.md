@@ -57,6 +57,28 @@ bash scripts/dev/install-git-hooks.sh
 - Sets up branch protection rules
 - Configures code quality checks
 
+### `setup-hooks.sh`
+Convenience script to set up Git hooks (calls install-git-hooks.sh).
+
+**Usage:**
+```bash
+bash scripts/dev/setup-hooks.sh
+```
+
+### `cyrex_watcher.py`
+Intelligent file watcher for development that automatically reloads the application on code changes.
+
+**Usage:**
+```bash
+python3 scripts/dev/cyrex_watcher.py
+```
+
+**Features:**
+- Watches for code changes in the app directory
+- Automatically reloads uvicorn on file changes
+- Ignores cache files, logs, and non-code files
+- Handles port conflicts gracefully
+
 ## Running Tests
 
 ### Quick Test

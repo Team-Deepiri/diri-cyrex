@@ -4,8 +4,10 @@ Exposes the workflow orchestrator via REST API
 """
 import os
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, AsyncIterator
+import json
 from ..core.orchestrator import WorkflowOrchestrator, get_orchestrator
 from ..core.state_manager import StateStatus
 from ..logging_config import get_logger
@@ -25,10 +27,13 @@ class ProcessRequestInput(BaseModel):
     use_langgraph: bool = Field(False, description="Whether to use LangGraph multi-agent workflow (task → plan → code)")
     force_local_llm: bool = Field(False, description="Force use of local LLM instead of OpenAI")
     llm_backend: Optional[str] = Field(None, description="Local LLM backend (ollama, llama_cpp, transformers)")
-    llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., llama3:8b)")
+    llm_model: Optional[str] = Field(None, description="Local LLM model name (e.g., mistral:7b)")
     llm_base_url: Optional[str] = Field(None, description="Local LLM base URL (e.g., http://ollama:11434)")
     max_tokens: Optional[int] = Field(None, description="Maximum tokens to generate (default: 500 for local LLM, 2000 for OpenAI)")
     request_timeout: Optional[float] = Field(None, description="Request timeout in seconds (default: uses LOCAL_LLM_TIMEOUT setting)")
+    stream: bool = Field(False, description="Enable streaming response (returns tokens as they're generated)")
+    priority: Optional[str] = Field("normal", description="Request priority: critical, high, normal, low, batch")
+    enable_batching: bool = Field(False, description="Enable request batching (groups similar requests together)")
 
 
 class WorkflowStep(BaseModel):
@@ -130,7 +135,7 @@ async def process_request(
                         if "404" in error_msg or "not found" in error_lower or "model" in error_lower and "not found" in error_lower:
                             raise HTTPException(
                                 status_code=404,
-                                detail=f"Model '{input.llm_model or 'llama3:8b'}' not found in Ollama. Please pull the model first: docker exec -it deepiri-ollama-ai ollama pull {input.llm_model or 'llama3:8b'}"
+                                detail=f"Model '{input.llm_model or 'mistral:7b'}' not found in Ollama. Please pull the model first: docker exec -it deepiri-ollama-dev ollama pull {input.llm_model or 'mistral:7b'}"
                             )
                         elif "Connection" in error_msg or "connect" in error_lower or "timeout" in error_lower:
                             raise HTTPException(
@@ -151,15 +156,114 @@ async def process_request(
                 raise HTTPException(status_code=400, detail=f"Invalid LLM backend: {e}")
         
         # Use default orchestrator (OpenAI preferred, local LLM fallback)
-        result = await orchestrator.process_request(
+        # PHASE 2.2: Request Queuing and Batching
+        queue_manager = get_request_queue_manager()
+        
+        # Determine request priority
+        priority_map = {
+            "critical": RequestPriority.CRITICAL,
+            "high": RequestPriority.HIGH,
+            "normal": RequestPriority.NORMAL,
+            "low": RequestPriority.LOW,
+            "batch": RequestPriority.BATCH,
+        }
+        priority = priority_map.get(input.priority.lower(), RequestPriority.NORMAL)
+        
+        # Override priority if batching is explicitly enabled
+        if input.enable_batching:
+            priority = RequestPriority.BATCH
+        
+        # Create queued request
+        import uuid
+        request_id = input.workflow_id or f"req_{uuid.uuid4().hex[:8]}"
+        queued_request = QueuedRequest(
+            request_id=request_id,
             user_input=input.user_input,
             user_id=input.user_id,
             workflow_id=input.workflow_id,
             use_rag=input.use_rag,
             use_tools=input.use_tools,
             use_langgraph=input.use_langgraph,
+            max_tokens=input.max_tokens,
+            model=input.llm_model,
+            stream=input.stream,
+            priority=priority,
         )
-        # Check if result indicates failure
+        
+        # Define processor function
+        async def process_queued_request(req: QueuedRequest) -> Dict[str, Any]:
+            """Process a queued request"""
+            # Calculate progressive timeout
+            base_timeout = 30.0
+            if req.use_tools:
+                base_timeout += 30.0
+            if req.use_rag:
+                base_timeout += 20.0
+            if len(req.user_input) > 500:
+                base_timeout += 20.0
+            progressive_timeout = min(base_timeout, 120.0)
+            
+            # Process request
+            if req.stream:
+                # Streaming - return async iterator
+                stream_result = orchestrator.process_request(
+                    user_input=req.user_input,
+                    user_id=req.user_id,
+                    workflow_id=req.workflow_id,
+                    use_rag=req.use_rag,
+                    use_tools=req.use_tools,
+                    use_langgraph=req.use_langgraph,
+                    max_tokens=req.max_tokens,
+                    model=req.model,
+                    stream=True,
+                )
+                
+                # Collect stream into result
+                full_response = ""
+                async for chunk in stream_result:
+                    if isinstance(chunk, dict):
+                        if chunk.get("type") == "token":
+                            full_response += chunk.get("content", "")
+                
+                return {
+                    "success": True,
+                    "response": full_response,
+                    "request_id": req.request_id,
+                }
+            else:
+                # Non-streaming
+                result = await asyncio.wait_for(
+                    orchestrator.process_request(
+                        user_input=req.user_input,
+                        user_id=req.user_id,
+                        workflow_id=req.workflow_id,
+                        use_rag=req.use_rag,
+                        use_tools=req.use_tools,
+                        use_langgraph=req.use_langgraph,
+                        max_tokens=req.max_tokens,
+                        model=req.model,
+                        stream=False,
+                    ),
+                    timeout=progressive_timeout
+                )
+                return result
+        
+        # Enqueue or process immediately
+        queue_result = await queue_manager.enqueue_request(queued_request, process_queued_request)
+        
+        # If queued, return task info
+        if queue_result.get("status") == "queued":
+            return {
+                "success": True,
+                "status": "queued",
+                "task_id": queue_result.get("task_id"),
+                "request_id": queue_result.get("request_id"),
+                "queue_position": queue_result.get("queue_position", 0),
+                "message": "Request queued. Use /orchestration/queue/{task_id} to check status.",
+            }
+        
+        # Otherwise, return result directly
+        result = queue_result
         if isinstance(result, dict) and result.get("success") is False:
             error_msg = result.get("error", "Unknown error")
             raise HTTPException(

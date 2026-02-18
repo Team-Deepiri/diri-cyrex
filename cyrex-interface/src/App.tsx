@@ -201,14 +201,18 @@ export default function App() {
   const [testTimeout, setTestTimeout] = useState(15);
   const [testOutput, setTestOutput] = useState<string[]>([]);
   const [testRunning, setTestRunning] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; return_code: number } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; return_code: number; warning?: string | null } | null>(null);
   const [testStatus, setTestStatus] = useState<Record<string, any> | null>(null);
   const [testSummary, setTestSummary] = useState<{
     passed: number;
     failed: number;
+    skipped?: number;
+    error?: number;
     warnings: number;
     duration: string;
     failures: Array<{ test: string; error: string }>;
+    allSkipped?: boolean;
+    hasAsyncWarning?: boolean;
   } | null>(null);
 
   // Debug state for each tab
@@ -1070,10 +1074,27 @@ export default function App() {
               } else if (data.type === 'output') {
                 setTestOutput(prev => [...prev, data.line]);
               } else if (data.type === 'complete') {
-                setTestResult({
-                  success: data.success,
-                  return_code: data.return_code
-                });
+      setTestResult({
+        success: data.success,
+        return_code: data.return_code,
+        warning: data.test_summary?.warning || null
+      });
+      
+      // Parse test summary if available
+      if (data.test_summary) {
+        const summary = data.test_summary;
+        setTestSummary({
+          passed: summary.passed || 0,
+          failed: summary.failed || 0,
+          skipped: summary.skipped || 0,
+          error: summary.error || 0,
+          warnings: summary.warnings || 0,
+          duration: 'N/A',
+          failures: summary.warning ? [{ test: 'Test Execution', error: summary.warning }] : [],
+          allSkipped: summary.passed === 0 && summary.skipped > 0 && summary.failed === 0,
+          hasAsyncWarning: summary.warning?.includes('pytest-asyncio') || false
+        });
+      }
                 setTestOutput(prev => {
                   const updated = [...prev, `\nTests completed with return code: ${data.return_code}`];
                   return updated;
@@ -1148,10 +1169,24 @@ export default function App() {
   const parseTestSummary = (output: string[]) => {
     const outputText = output.join('\n');
     
-    // Parse pytest summary line: "1 failed, 103 passed, 1 warning in 83.16s"
-    const summaryMatch = outputText.match(/(\d+)\s+failed[,\s]+(\d+)\s+passed[,\s]+(\d+)\s+warning[^]*?in\s+([\d.]+)s/);
+    // Parse pytest summary line with skipped tests: "1 skipped, 1 passed, 3 warnings in 12.30s"
+    // Or: "1 failed, 103 passed, 1 warning in 83.16s"
+    // Or: "1 skipped in 12.30s"
+    const summaryMatch = outputText.match(/(?:(\d+)\s+skipped[,\s]+)?(?:(\d+)\s+failed[,\s]+)?(?:(\d+)\s+passed[,\s]+)?(?:(\d+)\s+error[,\s]+)?(?:(\d+)\s+warnings?[,\s]+)?in\s+([\d.]+)s/);
     if (summaryMatch) {
-      const [, failed, passed, warnings, duration] = summaryMatch;
+      const [, skipped = '0', failed = '0', passed = '0', error = '0', warnings = '0', duration] = summaryMatch;
+      const skippedCount = parseInt(skipped);
+      const failedCount = parseInt(failed);
+      const passedCount = parseInt(passed);
+      const errorCount = parseInt(error);
+      const warningsCount = parseInt(warnings);
+      
+      // Check if all tests were skipped
+      const allSkipped = skippedCount > 0 && passedCount === 0 && failedCount === 0 && errorCount === 0;
+      
+      // Check for async test warnings
+      const hasAsyncWarning = outputText.includes('PytestUnhandledCoroutineWarning') || 
+                              outputText.includes('async def functions are not natively supported');
       
       // Extract failure details
       const failures: Array<{ test: string; error: string }> = [];
@@ -1167,13 +1202,35 @@ export default function App() {
         }
       }
       
+      // If all tests were skipped, add a warning
+      if (allSkipped) {
+        failures.push({
+          test: 'All Tests',
+          error: 'All tests were skipped. Check test configuration, dependencies, and markers. ' +
+                 (hasAsyncWarning ? 'Async tests detected - ensure pytest-asyncio is installed and configured.' : '')
+        });
+      }
+      
       setTestSummary({
-        passed: parseInt(passed),
-        failed: parseInt(failed),
-        warnings: parseInt(warnings),
+        passed: passedCount,
+        failed: failedCount,
+        skipped: skippedCount,
+        error: errorCount,
+        warnings: warningsCount,
         duration: `${duration}s`,
-        failures
+        failures,
+        allSkipped: allSkipped,
+        hasAsyncWarning
       });
+      
+      // Update test result to reflect actual success (not just return code)
+      if (allSkipped || (passedCount === 0 && failedCount === 0)) {
+        setTestResult(prev => ({
+          ...prev,
+          success: false,
+          warning: allSkipped ? 'All tests were skipped' : 'No tests ran'
+        }));
+      }
     } else {
       // Try alternative format
       const altMatch = outputText.match(/(\d+)\s+passed[,\s]+(\d+)\s+failed/);
@@ -1217,21 +1274,53 @@ export default function App() {
       setTestOutput(['Starting tests...']);
       const result = await callEndpoint('/testing/run', payload);
       
-      setTestResult({
-        success: (result as any).success,
-        return_code: (result as any).return_code
-      });
+      const resultData = result as any;
+      
+      // Use test_summary from response if available, otherwise parse output
+      if (resultData.test_summary) {
+        const summary = resultData.test_summary;
+        setTestSummary({
+          passed: summary.passed || 0,
+          failed: summary.failed || 0,
+          skipped: summary.skipped || 0,
+          error: summary.error || 0,
+          warnings: summary.warnings || 0,
+          duration: 'N/A',
+          failures: summary.warning ? [{ test: 'Test Execution', error: summary.warning }] : [],
+          allSkipped: summary.passed === 0 && summary.skipped > 0 && summary.failed === 0,
+          hasAsyncWarning: summary.warning?.includes('pytest-asyncio') || summary.warning?.includes('async') || false
+        });
+        
+        // Update success based on actual test results, not just return code
+        const actualSuccess = !(summary.passed === 0 && summary.skipped > 0 && summary.failed === 0) && 
+                              summary.failed === 0 && summary.error === 0 && summary.passed > 0;
+        
+        setTestResult({
+          success: actualSuccess,
+          return_code: resultData.return_code,
+          warning: summary.warning || null
+        });
+      } else {
+        setTestResult({
+          success: resultData.success,
+          return_code: resultData.return_code
+        });
+      }
 
       // Split stdout into lines for display
-      const outputLines = (result as any).stdout?.split('\n') || [];
-      const errorLines = (result as any).stderr?.split('\n') || [];
+      const outputLines = resultData.stdout?.split('\n') || [];
+      const errorLines = resultData.stderr?.split('\n') || [];
       const allLines = [
         ...outputLines.filter((l: string) => l.trim()),
         ...errorLines.filter((l: string) => l.trim())
       ];
       
       setTestOutput(allLines);
-      parseTestSummary(allLines);
+      
+      // Parse summary from output if not provided in response
+      if (!resultData.test_summary) {
+        parseTestSummary(allLines);
+      }
     } catch (err: any) {
       setError(`Test execution failed: ${err.message}`);
       setTestOutput(prev => [...prev, `Error: ${err.message}`]);

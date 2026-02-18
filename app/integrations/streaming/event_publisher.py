@@ -1,36 +1,65 @@
 """
-Event publisher for Cyrex runtime
-Wraps deepiri-modelkit streaming client
+Cyrex Event Publisher
+Publishes events to Redis Streams for cross-service communication
+Used for inference events, model status, and AGI decisions
 """
-import os
+import asyncio
 from typing import Dict, Any, Optional, AsyncIterator
-from deepiri_modelkit import StreamingClient as BaseStreamingClient
-from deepiri_modelkit.streaming.topics import StreamTopics
-from deepiri_modelkit.contracts.events import (
-    ModelReadyEvent,
+from datetime import datetime
+import os
+
+from deepiri_modelkit import (
+    StreamingClient,
     InferenceEvent,
-    PlatformEvent
+    ModelReadyEvent,
+    PlatformEvent,
+    get_logger
 )
+from deepiri_modelkit.streaming.topics import StreamTopics
+
+from ...settings import settings
+
+logger = get_logger("cyrex.event_publisher")
+
+
+def _redis_url() -> str:
+    """Build Redis URL from env or settings (so REDIS_HOST/PORT work locally)."""
+    url = os.getenv("REDIS_URL")
+    if url:
+        return url
+    if settings.REDIS_PASSWORD:
+        return f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+    return f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+
 
 class CyrexEventPublisher:
-    """Streaming client for Cyrex runtime"""
+    """
+    Publishes Cyrex runtime events to streaming platform
+    
+    Events published:
+    - InferenceEvent: Model predictions
+    - PlatformEvent: System status, errors
+    - AGIDecisionEvent: AGI system decisions
+    """
     
     def __init__(self):
-        """Initialize streaming client"""
-        redis_host = os.getenv("REDIS_HOST", "redis")
-        redis_port = int(os.getenv("REDIS_PORT", "6379"))
-        redis_password = os.getenv("REDIS_PASSWORD", "redispassword")
-        
-        self.client = BaseStreamingClient(
-            redis_host=redis_host,
-            redis_port=redis_port,
-            redis_password=redis_password
-        )
+        self.streaming = StreamingClient(redis_url=_redis_url())
+        self._connected = False
     
     async def connect(self):
-        """Connect to Redis"""
-        await self.client.connect()
+        """Connect to streaming platform"""
+        if not self._connected:
+            await self.streaming.connect()
+            self._connected = True
+            logger.info("event_publisher_connected")
     
+    async def disconnect(self):
+        """Disconnect from streaming platform"""
+        if self._connected:
+            await self.streaming.disconnect()
+            self._connected = False
+            logger.info("event_publisher_disconnected")
+
     async def publish_inference(
         self,
         model_name: str,
@@ -56,90 +85,26 @@ class CyrexEventPublisher:
             confidence=confidence,
             success=True
         )
-        
-        await self.client.publish(
+
+        # Exclude None values and convert booleans to strings for Redis compatibility
+        event_data = event.model_dump(exclude_none=True) if hasattr(event, 'model_dump') else {k: v for k, v in event.dict().items() if v is not None}
+        # Convert boolean values to strings for Redis
+        event_data = {k: str(v) if isinstance(v, bool) else v for k, v in event_data.items()}
+        await self.streaming.publish(
             StreamTopics.INFERENCE_EVENTS,
-            event.model_dump()
+            event_data
         )
-    
-    async def subscribe_to_model_events(
-        self,
-        callback: callable
-    ) -> AsyncIterator[ModelReadyEvent]:
-        """Subscribe to model-ready events"""
-        async for event_data in self.client.subscribe(
-            StreamTopics.MODEL_EVENTS,
-            callback,
-            consumer_group="cyrex-runtime",
-            consumer_name="cyrex-1"
-        ):
-            # Validate and yield ModelReadyEvent
-            if event_data.get("event") == "model-ready":
-                try:
-                    event = ModelReadyEvent(**event_data)
-                    yield event
-                except Exception as e:
-                    print(f"Invalid model event: {e}")
 
-
-"""
-Cyrex Event Publisher
-Publishes events to Redis Streams for cross-service communication
-Used for inference events, model status, and AGI decisions
-"""
-import asyncio
-from typing import Dict, Any, Optional
-from datetime import datetime
-import os
-
-from deepiri_modelkit import (
-    StreamingClient,
-    InferenceEvent,
-    ModelReadyEvent,
-    PlatformEvent,
-    get_logger
-)
-
-logger = get_logger("cyrex.event_publisher")
-
-
-class CyrexEventPublisher:
-    """
-    Publishes Cyrex runtime events to streaming platform
-    
-    Events published:
-    - InferenceEvent: Model predictions
-    - PlatformEvent: System status, errors
-    - AGIDecisionEvent: AGI system decisions
-    """
-    
-    def __init__(self):
-        self.streaming = StreamingClient(
-            redis_url=os.getenv("REDIS_URL", "redis://redis:6379")
-        )
-        self._connected = False
-    
-    async def connect(self):
-        """Connect to streaming platform"""
-        if not self._connected:
-            await self.streaming.connect()
-            self._connected = True
-            logger.info("event_publisher_connected")
-    
-    async def disconnect(self):
-        """Disconnect from streaming platform"""
-        if self._connected:
-            await self.streaming.disconnect()
-            self._connected = False
-            logger.info("event_publisher_disconnected")
-    
     async def publish_inference_event(self, event: InferenceEvent):
         """Publish model inference event"""
         await self.connect()
-        
-        # Convert Pydantic model to dict
-        event_data = event.model_dump() if hasattr(event, 'model_dump') else event.dict()
-        
+
+        # Convert Pydantic model to dict, excluding None values and converting booleans to strings for Redis
+        event_data = event.model_dump(exclude_none=True) if hasattr(event, 'model_dump') else {k: v for k, v in event.dict().items() if v is not None}
+
+        # Convert boolean values to strings for Redis compatibility
+        event_data = {k: str(v) if isinstance(v, bool) else v for k, v in event_data.items()}
+
         await self.streaming.publish("inference-events", event_data)
         
         logger.info("inference_event_published",
@@ -156,7 +121,26 @@ class CyrexEventPublisher:
         
         logger.info("platform_event_published",
                     event_type=event.event_type if hasattr(event, 'event_type') else None)
-    
+
+    async def subscribe_to_model_events(
+        self,
+        callback: callable
+    ) -> AsyncIterator[ModelReadyEvent]:
+        """Subscribe to model-ready events"""
+        async for event_data in self.streaming.subscribe(
+            StreamTopics.MODEL_EVENTS,
+            callback,
+            consumer_group="cyrex-runtime",
+            consumer_name="cyrex-1"
+        ):
+            # Validate and yield ModelReadyEvent
+            if event_data.get("event") == "model-ready":
+                try:
+                    event = ModelReadyEvent(**event_data)
+                    yield event
+                except Exception as e:
+                    print(f"Invalid model event: {e}")
+
     async def publish_agi_decision(self, decision: Dict[str, Any]):
         """Publish AGI decision event"""
         await self.connect()
@@ -228,4 +212,3 @@ async def shutdown_event_publisher():
     if _publisher:
         await _publisher.disconnect()
         _publisher = None
-

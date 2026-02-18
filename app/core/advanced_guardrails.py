@@ -113,38 +113,58 @@ class AdvancedGuardrails:
     def _initialize_default_policies(self):
         """Initialize default guardrail policies"""
         
-        # Prompt Injection Detection
+        # Prompt Injection Detection (Updated 2024)
         self.add_policy(GuardrailPolicy(
             name="prompt_injection",
             category=GuardrailCategory.PROMPT_INJECTION,
             risk_threshold=RiskLevel.HIGH,
             action_on_violation=GuardrailAction.BLOCK,
             patterns=[
-                r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?)",
-                r"disregard\s+(?:all\s+)?(?:previous|prior)\s+(?:instructions?|prompts?)",
-                r"forget\s+(?:everything|all)\s+(?:above|before)",
-                r"system\s*:\s*",
-                r"<\|?(?:system|assistant|user)\|?>",
-                r"new\s+(?:system\s+)?instructions?\s*:",
-                r"jailbreak",
-                r"DAN\s+mode",
-                r"developer\s+mode",
-                r"bypass\s+(?:safety|restrictions?|filters?)",
-                r"pretend\s+(?:you\s+are|to\s+be)",
-                r"roleplay\s+as\s+(?:an?\s+)?(?:evil|malicious)",
+                # Classic injection patterns
+                r"ignore\s+(?:all\s+)?(?:previous|prior|above|earlier)\s+(?:instructions?|prompts?|rules?|directives?)",
+                r"disregard\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions?|prompts?|rules?)",
+                r"forget\s+(?:everything|all|what)\s+(?:above|before|you\s+were\s+told)",
+                r"system\s*:\s*|<\s*\|?(?:system|assistant|user)\s*\|?\s*>",
+                r"new\s+(?:system\s+)?(?:instructions?|prompts?|rules?)\s*:",
+                # Jailbreak attempts
+                r"jailbreak|bypass|override|unrestricted|unfiltered",
+                r"DAN\s+mode|developer\s+mode|evil\s+mode|unrestricted\s+mode",
+                r"bypass\s+(?:safety|restrictions?|filters?|guardrails?)",
+                # Roleplay-based bypasses
+                r"(?:pretend|act|roleplay|simulate)\s+(?:you\s+are|to\s+be|as)\s+(?:an?\s+)?(?:evil|malicious|unrestricted|unfiltered)",
+                r"you\s+are\s+now\s+(?:an?\s+)?(?:unrestricted|unfiltered|evil)",
+                # Encoding/obfuscation attempts
+                r"(?:base64|hex|unicode|url\s+encode|decode|obfuscate)\s+(?:this|the|your)",
+                # Context manipulation
+                r"clear\s+(?:your|the)\s+(?:memory|context|history)",
+                r"start\s+(?:over|fresh|new)\s+(?:with|as)",
+                # Instruction injection via special characters
+                r"```\s*(?:system|instruction|prompt)",
+                r"\[INST\]|\[/INST\]|\[SYSTEM\]|\[/SYSTEM\]",
+                # Multi-turn injection attempts
+                r"in\s+(?:the\s+)?(?:next|following|subsequent)\s+(?:message|response|turn)",
             ],
         ))
         
-        # Content Safety
+        # Content Safety (Updated 2024)
         self.add_policy(GuardrailPolicy(
             name="harmful_content",
             category=GuardrailCategory.CONTENT_SAFETY,
             risk_threshold=RiskLevel.HIGH,
             action_on_violation=GuardrailAction.BLOCK,
             patterns=[
-                r"\b(?:how\s+to\s+)?(?:make|create|build)\s+(?:a\s+)?(?:bomb|weapon|explosive)",
-                r"\b(?:how\s+to\s+)?(?:harm|hurt|kill|attack)\s+(?:someone|people)",
-                r"\b(?:synthesize|produce)\s+(?:drugs?|narcotics?|poison)",
+                # Violence and weapons
+                r"\b(?:how\s+to\s+)?(?:make|create|build|synthesize|manufacture)\s+(?:a\s+)?(?:bomb|weapon|explosive|poison|toxin)",
+                r"\b(?:how\s+to\s+)?(?:harm|hurt|kill|attack|assassinate|murder)\s+(?:someone|people|person|individual)",
+                r"\b(?:instructions?\s+for|guide\s+to|tutorial\s+on)\s+(?:making|creating)\s+(?:weapons?|explosives?)",
+                # Illegal substances
+                r"\b(?:synthesize|produce|make|create|manufacture)\s+(?:drugs?|narcotics?|illegal\s+substances?)",
+                r"\b(?:how\s+to\s+)?(?:make|produce|synthesize)\s+(?:meth|heroin|cocaine|fentanyl)",
+                # Self-harm
+                r"\b(?:how\s+to\s+)?(?:commit\s+suicide|kill\s+myself|end\s+my\s+life)",
+                # Cybercrime
+                r"\b(?:how\s+to\s+)?(?:hack|breach|exploit|attack)\s+(?:a\s+)?(?:system|network|database|website)",
+                r"\b(?:instructions?\s+for|guide\s+to)\s+(?:phishing|malware|ransomware|virus)",
             ],
         ))
         
@@ -179,30 +199,54 @@ class AdvancedGuardrails:
             },
         ))
         
-        # Tool Safety
+        # Tool Safety (Updated 2024)
         self.add_policy(GuardrailPolicy(
             name="tool_safety",
             category=GuardrailCategory.TOOL_SAFETY,
             risk_threshold=RiskLevel.HIGH,
             action_on_violation=GuardrailAction.BLOCK,
             block_list=[
+                # System commands
                 "execute_shell",
                 "run_command",
+                "exec",
+                "system",
+                "shell_exec",
+                # Database operations
                 "delete_database",
                 "drop_table",
+                "drop_database",
+                "truncate_table",
+                "delete_all",
+                # File system operations
                 "rm_rf",
+                "delete_file",
+                "format_disk",
+                "rmdir",
+                # Network operations
+                "send_email_raw",
+                "make_http_request_unrestricted",
+                # Security operations
+                "disable_firewall",
+                "disable_antivirus",
+                "bypass_security",
             ],
         ))
         
-        # Ethical Guidelines
+        # Ethical Guidelines (Updated 2024)
         self.add_policy(GuardrailPolicy(
             name="ethical_guidelines",
             category=GuardrailCategory.ETHICAL,
             risk_threshold=RiskLevel.MEDIUM,
             action_on_violation=GuardrailAction.WARN,
             patterns=[
-                r"\b(?:discriminate|hate|racist|sexist)\b",
-                r"\b(?:illegal|fraudulent|scam)\s+(?:activity|scheme)",
+                # Discrimination and hate
+                r"\b(?:discriminate|hate|racist|sexist|bigot|prejudice)\b",
+                r"\b(?:illegal|fraudulent|scam|phishing)\s+(?:activity|scheme|operation)",
+                # Misinformation
+                r"\b(?:spread|create|generate)\s+(?:misinformation|fake\s+news|disinformation)",
+                # Privacy violations
+                r"\b(?:violate|breach|invade)\s+(?:privacy|confidentiality)",
             ],
         ))
     
@@ -362,14 +406,32 @@ class AdvancedGuardrails:
                 message=f"Tool '{tool_name}' is blocked by policy",
             )
         
-        # Check parameters for dangerous patterns
+        # Check parameters for dangerous patterns (Updated 2024)
         params_str = json.dumps(parameters)
         dangerous_patterns = [
-            r";\s*(?:rm|del|drop|delete)",
+            # Command injection
+            r";\s*(?:rm|del|drop|delete|format|exec|system)",
+            r"\|\s*(?:rm|del|drop|delete)",
+            r"&&\s*(?:rm|del|drop|delete)",
+            r"`\s*(?:rm|del|drop|delete)",
+            # SQL injection
             r"--\s*",
-            r"'\s*(?:OR|AND)\s*'",
+            r"'\s*(?:OR|AND|UNION)\s*'",
+            r"(?:DROP|DELETE|TRUNCATE)\s+(?:TABLE|DATABASE)",
+            # XSS
             r"<script",
             r"javascript:",
+            r"on\w+\s*=",
+            # Path traversal
+            r"\.\./",
+            r"\.\.\\",
+            # Code injection
+            r"eval\s*\(",
+            r"exec\s*\(",
+            r"__import__",
+            # Network attacks
+            r"curl\s+.*-X\s+(?:POST|PUT|DELETE)",
+            r"wget\s+.*-O",
         ]
         
         for pattern in dangerous_patterns:

@@ -4,9 +4,9 @@
 echo "🔧 Setting up Git hooks for diri-cyrex..."
 
 # Install hooks into .git/hooks for automatic setup
-if [ -f "scripts/install-git-hooks.sh" ]; then
-    chmod +x scripts/install-git-hooks.sh
-    ./scripts/install-git-hooks.sh
+if [ -f "scripts/dev/install-git-hooks.sh" ]; then
+    chmod +x scripts/dev/install-git-hooks.sh
+    ./scripts/dev/install-git-hooks.sh
 else
     # Fallback: just configure hooksPath
     git config core.hooksPath .git-hooks
