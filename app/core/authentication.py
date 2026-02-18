@@ -76,6 +76,7 @@ class AuthenticationManager:
             )
 
         self._jwt_secret = jwt_secret
+
         self._api_key_header = 'x-api-key'
         self._auth_header = 'authorization'
         self._initialized = False
