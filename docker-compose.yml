@@ -1,0 +1,120 @@
+services:
+  # Note: Using existing Milvus (deepiri-milvus-dev) on port 19530
+  # Note: Using existing MinIO (deepiri-minio-dev) on port 9000
+  # Note: Using existing etcd (deepiri-etcd-dev) if needed
+  
+  # Redis for caching (optional but recommended)
+  redis:
+    image: redis:7-alpine
+    container_name: cyrex-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  # Backend FastAPI service
+  backend:
+    build:
+      context: ..
+      dockerfile: diri-cyrex/Dockerfile
+    container_name: cyrex-backend
+    ports:
+      - "8001:8000"  # Changed to 8001 to avoid conflict with existing deepiri-cyrex-dev on 8000
+    environment:
+      # Python Environment
+      - PYTHONPATH=/opt/conda/lib/python3.11/site-packages:/app:/app/deepiri-modelkit/src
+      
+      # API Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - CYREX_API_KEY=${CYREX_API_KEY:-change-me}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:5173}
+      
+      # Milvus Configuration (using existing deepiri-milvus-dev)
+      # Use host.docker.internal to connect to services on host network
+      - MILVUS_HOST=host.docker.internal
+      - MILVUS_PORT=19530
+      
+      # PostgreSQL Configuration (using existing deepiri-postgres-dev)
+      # Use host.docker.internal to connect to services on host network
+      - POSTGRES_HOST=host.docker.internal
+      - POSTGRES_PORT=5432
+      
+      # Redis Configuration
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # Node Backend (if needed)
+      - NODE_BACKEND_URL=${NODE_BACKEND_URL:-http://api-gateway:5000}
+    volumes:
+      # Mount app directory for development (optional - comment out for production)
+      - ./app:/app/app:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Connect to existing Milvus on host network via host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+    # Verify PDF parsers are available, then start server
+    # Note: Packages should be installed during Docker build (as root)
+    # Runtime installation as non-root user (appuser) will fail due to permissions
+    command:
+      - /bin/bash
+      - -c
+      - |
+        echo "Checking PDF parsing dependencies..."
+        HAS_PDFPLUMBER=false
+        HAS_PYPDF2=false
+        
+        if /opt/conda/bin/python -c "import pdfplumber" 2>/dev/null; then
+          HAS_PDFPLUMBER=true
+          echo "✓ pdfplumber is available"
+        else
+          echo "⚠ pdfplumber not available"
+        fi
+        
+        if /opt/conda/bin/python -c "import PyPDF2" 2>/dev/null; then
+          HAS_PYPDF2=true
+          echo "✓ PyPDF2 is available"
+        else
+          echo "⚠ PyPDF2 not available"
+        fi
+        
+        if [ "$HAS_PDFPLUMBER" = "false" ] && [ "$HAS_PYPDF2" = "false" ]; then
+          echo "ERROR: Neither pdfplumber nor PyPDF2 is installed!" >&2
+          echo "Please rebuild the Docker image to install these packages:" >&2
+          echo "  docker-compose build backend" >&2
+          echo "Or ensure pdfplumber>=0.10.0 and PyPDF2>=3.0.0 are in requirements.txt" >&2
+          exit 1
+        fi
+        
+        echo "Starting server..."
+        exec /usr/local/bin/docker-entrypoint.sh uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  default:
+    name: cyrex-network

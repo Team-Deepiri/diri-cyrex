@@ -19,7 +19,8 @@ export type TabId =
   | 'health'
   | 'history'
   | 'vendor-fraud'
-  | 'agent-playground';
+  | 'agent-playground'
+  | 'document-indexing';
 
 interface UIState {
   activeTab: TabId;

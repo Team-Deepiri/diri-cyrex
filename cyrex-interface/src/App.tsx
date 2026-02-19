@@ -7,7 +7,7 @@ import { VendorFraudPanel } from './components/VendorFraud';
 import { AgentPlayground } from './components/AgentPlayground';
 import { WorkflowPlayground } from './components/WorkflowPlayground';
 import { MessagesWidget } from './components/MessagesWidget/MessagesWidget';
-
+import { DocumentIndexingPanel } from './components/DocumentIndexing/DocumentIndexingPanel';
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -3849,6 +3849,14 @@ export default function App() {
             </div>
           )}
 
+          {/* Document Indexing Tab */}
+          {activeTab === 'document-indexing' && (
+            <div>
+              <DocumentIndexingPanel baseUrl={baseUrl} apiKey={apiKey} />
+              {renderDebugPanel('document-indexing')}
+            </div>
+          )}
+          
           {/* Health Tab */}
           {activeTab === 'health' && (
             <div>
