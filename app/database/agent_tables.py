@@ -137,6 +137,30 @@ async def create_agent_tables():
         CREATE INDEX IF NOT EXISTS idx_events_severity ON cyrex.events(severity);
     """)
     
+    # Agent Metrics: Per-agent performance tracking (sliding window summaries)
+    await postgres.execute("""
+        CREATE TABLE IF NOT EXISTS cyrex.agent_metrics (
+            id SERIAL PRIMARY KEY,
+            agent_id VARCHAR(255) NOT NULL,
+            role VARCHAR(100) NOT NULL,
+            recorded_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            window_start TIMESTAMP NOT NULL,
+            window_end TIMESTAMP NOT NULL,
+            total_invocations INTEGER NOT NULL DEFAULT 0,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            guardrail_block_count INTEGER NOT NULL DEFAULT 0,
+            avg_duration_ms FLOAT NOT NULL DEFAULT 0,
+            p50_duration_ms FLOAT NOT NULL DEFAULT 0,
+            p95_duration_ms FLOAT NOT NULL DEFAULT 0,
+            p99_duration_ms FLOAT NOT NULL DEFAULT 0,
+            avg_confidence FLOAT NOT NULL DEFAULT 0,
+            tool_usage JSONB NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_agent_metrics_agent_id ON cyrex.agent_metrics(agent_id);
+        CREATE INDEX IF NOT EXISTS idx_agent_metrics_recorded_at ON cyrex.agent_metrics(recorded_at);
+    """)
+
     # Spreadsheet Data: User-specific spreadsheet storage
     await postgres.execute("""
         CREATE TABLE IF NOT EXISTS cyrex.spreadsheet_data (
@@ -196,7 +220,7 @@ async def create_agent_tables():
         CREATE INDEX IF NOT EXISTS idx_corrections_created ON cyrex.document_parsing_corrections(created_at);
     """)
     
-    logger.info("Operational database tables created in cyrex schema (workflows, task_executions, events, conversations, spreadsheet_data, document_parsing_templates, document_parsing_corrections)")
+    logger.info("Operational database tables created in cyrex schema (workflows, task_executions, events, conversations, spreadsheet_data, agent_metrics, document_parsing_templates, document_parsing_corrections)")
 
 
 async def drop_agent_tables():
@@ -208,6 +232,7 @@ async def drop_agent_tables():
         "cyrex.task_executions",  # Drop second (depends on workflows)
         "cyrex.workflows",  # Drop third
         "cyrex.spreadsheet_data",  # Drop fourth
+        "cyrex.agent_metrics",  # Drop fifth
         "cyrex.agent_playground_messages",  # Drop last
     ]
     

@@ -148,43 +148,34 @@ class AgentMetricsCollector:
         self._tool_counts: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self._lock = asyncio.Lock()
         self._db_initialized = False
+        # Cached Prometheus label objects: (agent_id, role, status) -> Counter child
+        self._prom_invoke_total: Dict[tuple, Any] = {}
+        # (agent_id, role) -> Histogram child
+        self._prom_invoke_duration: Dict[tuple, Any] = {}
+        self._prom_confidence: Dict[tuple, Any] = {}
+        # (agent_id, tool_name) -> Counter child
+        self._prom_tool_calls: Dict[tuple, Any] = {}
 
     async def ensure_db(self):
-        """Create the agent_metrics table once."""
+        """Verify the agent_metrics table exists (DDL managed by agent_tables.py)."""
         if self._db_initialized:
             return
         try:
             from ..database.postgres import get_postgres_manager
             postgres = await get_postgres_manager()
-            await postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
-            await postgres.execute("""
-                CREATE TABLE IF NOT EXISTS cyrex.agent_metrics (
-                    id SERIAL PRIMARY KEY,
-                    agent_id VARCHAR(255) NOT NULL,
-                    role VARCHAR(100) NOT NULL,
-                    recorded_at TIMESTAMP NOT NULL DEFAULT NOW(),
-                    window_start TIMESTAMP NOT NULL,
-                    window_end TIMESTAMP NOT NULL,
-                    total_invocations INTEGER NOT NULL DEFAULT 0,
-                    success_count INTEGER NOT NULL DEFAULT 0,
-                    error_count INTEGER NOT NULL DEFAULT 0,
-                    guardrail_block_count INTEGER NOT NULL DEFAULT 0,
-                    avg_duration_ms FLOAT NOT NULL DEFAULT 0,
-                    p50_duration_ms FLOAT NOT NULL DEFAULT 0,
-                    p95_duration_ms FLOAT NOT NULL DEFAULT 0,
-                    p99_duration_ms FLOAT NOT NULL DEFAULT 0,
-                    avg_confidence FLOAT NOT NULL DEFAULT 0,
-                    tool_usage JSONB NOT NULL DEFAULT '{}'
-                );
-                CREATE INDEX IF NOT EXISTS idx_agent_metrics_agent_id
-                    ON cyrex.agent_metrics(agent_id);
-                CREATE INDEX IF NOT EXISTS idx_agent_metrics_recorded_at
-                    ON cyrex.agent_metrics(recorded_at);
+            exists = await postgres.fetchval("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables
+                    WHERE table_schema = 'cyrex' AND table_name = 'agent_metrics'
+                )
             """)
+            if not exists:
+                logger.warning("cyrex.agent_metrics table not found; run initialize_agent_database() first")
+                return
             self._db_initialized = True
-            logger.info("Agent metrics DB table ready")
+            logger.debug("Agent metrics DB table verified")
         except Exception as e:
-            logger.warning(f"Could not initialize agent_metrics table: {e}")
+            logger.warning(f"Could not verify agent_metrics table: {e}")
 
     def record(
         self,
@@ -217,13 +208,29 @@ class AgentMetricsCollector:
         for tool_name in tool_calls:
             self._tool_counts[agent_id][tool_name] += 1
 
-        # Prometheus
+        # Prometheus (use cached label objects to avoid repeated dict lookups)
         status = "guardrail_blocked" if guardrail_blocked else ("success" if success else "error")
-        AGENT_INVOKE_TOTAL.labels(agent_id=agent_id, role=role, status=status).inc()
-        AGENT_INVOKE_DURATION.labels(agent_id=agent_id, role=role).observe(duration_ms / 1000.0)
-        AGENT_CONFIDENCE.labels(agent_id=agent_id, role=role).observe(confidence)
+        invoke_key = (agent_id, role, status)
+        if invoke_key not in self._prom_invoke_total:
+            self._prom_invoke_total[invoke_key] = AGENT_INVOKE_TOTAL.labels(
+                agent_id=agent_id, role=role, status=status
+            )
+        self._prom_invoke_total[invoke_key].inc()
+
+        ar_key = (agent_id, role)
+        if ar_key not in self._prom_invoke_duration:
+            self._prom_invoke_duration[ar_key] = AGENT_INVOKE_DURATION.labels(agent_id=agent_id, role=role)
+            self._prom_confidence[ar_key] = AGENT_CONFIDENCE.labels(agent_id=agent_id, role=role)
+        self._prom_invoke_duration[ar_key].observe(duration_ms / 1000.0)
+        self._prom_confidence[ar_key].observe(confidence)
+
         for tool_name in tool_calls:
-            AGENT_TOOL_CALLS_TOTAL.labels(agent_id=agent_id, tool_name=tool_name).inc()
+            tc_key = (agent_id, tool_name)
+            if tc_key not in self._prom_tool_calls:
+                self._prom_tool_calls[tc_key] = AGENT_TOOL_CALLS_TOTAL.labels(
+                    agent_id=agent_id, tool_name=tool_name
+                )
+            self._prom_tool_calls[tc_key].inc()
 
     def record_message_sent(self, agent_id: str, channel: str):
         """Record an inter-agent message sent."""

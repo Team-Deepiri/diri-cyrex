@@ -108,9 +108,16 @@ class BaseAgent(ABC):
         self._tools: Dict[str, Callable] = {}
         self._register_default_tools()
 
-    # -----------------------------------------------------------------------
-    # Initialization
-    # -----------------------------------------------------------------------
+    async def initialize(self):
+        """
+        Eagerly initialize all async components including the SynapseBroker.
+
+        Call this immediately after construction (e.g. in AgentFactory) so
+        that components are ready before the first invoke and the broker
+        listener is registered before any messages can arrive.
+        """
+        await self._initialize_components()
+        await self._initialize_broker()
 
     async def _initialize_components(self):
         """Initialize async components"""
@@ -136,7 +143,7 @@ class BaseAgent(ABC):
             self._event_handler = await get_event_handler()
 
     async def _initialize_broker(self):
-        """Lazy-initialize SynapseBroker and start listening on this agent's channel."""
+        """Initialize SynapseBroker and start listening on this agent's channel."""
         if self._broker is not None:
             return
         try:
@@ -147,10 +154,6 @@ class BaseAgent(ABC):
             self.logger.debug(f"Agent {self.agent_id} subscribed to channel {channel}")
         except Exception as e:
             self.logger.warning(f"Could not initialize SynapseBroker for agent {self.agent_id}: {e}")
-
-    # -----------------------------------------------------------------------
-    # Prompt helpers
-    # -----------------------------------------------------------------------
 
     def _default_prompt_template(self) -> str:
         """Default prompt template"""
@@ -173,10 +176,6 @@ Context: {{context}}
         self._tools["search_memory"] = self._tool_search_memory
         self._tools["store_memory"] = self._tool_store_memory
         self._tools["get_context"] = self._tool_get_context
-
-    # -----------------------------------------------------------------------
-    # Core invoke — with metrics instrumentation
-    # -----------------------------------------------------------------------
 
     async def invoke(
         self,
@@ -296,10 +295,6 @@ Context: {{context}}
             if self.status == AgentStatus.PROCESSING:
                 self.status = AgentStatus.IDLE
 
-    # -----------------------------------------------------------------------
-    # LLM invocation helpers
-    # -----------------------------------------------------------------------
-
     async def _invoke_simple(self, prompt: str) -> AgentResponse:
         """Simple invoke without tools"""
         if not self.llm:
@@ -367,10 +362,6 @@ Provide a final response incorporating the tool results.
             confidence=0.9 if tool_calls else 0.8,
         )
 
-    # -----------------------------------------------------------------------
-    # Context / memory helpers
-    # -----------------------------------------------------------------------
-
     def _build_prompt(self, input_text: str, context: Dict[str, Any]) -> str:
         """Build prompt from template"""
         return self.prompt_template.format(
@@ -410,10 +401,6 @@ Provide a final response incorporating the tool results.
             importance=0.7,
             metadata={"agent_id": self.agent_id, "role": self.role.value},
         )
-
-    # -----------------------------------------------------------------------
-    # Tool helpers
-    # -----------------------------------------------------------------------
 
     def _format_tool_descriptions(self) -> str:
         """Format tool descriptions for prompt"""
@@ -494,10 +481,6 @@ Provide a final response incorporating the tool results.
         tool_func.__doc__ = description or tool_func.__doc__
         self._tools[name] = tool_func
         self.logger.debug(f"Tool registered: {name}")
-
-    # -----------------------------------------------------------------------
-    # Inter-agent communication via SynapseBroker
-    # -----------------------------------------------------------------------
 
     async def send_message(
         self,
@@ -605,10 +588,6 @@ Provide a final response incorporating the tool results.
             f"Agent {self.name} received message from {message.sender}: "
             f"{json.dumps(message.payload)[:200]}"
         )
-
-    # -----------------------------------------------------------------------
-    # Abstract interface
-    # -----------------------------------------------------------------------
 
     @abstractmethod
     async def process(self, task: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
