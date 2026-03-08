@@ -168,7 +168,7 @@ RUN if [ "$BUILD_TYPE" = "from-scratch" ]; then \
 COPY deepiri-modelkit /app/deepiri-modelkit
 
 # Copy requirements first for better caching
-COPY diri-cyrex/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
 
 # Remove torch and deepiri-modelkit editable install from requirements.txt
 # (torch already in base image, modelkit installed separately)
@@ -295,9 +295,9 @@ ARG BASE_IMAGE
 COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
 # Copy all requirements files for conditional installation
-COPY diri-cyrex/requirements.txt /app/requirements.txt
-COPY diri-cyrex/requirements-cpu.txt /app/requirements-cpu.txt
-COPY diri-cyrex/requirements-mpsos.txt /app/requirements-mpsos.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements/requirements-mpsos.txt /app/requirements-mpsos.txt
 
 # Upgrade pip with resume-friendly settings
 RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --upgrade pip setuptools wheel
@@ -589,9 +589,9 @@ ARG BASE_IMAGE
 COPY deepiri-modelkit /app/deepiri-modelkit
 
 # Copy all requirements files for conditional installation
-COPY diri-cyrex/requirements.txt /app/requirements.txt
-COPY diri-cyrex/requirements-cpu.txt /app/requirements-cpu.txt
-COPY diri-cyrex/requirements-mpsos.txt /app/requirements-mpsos.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements/requirements-mpsos.txt /app/requirements-mpsos.txt
 
 # Remove torch and deepiri-modelkit editable install from requirements files
 # (torch already installed in base-from-scratch, modelkit installed separately)
