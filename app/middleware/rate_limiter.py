@@ -45,6 +45,16 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.requests_per_minute = requests_per_minute
     
     async def dispatch(self, request: Request, call_next):
+        # Skip rate limiting in development mode
+        import os
+        env = os.getenv("ENVIRONMENT", os.getenv("NODE_ENV", "development")).lower()
+        if env != "production":
+            # In development, just pass through
+            response = await call_next(request)
+            response.headers["X-RateLimit-Remaining"] = str(self.requests_per_minute)
+            response.headers["X-RateLimit-Limit"] = str(self.requests_per_minute)
+            return response
+        
         client_ip = request.client.host if request.client else "unknown"
         
         bucket = self.buckets[client_ip]
