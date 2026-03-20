@@ -10,6 +10,8 @@ Cyrex now includes the complete Deepiri AI system with three tiers:
 2. **Ability Generation** (Tier 2): LLM + RAG for dynamic ability creation
 3. **Productivity Agent** (Tier 3): RL-based adaptive learning
 
+The cyrex powers the agentic processing for any of the services needed. The goal of the cyrex is a framework to produce agents that can easily interact with the Deepiri microservices and data ingestion / extraction, as well as have a self improving feedback loop built into it's system for adjusting model weights and fine tuning the base LLMs.
+
 See `DEEPIRI_AI_SYSTEM.md` for complete documentation.
 
 ##  Quick Start
