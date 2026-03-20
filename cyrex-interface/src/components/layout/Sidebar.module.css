@@ -1,0 +1,187 @@
+/* Sidebar Styles */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 250px;
+  background: var(--color-bg-header);
+  border-right: 1px solid var(--color-border-light);
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 900;
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  width: 70px;
+}
+
+/* Header Section */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-lg);
+  min-height: 60px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-lg);
+  color: var(--color-primary-500);
+}
+
+.logoImage {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.logoText {
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 1;
+  max-width: 200px;
+  transition: opacity 0.2s ease, max-width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.logoBrand {
+  color: var(--color-primary-500);
+}
+
+.logoSubtitle {
+  color: var(--color-text-primary);
+}
+
+.collapsed .logoText {
+  opacity: 0;
+  max-width: 0;
+}
+
+/* Footer Section */
+.footer {
+  padding: var(--spacing-md);
+  display: flex;
+  justify-content: center;
+}
+
+.toggleButton {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  padding: var(--spacing-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, color 0.2s ease;
+  border-radius: 4px;
+  width: 100%;
+}
+
+.toggleButton:hover {
+  background: var(--color-primary-500);
+  color: #000;
+}
+
+/* Navigation Section */
+.navigation {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--spacing-md) 0;
+}
+
+.navItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: transparent;
+  border: none;
+  border-left: 3px solid transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-normal);
+  text-align: left;
+  transition: background 0.2s ease, color 0.2s ease, border-left-color 0.2s ease, padding 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  position: relative;
+}
+
+.navIcon {
+  font-size: 20px;
+  flex-shrink: 0;
+  min-width: 24px;
+  width: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.navLabel {
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.15s ease, width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  min-width: 0;
+  flex: 1;
+}
+
+.collapsed .navLabel {
+  opacity: 0;
+  width: 0;
+}
+
+.navItem:hover {
+  background: rgba(255, 153, 0, 0.1);
+  color: var(--color-primary-500);
+  border-left-color: var(--color-primary-500);
+}
+
+.navItem.active {
+  background: var(--color-primary-500);
+  color: #000;
+  font-weight: var(--font-weight-semibold);
+  border-left-color: var(--color-primary-600);
+}
+
+.navItem.active .navIcon {
+  filter: brightness(0);
+}
+
+/* Scrollbar Styling */
+.navigation::-webkit-scrollbar {
+  width: 4px;
+}
+
+.navigation::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.navigation::-webkit-scrollbar-thumb {
+  background: var(--color-border-light);
+  border-radius: 2px;
+}
+
+.navigation::-webkit-scrollbar-thumb:hover {
+  background: var(--color-primary-500);
+}
+
+/* Collapsed State Adjustments */
+.collapsed .navItem {
+  padding: var(--spacing-md) 20px;
+}
+

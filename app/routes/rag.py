@@ -5,7 +5,7 @@ Retrieval-Augmented Generation for challenge generation
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List, Dict
-from ..train.infrastructure.rag_pipeline import RAGPipeline, initialize_rag_system
+from ..integrations.rag_pipeline import RAGPipeline, initialize_rag_system
 from ..services.challenge_generator import get_challenge_generator
 from ..logging_config import get_logger, ErrorLogger
 

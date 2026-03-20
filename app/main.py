@@ -1,43 +1,110 @@
-from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from .routes.agent import router as agent_router
-from .routes.challenge import router as challenge_router
-from .settings import settings
-from .logging_config import get_logger, RequestLogger, ErrorLogger
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator, Optional
+from collections import defaultdict
+from threading import Lock
+
 import time
 import uuid
 import logging
-import numpy as np
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-from contextlib import asynccontextmanager
 import asyncio
-from typing import AsyncGenerator
-from redis import asyncio as aioredis
+import numpy as np
 
-# Initialize loggers
+from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+
+from .settings import settings
+from .logging_config import get_logger, RequestLogger, ErrorLogger
+from .middleware.request_timing import RequestTimingMiddleware
+from .middleware.rate_limiter import RateLimitMiddleware
+
+# Core routers
+from .routes.agent import router as agent_router
+from .routes.challenge import router as challenge_router
+from .routes.task import router as task_router
+from .routes.personalization import router as personalization_router
+from .routes.rag import router as rag_router
+from .routes.inference import router as inference_router
+from .routes.bandit import router as bandit_router
+from .routes.session import router as session_router
+from .routes.monitoring import router as monitoring_router
+from .routes.intelligence_api import router as intelligence_api_router
+from .routes.orchestration_api import router as orchestration_router
+
+# Extended routers
+from .routes.company_automation_api import router as company_automation_router
+from .routes.universal_rag_api import router as universal_rag_router
+from .routes.document_indexing_api import router as document_indexing_router
+from .routes.collection_management_api import router as collection_management_router
+from .routes.language_intelligence_api import router as language_intelligence_router
+from .routes.document_extraction_api import router as document_extraction_router
+from .routes.testing_api import router as testing_router
+from .routes.vendor_fraud_api import router as vendor_fraud_router
+from .routes.agent_playground_api import router as agent_playground_router
+from .routes.workflow_api import router as workflow_router
+from .routes.cyrex_guard_api import router as cyrex_guard_router
+from .routes.documents import router as documents_router
+
+# Logging
 logger = get_logger("cyrex.main")
 request_logger = RequestLogger()
 error_logger = ErrorLogger()
 
-# Prometheus metrics
+# Metrics
 REQ_COUNTER = Counter("cyrex_requests_total", "Total requests", ["path", "method", "status"])
 REQ_LATENCY = Histogram("cyrex_request_duration_seconds", "Request latency", ["path", "method"])
 ERROR_COUNTER = Counter("cyrex_errors_total", "Total errors", ["error_type", "endpoint"])
 
+# Request logging throttling
+_request_counts = defaultdict(int)
+_request_lock = Lock()
+RATE_LIMITED_PATHS = [
+    "/health",
+    "/metrics",
+    "/orchestration/status",
+    "/orchestration/health-comprehensive",
+]
+
+def should_log_request(path: str) -> bool:
+    if "/conversation" in path and path.endswith("/conversation"):
+        return False
+    if any(path.startswith(p) for p in RATE_LIMITED_PATHS):
+        with _request_lock:
+            _request_counts[path] += 1
+            if _request_counts[path] % 10 == 0:
+                _request_counts[path] = 0
+                return True
+            return False
+    return True
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager for startup/shutdown events."""
-    # Startup
     logger.info("Starting Deepiri AI Challenge Service API", version="3.0.0")
-    
-    # Validate required settings
-    if not settings.OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY not configured - AI features will be disabled")
 
-    # Initialize optional Redis-backed tool rate limiter.
+    # Uvicorn log filtering
+    from .logging_config import RateLimitedAccessLogFilter
+    uvicorn_logger = logging.getLogger("uvicorn.access")
+    filter_instance = RateLimitedAccessLogFilter()
+    uvicorn_logger.filters.clear()
+    uvicorn_logger.addFilter(filter_instance)
+
+    # Validate config
+    if not settings.OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not set")
+
+    # Initialize core systems
     try:
+        from .core.system_initializer import get_system_initializer
+        system = await get_system_initializer()
+        await system.initialize_all()
+        logger.info("Core systems initialized")
+    except Exception as e:
+        logger.warning(f"System init failed: {e}")
+
+    # Initialize Redis tool rate limiter
+    try:
+        from redis import asyncio as aioredis
         from .core.rate_limit_tools import RedisTokenBucketLimiter
         from .core.tool_registry import get_tool_registry
 
@@ -46,160 +113,142 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
-            decode_responses=False,
         )
         await redis_client.ping()
         get_tool_registry().set_rate_limiter(RedisTokenBucketLimiter(redis_client))
-        logger.info("Tool rate limiter initialized and attached to registry")
+        logger.info("Tool rate limiter enabled")
     except Exception as e:
-        logger.warning(f"Tool rate limiter disabled (Redis unavailable): {e}")
-    
+        logger.warning(f"Rate limiter disabled: {e}")
+
     yield
-    
-    # Shutdown
+
+    # Shutdown systems
+    try:
+        system = await get_system_initializer()
+        await system.shutdown_all()
+    except Exception as e:
+        logger.warning(f"System shutdown failed: {e}")
+
     logger.info("Shutting down Deepiri AI Challenge Service API")
 
 
 app = FastAPI(
-    title="Deepiri AI Challenge Service API", 
+    title="Deepiri AI Challenge Service API",
     version="3.0.0",
     lifespan=lifespan
 )
 
-# CORS configuration - support both web app and desktop IDE
-cors_origins = [settings.CORS_ORIGIN] if settings.CORS_ORIGIN else []
-# Add common desktop IDE origins
-cors_origins.extend([
-    "http://localhost:5173",  # Vite dev server
-    "http://localhost:5175",  # Cyrex interface dev server
-    "http://localhost:3000",  # React dev server
-    "file://",  # Electron file protocol
-    "app://",   # Electron app protocol
-])
-
+# CORS
+origins = [settings.CORS_ORIGIN] if settings.CORS_ORIGIN else []
+origins += [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:5175",
+    "file://",
+    "app://",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestTimingMiddleware)
+app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
 
-
+# Middleware
 @app.middleware("http")
-async def add_request_id_and_metrics(request: Request, call_next):
-    """Middleware for request ID generation, metrics collection, and logging."""
+async def middleware(request: Request, call_next):
     request_id = str(uuid.uuid4())
-    start = time.time()
-    path = request.url.path
-    method = request.method
-    response = None
-    
-    # Add request ID to request state
     request.state.request_id = request_id
-    
+    start = time.time()
+    response = None
+
     try:
-        # API key guard for non-health/metrics endpoints
-        # Allow OPTIONS requests (CORS preflight) and requests from desktop IDE (Electron) and web app
+        # API Key guard
+        path = request.url.path
+        method = request.method
         if not path.startswith("/health") and not path.startswith("/metrics") and method != "OPTIONS":
             api_key = request.headers.get("x-api-key")
-            # Check if request is from desktop IDE (has x-desktop-client header) or has valid API key
-            is_desktop_client = request.headers.get("x-desktop-client") == "true"
-            
-            if settings.CYREX_API_KEY:
-                # For local development: allow requests when API key is set to default "change-me" and no key provided
-                is_default_key = settings.CYREX_API_KEY == "change-me"
-                has_valid_key = api_key == settings.CYREX_API_KEY
-                
-                # Desktop IDE can use API key or be identified by header
-                if not is_desktop_client:
-                    if not has_valid_key and not (is_default_key and not api_key):
-                        # Require valid API key unless it's default and none provided (local dev)
-                        error_logger.log_api_error(
-                            HTTPException(status_code=401, detail="Invalid API key"),
-                            request_id,
-                            path
-                        )
-                        raise HTTPException(status_code=401, detail="Invalid API key")
-                # Desktop IDE with API key is always allowed
-                elif is_desktop_client and api_key and api_key != settings.CYREX_API_KEY:
-                    # Desktop IDE must have valid API key
-                    error_logger.log_api_error(
-                        HTTPException(status_code=401, detail="Invalid API key"),
-                        request_id,
-                        path
-                    )
-                    raise HTTPException(status_code=401, detail="Invalid API key")
-        
+            is_desktop = request.headers.get("x-desktop-client") == "true"
+            is_default_key = settings.CYREX_API_KEY == "change-me"
+            has_valid_key = api_key == settings.CYREX_API_KEY
+
+            if not is_desktop and not has_valid_key and not (is_default_key and not api_key):
+                error_logger.log_api_error(
+                    HTTPException(status_code=401, detail="Invalid API key"),
+                    request_id,
+                    path
+                )
+                raise HTTPException(status_code=401, detail="Invalid API key")
+            if is_desktop and api_key and api_key != settings.CYREX_API_KEY:
+                error_logger.log_api_error(
+                    HTTPException(status_code=401, detail="Invalid API key"),
+                    request_id,
+                    path
+                )
+                raise HTTPException(status_code=401, detail="Invalid API key")
+
         response = await call_next(request)
+        response.headers["x-request-id"] = request_id
         return response
-        
+
     except Exception as e:
-        # Log and track errors
-        error_logger.log_api_error(e, request_id, path)
-        ERROR_COUNTER.labels(
-            error_type=type(e).__name__,
-            endpoint=path
-        ).inc()
-        
-        # Re-raise HTTP exceptions, wrap others
-        if isinstance(e, HTTPException):
-            raise
-        raise HTTPException(status_code=500, detail="Internal server error")
-        
+        error_logger.log_api_error(e, request_id, request.url.path)
+        ERROR_COUNTER.labels(type(e).__name__, request.url.path).inc()
+        raise
+
     finally:
-        # Record metrics and log request
-        status = response.status_code if response else 500
         duration = time.time() - start
-        duration_ms = duration * 1000
-        
-        REQ_COUNTER.labels(path=path, method=method, status=str(status)).inc()
-        REQ_LATENCY.labels(path=path, method=method).observe(duration)
-        
-        request_logger.log_request(
-            request_id=request_id,
-            method=method,
-            path=path,
-            status_code=status,
-            duration_ms=duration_ms,
-            user_agent=request.headers.get("user-agent"),
-            ip_address=request.client.host if request.client else None
-        )
+        status = response.status_code if response else 500
+        REQ_COUNTER.labels(request.url.path, request.method, str(status)).inc()
+        REQ_LATENCY.labels(request.url.path, request.method).observe(duration)
 
+        if should_log_request(request.url.path):
+            request_logger.log_request(
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status_code=status,
+                duration_ms=duration * 1000,
+                user_agent=request.headers.get("user-agent"),
+                ip_address=request.client.host if request.client else None
+            )
 
+# Health endpoint
 @app.get("/health")
-def health():
-    """Health check endpoint with detailed status information."""
+async def health():
     health_status = {
         "status": "healthy",
         "version": "3.0.0",
         "timestamp": time.time(),
-        "services": {
-            "ai": "ready" if settings.OPENAI_API_KEY else "disabled",
-            "redis": "not_configured",  # TODO: Add Redis health check
-            "node_backend": "not_checked"  # TODO: Add Node backend health check
-        },
-        "configuration": {
-            "log_level": settings.LOG_LEVEL,
-            "cors_origin": settings.CORS_ORIGIN,
-            "max_concurrent_requests": settings.MAX_CONCURRENT_REQUESTS
-        }
+        "services": {"ai": "ready" if settings.OPENAI_API_KEY else "disabled"}
     }
-    
-    logger.info("Health check requested", **health_status)
+
+    # Redis health
+    try:
+        import redis.asyncio as redis
+        redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        if settings.REDIS_PASSWORD:
+            redis_url = f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        r = redis.from_url(redis_url, db=settings.REDIS_DB, decode_responses=True, socket_connect_timeout=5.0)
+        await r.ping()
+        await r.close()
+        health_status["services"]["redis"] = "healthy"
+    except Exception as e:
+        health_status["services"]["redis"] = f"unhealthy: {e}"
+
     return health_status
 
-
+# Metrics
 @app.get("/metrics")
 def metrics():
-    """Prometheus metrics endpoint."""
-    logger.debug("Metrics endpoint accessed")
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-
+# Root
 @app.get("/")
 def root():
-    """Root endpoint with API information."""
     return {
         "message": "Deepiri AI Challenge Service API",
         "version": "3.0.0",
@@ -208,10 +257,8 @@ def root():
         "metrics": "/metrics"
     }
 
-
-# Direct API endpoints (without /agent prefix)
+# Direct AI endpoints
 from pydantic import BaseModel
-from typing import Optional
 
 class EmbeddingRequest(BaseModel):
     text: str
@@ -224,51 +271,26 @@ class CompletionRequest(BaseModel):
 
 @app.post("/api/embeddings")
 async def api_embeddings(req: EmbeddingRequest, request: Request):
-    """Generate text embeddings - direct API endpoint."""
     request_id = getattr(request.state, 'request_id', 'unknown')
-    
     try:
         from ..services.embedding_service import get_embedding_service
-        
         service = get_embedding_service()
-        # Embed returns numpy array - get first if it's 2D
         embedding_result = service.embed(req.text, use_cache=True)
-        
-        # Handle numpy array - convert to list and flatten if needed
-        if isinstance(embedding_result, np.ndarray):
-            if len(embedding_result.shape) > 1:
-                embedding = embedding_result[0]
-            else:
-                embedding = embedding_result
-            embedding_list = embedding.tolist()
-        else:
-            embedding_list = list(embedding_result) if hasattr(embedding_result, '__iter__') else [embedding_result]
-        
-        return {
-            "embedding": embedding_list,
-            "dimension": len(embedding_list),
-            "model": req.model
-        }
-    
+        embedding_list = embedding_result.tolist() if isinstance(embedding_result, np.ndarray) else list(embedding_result)
+        return {"embedding": embedding_list, "dimension": len(embedding_list), "model": req.model}
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/embeddings")
-        logger.error("Embedding generation failed", request_id=request_id, error=str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Embedding generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
 
 @app.post("/api/complete")
 async def api_complete(req: CompletionRequest, request: Request):
-    """Generate AI completion - direct API endpoint."""
     request_id = getattr(request.state, 'request_id', 'unknown')
-    
     try:
         if not settings.OPENAI_API_KEY:
             raise HTTPException(status_code=503, detail="OpenAI API key not configured")
-        
         import openai
-        import asyncio
-        
         client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-        
+        import asyncio
         completion = await asyncio.to_thread(
             client.chat.completions.create,
             model=settings.OPENAI_MODEL,
@@ -276,55 +298,40 @@ async def api_complete(req: CompletionRequest, request: Request):
             max_tokens=req.max_tokens,
             temperature=req.temperature
         )
-        
-        return {
-            "completion": completion.choices[0].message.content,
-            "tokens_used": completion.usage.total_tokens if completion.usage else 0,
-            "model": completion.model
-        }
-    
+        return {"completion": completion.choices[0].message.content,
+                "tokens_used": completion.usage.total_tokens if completion.usage else 0,
+                "model": completion.model}
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/complete")
-        logger.error("Completion generation failed", request_id=request_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Completion generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Completion generation failed: {e}")
 
-
-# Include routers
-from .routes.task import router as task_router
-from .routes.personalization import router as personalization_router
-from .routes.rag import router as rag_router
-from .routes.inference import router as inference_router
-from .routes.bandit import router as bandit_router
-from .routes.session import router as session_router
-from .routes.monitoring import router as monitoring_router
-from .routes.intelligence_api import router as intelligence_api_router
-from .routes.orchestration_api import router as orchestration_router
-from .middleware.request_timing import RequestTimingMiddleware
-from .middleware.rate_limiter import RateLimitMiddleware
-
-app.add_middleware(RequestTimingMiddleware)
-app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
-
-app.include_router(agent_router, prefix="/agent", tags=["agent"])
-app.include_router(challenge_router, prefix="/agent", tags=["challenge"])
-app.include_router(task_router, prefix="/agent", tags=["task"])
-app.include_router(personalization_router, prefix="/agent", tags=["personalization"])
-app.include_router(rag_router, prefix="/agent", tags=["rag"])
-app.include_router(inference_router, prefix="/agent", tags=["inference"])
-app.include_router(bandit_router, prefix="/agent", tags=["bandit"])
-app.include_router(session_router, prefix="/agent", tags=["session"])
-app.include_router(monitoring_router, prefix="/agent", tags=["monitoring"])
-app.include_router(intelligence_api_router, prefix="/agent", tags=["intelligence"])
-app.include_router(orchestration_router, tags=["orchestration"])
-
+# Routers
+# Core
+app.include_router(agent_router, prefix="/agent")
+app.include_router(challenge_router, prefix="/agent")
+app.include_router(task_router, prefix="/agent")
+app.include_router(personalization_router, prefix="/agent")
+app.include_router(rag_router)
+app.include_router(inference_router, prefix="/agent")
+app.include_router(bandit_router, prefix="/agent")
+app.include_router(session_router, prefix="/agent")
+app.include_router(monitoring_router, prefix="/agent")
+app.include_router(intelligence_api_router, prefix="/agent")
+app.include_router(orchestration_router)
+# Extended
+app.include_router(company_automation_router)
+app.include_router(universal_rag_router)
+app.include_router(document_indexing_router)
+app.include_router(collection_management_router)
+app.include_router(language_intelligence_router)
+app.include_router(document_extraction_router)
+app.include_router(testing_router)
+app.include_router(vendor_fraud_router)
+app.include_router(agent_playground_router)
+app.include_router(workflow_router)
+app.include_router(cyrex_guard_router)
+app.include_router(documents_router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        log_level=settings.LOG_LEVEL.lower(),
-        reload=True
-    )
-
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

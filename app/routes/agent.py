@@ -202,7 +202,10 @@ async def agent_message_stream(req: MessageRequest, request: Request):
     return StreamingResponse(
         event_generator(), 
         media_type="text/plain",
-        headers={"X-Request-ID": request_id}
+        headers={
+            "X-Request-ID": request_id,
+            "content-type": "text/plain"  # Force exact header without charset
+        }
     )
 
 

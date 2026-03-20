@@ -22,6 +22,7 @@ class MultiArmedBandit:
         self.alpha = {ct: np.ones(context_dim) for ct in challenge_types}
         self.beta = {ct: np.ones(context_dim) for ct in challenge_types}
         self.counts = {ct: 0 for ct in challenge_types}
+        self.values = {ct: 0.0 for ct in challenge_types}  # Track average rewards
         self.total_pulls = 0
     
     def select_challenge(self, context: np.ndarray) -> str:
@@ -107,6 +108,22 @@ class BanditService:
         """Update bandit with reward."""
         bandit = self.get_bandit(user_id)
         context_array = self._context_to_array(context)
+        
+        # Ensure challenge_type exists in counts and values
+        if challenge_type not in bandit.counts:
+            bandit.counts[challenge_type] = 0
+        if challenge_type not in bandit.values:
+            bandit.values[challenge_type] = 0.0
+        
+        # Increment count
+        bandit.counts[challenge_type] += 1
+        n = bandit.counts[challenge_type]
+        prev = bandit.values[challenge_type]
+        
+        # Incremental average update
+        bandit.values[challenge_type] = prev + (reward - prev) / n
+        
+        # Also update alpha/beta for Thompson sampling
         bandit.update(challenge_type, reward, context_array)
     
     def _context_to_array(self, context: Dict) -> np.ndarray:
