@@ -3,9 +3,11 @@ Orchestration API Routes
 Exposes the workflow orchestrator via REST API
 """
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
 from ..core.orchestrator import WorkflowOrchestrator, get_orchestrator
+from ..core.rate_limit_tools import ToolRateLimitExceeded
 from ..core.state_manager import StateStatus
 from ..logging_config import get_logger
 
@@ -116,17 +118,38 @@ async def process_request(
 @router.post("/workflow")
 async def execute_workflow(
     input: ExecuteWorkflowInput,
+    request: Request,
     orchestrator: WorkflowOrchestrator = Depends(get_orchestrator),
 ):
     """Execute a multi-step workflow"""
     try:
         steps = [{"name": s.name, "tool": s.tool, "input": s.input} for s in input.steps]
+        initial_state = input.initial_state or {}
+        if hasattr(request.state, "user_id") and request.state.user_id:
+            initial_state["user_id"] = request.state.user_id
+
         result = await orchestrator.execute_workflow(
             workflow_id=input.workflow_id,
             steps=steps,
-            initial_state=input.initial_state,
+            initial_state=initial_state,
         )
         return result
+
+    except ToolRateLimitExceeded as e:
+        logger.warning(f"Workflow rate limit exceeded: {e}")
+        response = JSONResponse(
+            status_code=429,
+            content={
+                "error": "rate_limit_exceeded",
+                "message": str(e),
+                "remaining": int(e.remaining),
+                "retry_after": e.retry_after,
+                "limit_type": e.limit_type,
+            },
+        )
+        response.headers["Retry-After"] = str(e.retry_after)
+        return response
+
     except Exception as e:
         logger.error(f"Workflow execution failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

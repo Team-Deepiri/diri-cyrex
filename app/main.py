@@ -13,6 +13,7 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from contextlib import asynccontextmanager
 import asyncio
 from typing import AsyncGenerator
+from redis import asyncio as aioredis
 
 # Initialize loggers
 logger = get_logger("cyrex.main")
@@ -34,6 +35,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Validate required settings
     if not settings.OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not configured - AI features will be disabled")
+
+    # Initialize optional Redis-backed tool rate limiter.
+    try:
+        from .core.rate_limit_tools import RedisTokenBucketLimiter
+        from .core.tool_registry import get_tool_registry
+
+        redis_client = aioredis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=False,
+        )
+        await redis_client.ping()
+        get_tool_registry().set_rate_limiter(RedisTokenBucketLimiter(redis_client))
+        logger.info("Tool rate limiter initialized and attached to registry")
+    except Exception as e:
+        logger.warning(f"Tool rate limiter disabled (Redis unavailable): {e}")
     
     yield
     
