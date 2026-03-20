@@ -1,0 +1,3 @@
+[submodule "diri-agent-testing-utils"]
+	path = diri-agent-testing-utils
+	url = git@github.com:Team-Deepiri/diri-agent-testing-utils.git
