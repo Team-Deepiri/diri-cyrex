@@ -20,9 +20,9 @@ from pathlib import Path
 from typing import List, Optional
 import json
 
-# Get project root directory (parent of scripts directory)
+# Get project root directory from scripts/dev/run_tests.py
 SCRIPT_DIR = Path(__file__).parent.absolute()
-PROJECT_ROOT = SCRIPT_DIR.parent.absolute()
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.absolute()
 
 # Ensure we can find the tests directory
 TESTS_DIR = PROJECT_ROOT / "tests"
@@ -74,7 +74,8 @@ TEST_CATEGORIES = {
             "tests/test_ollama_agent.py",
             "tests/test_orchestration_api.py",
             "tests/test_health.py",
-            "tests/test_comprehensive.py"
+            "tests/test_comprehensive.py",
+            "tests/test_rate_limiting.py"
         ],
         "markers": []
     }
@@ -87,7 +88,8 @@ TEST_FILES = {
     "ollama": "tests/test_ollama_agent.py",
     "api": "tests/test_orchestration_api.py",
     "health": "tests/test_health.py",
-    "comprehensive": "tests/test_comprehensive.py"
+    "comprehensive": "tests/test_comprehensive.py",
+    "rate-limiting": "tests/test_rate_limiting.py"
 }
 
 

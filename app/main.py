@@ -78,6 +78,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Failed to start auto-model loader: {e}")
     
+    # Initialize tool rate limiter
+    try:
+        from .utils.cache import get_redis_client
+        from .core.rate_limit_tools import RedisTokenBucketLimiter
+        from .core.tool_registry import get_tool_registry
+        
+        redis_client = await get_redis_client() if hasattr(get_redis_client(), '__aenter__') else get_redis_client()
+        if redis_client:
+            limiter = RedisTokenBucketLimiter(redis_client)
+            registry = get_tool_registry()
+            registry.set_rate_limiter(limiter)
+            logger.info("Tool rate limiter initialized and attached to registry")
+        else:
+            logger.warning("Redis not available. Tool rate limiting is disabled (fail-open).")
+    except Exception as e:
+        logger.error(f"Failed to initialize tool rate limiter: {e}", exc_info=True)
+    
     yield
     
     # Shutdown

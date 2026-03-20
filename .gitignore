@@ -172,6 +172,7 @@ model_cache/
 test_*.py
 *_test.py
 test_model_load.py
+!tests/test_rate_limiting.py
 
 # ========================================
 # MISC

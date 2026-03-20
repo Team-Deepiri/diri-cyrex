@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 from ..logging_config import get_logger
 from .tool_registry import ToolRegistry, get_tool_registry
+from .rate_limit_tools import ToolRateLimitExceeded
 from .state_manager import WorkflowStateManager, WorkflowState, StateStatus
 from .guardrails import SafetyGuardrails, get_guardrails
 
@@ -211,11 +212,15 @@ class TaskExecutionEngine:
                 # Merge current state into input
                 tool_input = {**current_state, **step_input}
                 
-                # Execute tool
-                if hasattr(tool, 'ainvoke'):
-                    output = await tool.ainvoke(tool_input)
-                else:
-                    output = await asyncio.to_thread(tool.invoke, tool_input)
+                # Extract user_id from state for rate limiting
+                user_id = current_state.get("user_id")
+                
+                # Execute tool through registry (with rate limiting)
+                output = await self.tool_registry.aexecute_tool(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    user_id=user_id,
+                )
                 
                 # Safety check on output
                 if isinstance(output, str):
@@ -240,6 +245,29 @@ class TaskExecutionEngine:
             return {
                 "step_id": step_id,
                 "output": step.output_data,
+                "duration_ms": step.duration_ms,
+            }
+        
+        except ToolRateLimitExceeded as e:
+            step.status = ExecutionStatus.FAILED
+            step.error = str(e)
+            step.completed_at = datetime.now()
+            step.duration_ms = (step.completed_at - start_time).total_seconds() * 1000
+            
+            self.logger.warning(
+                f"Step {step_name} rate limited: {e}",
+                remaining=e.remaining,
+                retry_after=e.retry_after,
+                limit_type=e.limit_type,
+            )
+            
+            return {
+                "step_id": step_id,
+                "error": str(e),
+                "error_type": "rate_limit_exceeded",
+                "remaining": e.remaining,
+                "retry_after": e.retry_after,
+                "limit_type": e.limit_type,
                 "duration_ms": step.duration_ms,
             }
         

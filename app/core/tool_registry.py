@@ -8,7 +8,9 @@ from enum import Enum
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
 import inspect
+import math
 from ..logging_config import get_logger
+from .rate_limit_tools import ToolRateLimitExceeded
 
 logger = get_logger("cyrex.tool_registry")
 
@@ -59,6 +61,7 @@ class ToolRegistry:
         self.tools: Dict[str, BaseTool] = {}
         self.metadata: Dict[str, ToolMetadata] = {}
         self.call_counts: Dict[str, int] = {}
+        self._rate_limiter: Optional[Any] = None
         self.logger = logger
         if load_defaults:
             self._load_default_tools()
@@ -74,6 +77,15 @@ class ToolRegistry:
         self.tools = {}
         self.metadata = {}
         self.call_counts = {}
+        self._rate_limiter = None
+    
+    def set_rate_limiter(self, limiter: Optional[Any]):
+        """Attach a rate limiter to the registry."""
+        self._rate_limiter = limiter
+        if limiter:
+            self.logger.info("Rate limiter attached to tool registry")
+        else:
+            self.logger.info("Rate limiter detached from tool registry")
     
     def register_tool(
         self,
@@ -142,6 +154,10 @@ class ToolRegistry:
     def get_tool(self, name: str) -> Optional[BaseTool]:
         """Get tool by name"""
         return self.tools.get(name)
+    
+    def get_metadata(self, name: str) -> Optional[ToolMetadata]:
+        """Get metadata for a tool by name"""
+        return self.metadata.get(name)
     
     def get_tools(
         self,
@@ -227,10 +243,43 @@ class ToolRegistry:
         tool_input: Dict[str, Any],
         user_id: Optional[str] = None,
     ) -> Any:
-        """Async execute tool"""
+        """Async execute tool with rate limiting."""
         tool = self.get_tool(tool_name)
         if not tool:
             raise ValueError(f"Tool {tool_name} not found")
+        
+        metadata = self.get_metadata(tool_name)
+        
+        # Rate limit check
+        if (
+            self._rate_limiter
+            and metadata
+            and metadata.rate_limit is not None
+            and metadata.rate_limit > 0
+        ):
+            refill_rate = metadata.rate_limit / 60.0
+            cost = metadata.cost_per_call or 1.0
+            
+            allowed, remaining = await self._rate_limiter.allow(
+                tool_name=tool_name,
+                user_id=user_id,
+                capacity=float(metadata.rate_limit),
+                refill_rate=refill_rate,
+                cost=cost,
+            )
+            
+            if not allowed:
+                tokens_needed = max(0.01, cost)
+                retry_after = (
+                    math.ceil((tokens_needed - remaining) / refill_rate)
+                    if refill_rate > 0
+                    else 60
+                )
+                raise ToolRateLimitExceeded(
+                    f"Rate limit exceeded for tool '{tool_name}'",
+                    remaining=int(remaining),
+                    retry_after=int(min(retry_after, 3600)),
+                )
         
         try:
             self.call_counts[tool_name] = self.call_counts.get(tool_name, 0) + 1
