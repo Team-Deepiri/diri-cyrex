@@ -95,6 +95,10 @@ llama-cpp-python>=0.2.0  # llama.cpp bindings (optional, for direct model loadin
 # For GPU support: CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install llama-cpp-python
 # For CPU only: pip install llama-cpp-python
 
+# Agent safety guardrails (VCS install; pin @<tag-or-commit> for reproducible builds)
+# Keep the same line in requirements-cpu.txt, requirements-mpsos.txt, requirements-core.txt
+diri-agent-guardrails @ git+https://github.com/Team-Deepiri/diri-agent-guardrails.git@main
+
 # Deepiri ModelKit (shared contracts and utilities)
 # Installed from /app/deepiri-modelkit in Dockerfile
 # For local development: pip install -e ../deepiri-modelkit

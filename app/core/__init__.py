@@ -7,7 +7,7 @@ from .orchestrator import WorkflowOrchestrator
 from .execution_engine import TaskExecutionEngine
 from .state_manager import WorkflowStateManager
 from .tool_registry import ToolRegistry
-from .guardrails import SafetyGuardrails
+from diri_agent_guardrails import SafetyGuardrails
 from .prompt_manager import PromptVersionManager
 from .monitoring import SystemMonitor
 from .queue_manager import TaskQueueManager

@@ -9,10 +9,10 @@ from ..core.memory_manager import get_memory_manager
 from ..core.event_handler import get_event_handler
 from ..core.agent_initializer import get_agent_initializer
 from ..core.langgraph_integration import get_langgraph_manager
-from ..core.enhanced_guardrails import get_enhanced_guardrails
 from ..integrations.api_bridge import get_api_bridge
 from ..integrations.synapse_broker import get_synapse_broker
 from ..logging_config import get_logger
+from diri_agent_guardrails import get_enhanced_guardrails
 
 logger = get_logger("cyrex.system_initializer")
 
@@ -132,7 +132,8 @@ class SystemInitializer:
             await get_event_handler()
             await get_agent_initializer()
             await get_langgraph_manager()
-            await get_enhanced_guardrails()
+            postgres = await get_postgres_manager()
+            await get_enhanced_guardrails(postgres=postgres, schema="cyrex")
             
             # 4. Initialize integrations
             self.logger.info("Initializing integrations...")

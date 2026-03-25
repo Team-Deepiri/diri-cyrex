@@ -16,7 +16,7 @@ from ..core.prompt_templates import get_prompt_template_manager, PromptCategory
 from ..core.queue_system import get_queue_producer, create_queue_consumer, QueuePriority
 from ..core.enhanced_state_manager import get_enhanced_state_manager, WorkflowPhase
 from ..core.redis_streams_broker import get_redis_streams_broker, StreamEventType
-from ..core.advanced_guardrails import get_advanced_guardrails, GuardrailAction
+from diri_agent_guardrails import GuardrailAction, get_advanced_guardrails
 from ..core.orchestrator import get_orchestrator
 from ..core.tool_registry import get_tool_registry, ToolCategory
 from ..integrations.ollama_container import get_ollama_client, ChatMessage, GenerationOptions

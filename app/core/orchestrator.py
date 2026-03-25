@@ -111,7 +111,7 @@ except ImportError:
 from .execution_engine import TaskExecutionEngine, get_execution_engine
 from .state_manager import WorkflowStateManager, get_state_manager
 from .tool_registry import ToolRegistry, get_tool_registry, ToolCategory
-from .guardrails import SafetyGuardrails, get_guardrails
+from diri_agent_guardrails import SafetyGuardrails, get_guardrails
 from .queue_manager import TaskQueueManager, get_queue_manager, TaskPriority
 from .monitoring import SystemMonitor, get_monitor
 from .prompt_manager import PromptVersionManager, get_prompt_manager

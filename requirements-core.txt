@@ -49,3 +49,4 @@ optuna>=3.5.0  # For hyperparameter optimization
 hyperopt>=0.2.7  # For hyperparameter optimization
 tensorboard>=2.15.0  # For visualization
 
+diri-agent-guardrails @ git+https://github.com/Team-Deepiri/diri-agent-guardrails.git@main

@@ -9,14 +9,15 @@ import asyncio
 from ..core.types import AgentConfig, AgentRole, AgentStatus, MemoryType
 from ..core.memory_manager import get_memory_manager
 from ..core.session_manager import get_session_manager
-from ..core.enhanced_guardrails import get_enhanced_guardrails
 from ..core.agent_state_processor import AgentStateProcessor, AgentState
 from ..core.prompt_templates import get_prompt_template_manager
 from ..core.event_registry import get_event_registry
 from ..core.event_handler import get_event_handler
 from ..integrations.local_llm import LocalLLMProvider, get_local_llm
 from ..integrations.api_bridge import get_api_bridge
+from ..database.postgres import get_postgres_manager
 from ..logging_config import get_logger
+from diri_agent_guardrails import get_enhanced_guardrails
 import json
 
 logger = get_logger("cyrex.agent.base")
@@ -103,7 +104,8 @@ class BaseAgent(ABC):
         if not self._session_manager:
             self._session_manager = await get_session_manager()
         if not self._guardrails:
-            self._guardrails = await get_enhanced_guardrails()
+            postgres = await get_postgres_manager()
+            self._guardrails = await get_enhanced_guardrails(postgres=postgres, schema="cyrex")
         if not self._api_bridge:
             self._api_bridge = await get_api_bridge()
         if not self._state_processor:
