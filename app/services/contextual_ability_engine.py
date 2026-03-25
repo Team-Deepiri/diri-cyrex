@@ -51,10 +51,15 @@ except ImportError:
     Milvus = None
 
 try:
-    from langchain_community.embeddings import HuggingFaceEmbeddings
+    # Try modern langchain-huggingface first (eliminates deprecation warnings)
+    from langchain_huggingface import HuggingFaceEmbeddings
 except ImportError:
-    logger.warning("HuggingFaceEmbeddings not available")
-    HuggingFaceEmbeddings = None
+    try:
+        # Fallback to deprecated community version
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+    except ImportError:
+        logger.warning("HuggingFaceEmbeddings not available")
+        HuggingFaceEmbeddings = None
 
 try:
     from langchain_openai import ChatOpenAI
@@ -291,7 +296,7 @@ Generate the ability now:"""
             ability = self.rag_chain.invoke(inputs)
             
             # Validate and post-process
-            ability_dict = ability.dict()
+            ability_dict = ability.model_dump()
             ability_dict = self._validate_ability(ability_dict, user_profile)
             
             # Generate alternatives

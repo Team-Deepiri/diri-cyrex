@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 import os
 
@@ -8,8 +9,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     CORS_ORIGIN: str = "http://localhost:5173"
-    NODE_BACKEND_URL: str = "http://localhost:5000"
+    # Default to api-gateway service name for Docker, fallback to localhost for local dev
+    NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
+    
+    # Messaging Service Configuration
+    MESSAGING_SERVICE_URL: str = "http://messaging-service:5009"
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
@@ -24,6 +29,7 @@ class Settings(BaseSettings):
     # Performance Configuration
     MAX_CONCURRENT_REQUESTS: int = 10
     REQUEST_TIMEOUT: int = 30
+    LOCAL_LLM_TIMEOUT: int = 300  # Timeout for local LLMs (5 minutes - accommodates slower CPU inference)
     
     # AI Configuration
     AI_TEMPERATURE: float = 0.7
@@ -46,16 +52,26 @@ class Settings(BaseSettings):
     
     # Local LLM Configuration
     LOCAL_LLM_BACKEND: str = "ollama"  # "ollama", "llama_cpp", or "transformers"
-    LOCAL_LLM_MODEL: str = "llama3:8b"  # Model name/identifier
+    LOCAL_LLM_MODEL: str = "mistral:7b"  # Model name/identifier (Mistral as default)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
+    
+    # PostgreSQL Configuration
+    # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
+    POSTGRES_HOST: str = "postgres"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_DB: str = "deepiri"
+    POSTGRES_USER: str = "deepiri"
+    POSTGRES_PASSWORD: str = "deepiripassword"
     
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"
+    )
 
 
 # Initialize settings

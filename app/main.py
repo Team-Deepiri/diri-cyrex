@@ -3,6 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from .routes.agent import router as agent_router
 from .routes.challenge import router as challenge_router
+from .routes.company_automation_api import router as company_automation_router
+from .routes.universal_rag_api import router as universal_rag_router
+from .routes.document_indexing_api import router as document_indexing_router
+from .routes.collection_management_api import router as collection_management_router
+from .routes.language_intelligence_api import router as language_intelligence_router
+from .routes.document_extraction_api import router as document_extraction_router
 from .settings import settings
 from .logging_config import get_logger, RequestLogger, ErrorLogger
 import time
@@ -13,6 +19,8 @@ from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_
 from contextlib import asynccontextmanager
 import asyncio
 from typing import AsyncGenerator
+from collections import defaultdict
+from threading import Lock
 
 # Initialize loggers
 logger = get_logger("cyrex.main")
@@ -31,13 +39,62 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting Deepiri AI Challenge Service API", version="3.0.0")
     
+    # Ensure uvicorn access log filter is applied (in case uvicorn reconfigures logger)
+    from .logging_config import RateLimitedAccessLogFilter
+    uvicorn_access_logger = logging.getLogger("uvicorn.access")
+    # Remove existing filter if present and add ours
+    filter_instance = RateLimitedAccessLogFilter()
+    for f in uvicorn_access_logger.filters[:]:
+        if isinstance(f, RateLimitedAccessLogFilter):
+            uvicorn_access_logger.removeFilter(f)
+    uvicorn_access_logger.addFilter(filter_instance)
+    # Also apply to all existing handlers
+    for handler in uvicorn_access_logger.handlers:
+        # Remove existing filter instances from handler
+        for f in handler.filters[:]:
+            if isinstance(f, RateLimitedAccessLogFilter):
+                handler.removeFilter(f)
+        handler.addFilter(filter_instance)
+    
     # Validate required settings
     if not settings.OPENAI_API_KEY:
         logger.warning("OPENAI_API_KEY not configured - AI features will be disabled")
     
+    # Initialize core systems
+    try:
+        from .core.system_initializer import get_system_initializer
+        system_init = await get_system_initializer()
+        await system_init.initialize_all()
+        logger.info("Core systems initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize core systems: {e}", exc_info=True)
+        # Continue startup even if some systems fail
+    
+    # Initialize auto-model loader
+    try:
+        from .integrations.model_loader import get_auto_loader
+        auto_loader = await get_auto_loader()
+        logger.info("Auto-model loader started")
+    except Exception as e:
+        logger.warning(f"Failed to start auto-model loader: {e}")
+    
     yield
     
     # Shutdown
+    try:
+        from .core.system_initializer import get_system_initializer
+        system_init = await get_system_initializer()
+        await system_init.shutdown_all()
+    except Exception as e:
+        logger.warning(f"Error during system shutdown: {e}")
+    
+    try:
+        from .integrations.model_loader import _auto_loader
+        if _auto_loader:
+            await _auto_loader.stop()
+    except Exception:
+        pass
+    
     logger.info("Shutting down Deepiri AI Challenge Service API")
 
 
@@ -66,6 +123,45 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# CORS middleware handles OPTIONS requests automatically
+# No explicit handler needed - FastAPI's CORSMiddleware will return 204 for OPTIONS
+
+
+# Rate limiting for frequent polling endpoints - log every Nth request
+# Track request counts per path for rate limiting
+_request_counts = defaultdict(int)
+_request_lock = Lock()
+
+# Paths that should be rate-limited (log every 10th request)
+RATE_LIMITED_PATHS = [
+    "/health",
+    "/metrics",
+    "/orchestration/status",
+    "/orchestration/health-comprehensive",
+]
+
+def should_log_request(path: str) -> bool:
+    """Determine if a request path should be logged at INFO level."""
+    # Completely suppress conversation polling endpoints
+    if "/conversation" in path and path.endswith("/conversation"):
+        return False
+    
+    # Check if this is a rate-limited path
+    is_rate_limited = any(path.startswith(limited_path) for limited_path in RATE_LIMITED_PATHS)
+    
+    if is_rate_limited:
+        # Log every 10th request for polling endpoints
+        with _request_lock:
+            _request_counts[path] += 1
+            count = _request_counts[path]
+            should_log = (count % 10 == 0)
+            if should_log:
+                _request_counts[path] = 0  # Reset counter
+            return should_log
+    
+    # Always log non-polling endpoints
+    return True
+
 
 @app.middleware("http")
 async def add_request_id_and_metrics(request: Request, call_next):
@@ -82,7 +178,8 @@ async def add_request_id_and_metrics(request: Request, call_next):
     try:
         # API key guard for non-health/metrics endpoints
         # Allow OPTIONS requests (CORS preflight) and requests from desktop IDE (Electron) and web app
-        if not path.startswith("/health") and not path.startswith("/metrics") and method != "OPTIONS":
+        # Also allow health-comprehensive endpoint
+        if not path.startswith("/health") and not path.startswith("/metrics") and not path.startswith("/orchestration/health-comprehensive") and method != "OPTIONS":
             api_key = request.headers.get("x-api-key")
             # Check if request is from desktop IDE (has x-desktop-client header) or has valid API key
             is_desktop_client = request.headers.get("x-desktop-client") == "true"
@@ -113,6 +210,8 @@ async def add_request_id_and_metrics(request: Request, call_next):
                     raise HTTPException(status_code=401, detail="Invalid API key")
         
         response = await call_next(request)
+        # Add request ID to response headers
+        response.headers["x-request-id"] = request_id
         return response
         
     except Exception as e:
@@ -137,19 +236,21 @@ async def add_request_id_and_metrics(request: Request, call_next):
         REQ_COUNTER.labels(path=path, method=method, status=str(status)).inc()
         REQ_LATENCY.labels(path=path, method=method).observe(duration)
         
-        request_logger.log_request(
-            request_id=request_id,
-            method=method,
-            path=path,
-            status_code=status,
-            duration_ms=duration_ms,
-            user_agent=request.headers.get("user-agent"),
-            ip_address=request.client.host if request.client else None
-        )
+        # Only log at INFO level for non-polling endpoints
+        if should_log_request(path):
+            request_logger.log_request(
+                request_id=request_id,
+                method=method,
+                path=path,
+                status_code=status,
+                duration_ms=duration_ms,
+                user_agent=request.headers.get("user-agent"),
+                ip_address=request.client.host if request.client else None
+            )
 
 
 @app.get("/health")
-def health():
+async def health():
     """Health check endpoint with detailed status information."""
     health_status = {
         "status": "healthy",
@@ -157,8 +258,8 @@ def health():
         "timestamp": time.time(),
         "services": {
             "ai": "ready" if settings.OPENAI_API_KEY else "disabled",
-            "redis": "not_configured",  # TODO: Add Redis health check
-            "node_backend": "not_checked"  # TODO: Add Node backend health check
+            "redis": "not_configured",
+            "node_backend": "not_checked"
         },
         "configuration": {
             "log_level": settings.LOG_LEVEL,
@@ -167,8 +268,80 @@ def health():
         }
     }
     
+    # Redis health check
+    try:
+        import redis.asyncio as redis
+        redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        if settings.REDIS_PASSWORD:
+            redis_url = f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
+        
+        redis_client = redis.from_url(
+            redis_url,
+            db=settings.REDIS_DB,
+            decode_responses=True,
+            socket_connect_timeout=5.0
+        )
+        await redis_client.ping()
+        await redis_client.close()
+        health_status["services"]["redis"] = "healthy"
+    except ImportError:
+        health_status["services"]["redis"] = "not_available"
+    except Exception as e:
+        health_status["services"]["redis"] = f"unhealthy: {str(e)}"
+        logger.warning(f"Redis health check failed: {e}")
+    
+    # Node backend health check
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(f"{settings.NODE_BACKEND_URL}/health")
+            if response.status_code == 200:
+                health_status["services"]["node_backend"] = "healthy"
+            else:
+                health_status["services"]["node_backend"] = f"unhealthy: HTTP {response.status_code}"
+    except ImportError:
+        health_status["services"]["node_backend"] = "httpx_not_available"
+    except httpx.TimeoutException:
+        health_status["services"]["node_backend"] = "timeout"
+    except Exception as e:
+        health_status["services"]["node_backend"] = f"unhealthy: {str(e)}"
+        logger.warning(f"Node backend health check failed: {e}")
+    
+    # Add core systems health check
+    try:
+        from .core.system_initializer import get_system_initializer
+        system_init = await get_system_initializer()
+        system_health = await system_init.health_check()
+        health_status["core_systems"] = system_health.get("systems", {})
+    except Exception as e:
+        health_status["core_systems"] = {"error": str(e)}
+    
+    # Ollama health check
+    try:
+        from .integrations.ollama_container import get_ollama_client
+        ollama_client = await get_ollama_client()
+        ollama_health = await ollama_client.health_check()
+        health_status["ollama"] = ollama_health
+    except Exception as e:
+        health_status["ollama"] = {"status": "error", "error": str(e)}
+    
+    # Determine overall status
+    unhealthy_services = [
+        service for service, status in health_status["services"].items()
+        if isinstance(status, str) and "unhealthy" in status.lower()
+    ]
+    if unhealthy_services:
+        health_status["status"] = "degraded"
+    
     logger.info("Health check requested", **health_status)
     return health_status
+
+
+@app.options("/health")
+async def health_options():
+    """Handle OPTIONS request for health endpoint (CORS preflight)."""
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @app.get("/metrics")
@@ -280,8 +453,14 @@ from .routes.session import router as session_router
 from .routes.monitoring import router as monitoring_router
 from .routes.intelligence_api import router as intelligence_api_router
 from .routes.orchestration_api import router as orchestration_router
+from .routes.testing_api import router as testing_router
+from .routes.vendor_fraud_api import router as vendor_fraud_router
+from .routes.agent_playground_api import router as agent_playground_router
+from .routes.workflow_api import router as workflow_router
+from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .middleware.request_timing import RequestTimingMiddleware
 from .middleware.rate_limiter import RateLimitMiddleware
+from .routes.documents import router as documents_router
 
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
@@ -290,13 +469,26 @@ app.include_router(agent_router, prefix="/agent", tags=["agent"])
 app.include_router(challenge_router, prefix="/agent", tags=["challenge"])
 app.include_router(task_router, prefix="/agent", tags=["task"])
 app.include_router(personalization_router, prefix="/agent", tags=["personalization"])
-app.include_router(rag_router, prefix="/agent", tags=["rag"])
+app.include_router(rag_router, tags=["rag"])
 app.include_router(inference_router, prefix="/agent", tags=["inference"])
 app.include_router(bandit_router, prefix="/agent", tags=["bandit"])
 app.include_router(session_router, prefix="/agent", tags=["session"])
 app.include_router(monitoring_router, prefix="/agent", tags=["monitoring"])
 app.include_router(intelligence_api_router, prefix="/agent", tags=["intelligence"])
 app.include_router(orchestration_router, tags=["orchestration"])
+app.include_router(testing_router, tags=["testing"])
+app.include_router(company_automation_router, tags=["company-automation"])
+app.include_router(universal_rag_router, tags=["universal-rag"])
+app.include_router(documents_router, tags=["documents"])
+app.include_router(vendor_fraud_router, tags=["vendor-fraud"])
+app.include_router(document_indexing_router, tags=["document-indexing"])
+app.include_router(collection_management_router, tags=["collection-management"])
+app.include_router(agent_playground_router, tags=["agent-playground"])
+app.include_router(workflow_router, tags=["workflow"])
+app.include_router(cyrex_guard_router, tags=["cyrex-guard"])
+app.include_router(language_intelligence_router, tags=["language-intelligence"])
+app.include_router(document_extraction_router, tags=["document-extraction"])
+
 
 
 if __name__ == "__main__":
