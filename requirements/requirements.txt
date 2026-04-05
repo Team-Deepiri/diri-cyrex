@@ -114,3 +114,6 @@ pdf2image>=1.16.0  # PDF to image conversion for OCR
 beautifulsoup4>=4.12.0  # HTML parsing
 openpyxl>=3.1.0  # Excel file reading/writing
 # docling>=1.0.0  # DocLayNet for advanced layout detection (optional, install separately if needed)
+
+# Host-only (not for Cyrex container): deepiri-gpu-utils powers scripts/utils/detect_gpu.{sh,ps1}
+# See requirements/requirements-gpu-utils.txt and docs/operations/GPU_UTILS_HOST.md

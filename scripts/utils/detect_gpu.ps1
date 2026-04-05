@@ -1,56 +1,15 @@
-# GPU Detection Script for Docker Build (PowerShell)
-# Detects if a good enough GPU is present and returns appropriate base image
+# GPU Detection for Cyrex Docker build — delegates to deepiri-gpu-utils.
+# Contract: stdout is exactly one line, the Docker BASE_IMAGE.
+#
+# Install: pip install -e <path-to-deepiri-gpu-utils>
+# See: docs/operations/GPU_UTILS_HOST.md
 
-# Minimum GPU requirements (adjust as needed)
-$MIN_GPU_MEMORY_GB = 4
-
-# Check if nvidia-smi is available (indicates NVIDIA GPU)
-$nvidiaSmiPath = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-
-if ($nvidiaSmiPath) {
-    Write-Host "NVIDIA GPU detected, checking capabilities..." -ForegroundColor Yellow
-    
-    try {
-        # Get GPU information
-        $gpuInfo = nvidia-smi --query-gpu=name,memory.total --format=csv,noheader | Select-Object -First 1
-        
-        if ($gpuInfo) {
-            $parts = $gpuInfo -split ','
-            $gpuName = $parts[0].Trim()
-            $memoryStr = $parts[1].Trim()
-            
-            # Parse memory (format: "XXXX MiB" or "XXXX MB")
-            $memoryValue = [regex]::Match($memoryStr, '(\d+)').Groups[1].Value
-            $memoryGB = [math]::Round([int]$memoryValue / 1024, 1)
-            
-            Write-Host "GPU: $gpuName" -ForegroundColor Green
-            Write-Host "GPU Memory: ${memoryGB}GB" -ForegroundColor Green
-            
-            # Check if GPU meets minimum requirements
-            if ($memoryGB -ge $MIN_GPU_MEMORY_GB) {
-                Write-Host "GPU meets requirements, using CUDA image" -ForegroundColor Green
-                # Check for RTX 5080 or newer (will automatically get CUDA 12.8 support)
-                if ($gpuName -match "(RTX 5080|RTX 5090|Blackwell)") {
-                    Write-Host "RTX 5080/5090 or Blackwell GPU detected - will automatically get CUDA 12.8 support" -ForegroundColor Yellow
-                }
-                # Use CUDA 12.8 base image for RTX 5080/5090 support
-                Write-Output "pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime"
-                exit 0
-            } else {
-                Write-Host "GPU memory (${memoryGB}GB) below minimum (${MIN_GPU_MEMORY_GB}GB), using CPU image" -ForegroundColor Yellow
-                Write-Output "python:3.11-slim"
-                exit 0
-            }
-        }
-    } catch {
-        Write-Host "Error checking GPU info: $_" -ForegroundColor Red
-        Write-Host "Falling back to CPU image" -ForegroundColor Yellow
-        Write-Output "python:3.11-slim"
-        exit 0
-    }
-} else {
-    Write-Host "No NVIDIA GPU detected, using CPU image" -ForegroundColor Yellow
-    Write-Output "python:3.11-slim"
-    exit 0
+$deepiriGpu = Get-Command deepiri-gpu -ErrorAction SilentlyContinue
+if (-not $deepiriGpu) {
+    Write-Host "detect_gpu.ps1: 'deepiri-gpu' not on PATH. Install deepiri-gpu-utils (pip install -e ...)." -ForegroundColor Red
+    Write-Host "Docs: diri-cyrex/docs/operations/GPU_UTILS_HOST.md" -ForegroundColor Yellow
+    exit 127
 }
 
+& deepiri-gpu build-args --base-image-only @args
+exit $LASTEXITCODE
