@@ -74,6 +74,10 @@ pip install -r requirements.txt
    
    # Optional: Redis (if using caching)
    REDIS_CACHE_URL=redis://localhost:6379/1
+
+   # Optional: Synapse sidecar transport for stream publish/consume
+   SYNAPSE_TRANSPORT=sidecar
+   SYNAPSE_SIDECAR_URL=http://localhost:8081
    ```
 
 ## Step 5: Run Cyrex
@@ -174,6 +178,8 @@ If you're accessing from a web frontend, make sure:
 ### Optional
 - `NODE_BACKEND_URL` - Backend service URL
 - `REDIS_CACHE_URL` - Redis connection string
+- `SYNAPSE_TRANSPORT` - `sidecar` (default) or `redis`
+- `SYNAPSE_SIDECAR_URL` - Sidecar HTTP endpoint (required when using sidecar transport)
 - `LOG_LEVEL` - Logging level (DEBUG, INFO, WARNING, ERROR)
 - `MAX_CONCURRENT_REQUESTS` - Max concurrent requests (default: 10)
 
