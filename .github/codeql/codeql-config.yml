@@ -1,0 +1,20 @@
+name: diri-cyrex-codeql-config
+
+# Focus analysis on the Python service, support code, and tests.
+paths:
+  - app
+  - cyrex-agi
+  - mlops
+  - scripts
+  - tests
+
+# Exclude generated/build/cache/runtime artifacts.
+paths-ignore:
+  - '**/__pycache__/**'
+  - '**/.pytest_cache/**'
+  - '**/.mypy_cache/**'
+  - '**/.venv/**'
+  - '**/venv/**'
+  - '**/dist/**'
+  - '**/build/**'
+  - '**/*.min.js'
