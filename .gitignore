@@ -177,7 +177,6 @@ test_model_load.py
 # MISC
 # ========================================
 .husky
-.github
 .dockerignore
 *.cache
 .cache/
