@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import hashlib
 import secrets
+import os
 import jwt
 from ..database.postgres import get_postgres_manager
 from ..logging_config import get_logger
@@ -57,7 +58,25 @@ class AuthenticationManager:
     
     def __init__(self):
         self.logger = logger
-        self._jwt_secret = getattr(settings, 'JWT_SECRET', 'default-secret-change-in-production')
+
+        # Get JWT_SECRET from settings or environment
+        jwt_secret = getattr(settings, 'JWT_SECRET', None) or os.getenv('JWT_SECRET')
+
+        if not jwt_secret:
+            raise ValueError(
+                'JWT_SECRET must be set in environment variables or settings. '
+                'This is required for security. Set JWT_SECRET in .env file before starting the application.'
+            )
+
+        if len(jwt_secret) < 32:
+            raise ValueError(
+                f'JWT_SECRET must be at least 32 characters long for security. '
+                f'Current length: {len(jwt_secret)}. Generate a secure secret using: '
+                f'python -c "import secrets; print(secrets.token_urlsafe(32))"'
+            )
+
+        self._jwt_secret = jwt_secret
+
         self._api_key_header = 'x-api-key'
         self._auth_header = 'authorization'
         self._initialized = False

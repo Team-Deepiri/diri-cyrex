@@ -100,7 +100,10 @@ class AgentFactory:
         
         # Register tools (pass session_id as instance_id for spreadsheet tools)
         await AgentFactory._register_agent_tools(agent, instance_id=session_id)
-        
+
+        # Eagerly initialize async components and broker before returning
+        await agent.initialize()
+
         logger.info(f"Agent created: {agent.agent_id}", role=role.value, model=model_name)
         return agent
     

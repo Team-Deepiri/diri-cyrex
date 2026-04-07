@@ -24,6 +24,8 @@ from ..integrations.realtime_streaming import get_stream_publisher
 from ..integrations.messaging_service_client import get_messaging_client
 from ..agents.base_agent import BaseAgent, AgentResponse
 from ..agents.agent_factory import create_agent
+from ..agents.metrics import get_agent_metrics_collector
+from ..integrations.synapse_broker import get_synapse_broker
 from ..agents.tools.enhanced_memory_tools import EnhancedMemoryTools
 from ..agents.tools.comprehensive_api_tools import ComprehensiveAPITools
 from ..database.agent_tables import initialize_agent_database
@@ -1807,8 +1809,18 @@ async def create_group_chat(request: GroupChatCreateRequest) -> Dict[str, Any]:
             "messages": [],
         }
         
+        # Register the group channel in SynapseBroker so agent responses flow through it
+        try:
+            broker = await get_synapse_broker()
+            group_channel = f"group:{group_chat_id}"
+            # No-op subscriber — channel is used for publish-only inter-agent messaging;
+            # readers consume via broker.consume() on the channel.
+            await broker.subscribe(group_channel, lambda msg: None)
+        except Exception as e:
+            logger.warning(f"Could not register group chat channel in SynapseBroker: {e}")
+
         logger.info(f"Created group chat: {group_chat_id} with {len(agent_details)} agents")
-        
+
         return {
             "group_chat_id": group_chat_id,
             "name": request.name,
@@ -1977,7 +1989,26 @@ The conversation history below shows messages from all participants in the group
                         "instance_id": instance_id,
                         "timestamp": datetime.utcnow().isoformat(),
                     })
-                    
+
+                    # Publish agent response to group SynapseBroker channel
+                    try:
+                        broker = await get_synapse_broker()
+                        await broker.publish(
+                            channel=f"group:{group_chat_id}",
+                            payload={
+                                "type": "agent_response",
+                                "agent_id": agent_info["agent_id"],
+                                "agent_name": agent_info["name"],
+                                "content": response_text,
+                            },
+                            sender=agent_info["agent_id"],
+                        )
+                        get_agent_metrics_collector().record_message_sent(
+                            agent_info["agent_id"], f"group:{group_chat_id}"
+                        )
+                    except Exception as e:
+                        logger.debug(f"SynapseBroker publish skipped for group chat: {e}")
+
                     responses.append({
                         "agent_id": agent_info["agent_id"],
                         "agent_name": agent_info["name"],
@@ -2193,7 +2224,26 @@ The conversation history below shows messages from all participants in the group
                     "instance_id": instance_id,
                     "timestamp": datetime.utcnow().isoformat(),
                 })
-                
+
+                # Publish agent response to group SynapseBroker channel
+                try:
+                    broker = await get_synapse_broker()
+                    await broker.publish(
+                        channel=f"group:{group_chat_id}",
+                        payload={
+                            "type": "agent_response",
+                            "agent_id": agent_info["agent_id"],
+                            "agent_name": agent_info["name"],
+                            "content": full_response,
+                        },
+                        sender=agent_info["agent_id"],
+                    )
+                    get_agent_metrics_collector().record_message_sent(
+                        agent_info["agent_id"], f"group:{group_chat_id}"
+                    )
+                except Exception as e:
+                    logger.debug(f"SynapseBroker publish skipped for group chat: {e}")
+
                 # Also save to agent's own conversation history
                 conversation = agent_data.get("conversation", [])
                 conversation.append({

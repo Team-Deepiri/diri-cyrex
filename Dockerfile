@@ -168,7 +168,7 @@ RUN if [ "$BUILD_TYPE" = "from-scratch" ]; then \
 COPY deepiri-modelkit /app/deepiri-modelkit
 
 # Copy requirements first for better caching
-COPY diri-cyrex/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
 
 # Remove torch and deepiri-modelkit editable install from requirements.txt
 # (torch already in base image, modelkit installed separately)
@@ -295,9 +295,9 @@ ARG BASE_IMAGE
 COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
 # Copy all requirements files for conditional installation
-COPY diri-cyrex/requirements.txt /app/requirements.txt
-COPY diri-cyrex/requirements-cpu.txt /app/requirements-cpu.txt
-COPY diri-cyrex/requirements-mpsos.txt /app/requirements-mpsos.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements/requirements-mpsos.txt /app/requirements-mpsos.txt
 
 # Upgrade pip with resume-friendly settings
 RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --upgrade pip setuptools wheel
@@ -497,6 +497,17 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
      pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
      echo "Some packages may not be fully installed")
 
+# Force install PDF parsing packages if not already installed (critical for document indexing)
+RUN echo "Verifying PDF parsing packages..." && \
+    (python -c "import pdfplumber; print('✓ pdfplumber available')" 2>/dev/null || \
+     python -c "import PyPDF2; print('✓ PyPDF2 available')" 2>/dev/null || \
+     (echo "⚠️  Neither pdfplumber nor PyPDF2 found, installing..." && \
+      pip install --no-cache-dir --upgrade-strategy=only-if-needed pdfplumber>=0.10.0 PyPDF2>=3.0.0 pdfminer.six && \
+      (python -c "import pdfplumber; print('✓ pdfplumber installed')" 2>/dev/null || \
+       python -c "import PyPDF2; print('✓ PyPDF2 installed')" 2>/dev/null || \
+       (echo "ERROR: Failed to install PDF parsing packages" && exit 1)))) && \
+    echo "✓ PDF parsing packages verified"
+
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
     python -c "import torch; print('✓ torch version:', torch.__version__); print('✓ CUDA available:', torch.cuda.is_available() if hasattr(torch.cuda, 'is_available') else False)" && \
@@ -589,9 +600,9 @@ ARG BASE_IMAGE
 COPY deepiri-modelkit /app/deepiri-modelkit
 
 # Copy all requirements files for conditional installation
-COPY diri-cyrex/requirements.txt /app/requirements.txt
-COPY diri-cyrex/requirements-cpu.txt /app/requirements-cpu.txt
-COPY diri-cyrex/requirements-mpsos.txt /app/requirements-mpsos.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements/requirements-mpsos.txt /app/requirements-mpsos.txt
 
 # Remove torch and deepiri-modelkit editable install from requirements files
 # (torch already installed in base-from-scratch, modelkit installed separately)
@@ -827,6 +838,17 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
     (echo "⚠️  WARNING: Some requirements installation failed" && \
      pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
      echo "Some packages may not be fully installed")
+
+# Force install PDF parsing packages if not already installed (critical for document indexing)
+RUN echo "Verifying PDF parsing packages..." && \
+    (python -c "import pdfplumber; print('✓ pdfplumber available')" 2>/dev/null || \
+     python -c "import PyPDF2; print('✓ PyPDF2 available')" 2>/dev/null || \
+     (echo "⚠️  Neither pdfplumber nor PyPDF2 found, installing..." && \
+      pip install --no-cache-dir --upgrade-strategy=only-if-needed pdfplumber>=0.10.0 PyPDF2>=3.0.0 pdfminer.six && \
+      (python -c "import pdfplumber; print('✓ pdfplumber installed')" 2>/dev/null || \
+       python -c "import PyPDF2; print('✓ PyPDF2 installed')" 2>/dev/null || \
+       (echo "ERROR: Failed to install PDF parsing packages" && exit 1)))) && \
+    echo "✓ PDF parsing packages verified"
 
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
