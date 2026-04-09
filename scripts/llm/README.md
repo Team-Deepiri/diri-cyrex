@@ -30,6 +30,14 @@ Checks Ollama container for models and prompts to pull if none exist.
 bash scripts/llm/check-ollama-models.sh
 ```
 
+### `check_ollama_models.sh` (compatibility alias)
+Legacy snake_case wrapper that forwards to the canonical script.
+
+**Usage:**
+```bash
+bash scripts/llm/check_ollama_models.sh
+```
+
 **What it does:**
 - Detects GPU and drivers
 - Checks Ollama container status
@@ -87,11 +95,11 @@ bash scripts/llm/test-ollama-connection.sh
 
 **Option 1: Pre-pull During Docker Build (Recommended)**
 ```bash
-# Default models (mistral:7b, llama3:8b, codellama:7b) are pre-pulled automatically
+# Example baseline models
 docker-compose build ollama
 
 # Customize which models to pre-pull
-docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b" ollama
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b qwen2.5:7b qwen2.5-coder:7b deepseek-coder:6.7b phi3:mini" ollama
 ```
 
 **Option 2: Use Installation Script**
@@ -102,12 +110,16 @@ bash scripts/llm/check-ollama-models.sh
 
 **Option 3: Manual Pull**
 ```bash
-# Pull default model
+# Pull baseline models
 ollama pull mistral:7b
 
-# Pull alternative models
+# Pull compatibility / coding alternatives
 ollama pull llama3:8b
 ollama pull codellama:7b
+ollama pull qwen2.5:7b
+ollama pull qwen2.5-coder:7b
+ollama pull deepseek-coder:6.7b
+ollama pull phi3:mini
 ```
 
 ### List Models
@@ -130,11 +142,11 @@ Once Ollama is running, you can access:
 The project includes a custom Dockerfile that pre-pulls models during build:
 
 ```bash
-# Build with default models (mistral:7b, llama3:8b, codellama:7b)
+# Build with baseline models
 docker-compose build ollama
 
 # Customize models to pre-pull
-docker-compose build --build-arg MODELS="mistral:7b llama3:8b" ollama
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b qwen2.5:7b qwen2.5-coder:7b deepseek-coder:6.7b phi3:mini" ollama
 
 # Disable pre-pull (use check-ollama-models.sh script instead)
 docker-compose build --build-arg PRE_PULL_MODELS=false ollama
@@ -148,7 +160,7 @@ ollama:
     dockerfile: Dockerfile
     args:
       PRE_PULL_MODELS: "true"  # Enable/disable pre-pull
-      MODELS: "mistral:7b llama3:8b codellama:7b"  # Space-separated list
+      MODELS: "mistral:7b llama3:8b codellama:7b qwen2.5:7b qwen2.5-coder:7b deepseek-coder:6.7b phi3:mini"  # Space-separated list
 ```
 
 ### Manual Docker Run
@@ -163,10 +175,14 @@ docker run -d -p 11434:11434 --name ollama ollama/ollama
 
 ### Model Customization
 
-**Default Models:**
-- `mistral:7b` (4.1GB) - Default model, efficient and high quality
-- `llama3:8b` (4.7GB) - Alternative general-purpose model
-- `codellama:7b` (3.8GB) - Specialized for coding tasks
+**Recommended Baseline Models:**
+- `mistral:7b` (4.1GB) - Primary project default
+- `llama3:8b` (4.7GB) - Compatibility model for existing flows
+- `codellama:7b` (3.8GB) - Coding tasks
+- `qwen2.5:7b` (4.4GB) - Alternative general-purpose model
+- `qwen2.5-coder:7b` (4.4GB) - Alternative coding model
+- `deepseek-coder:6.7b` (4.1GB) - Advanced coding model
+- `phi3:mini` (2.3GB) - Low-resource fallback
 
 **See `docker/ollama/README.md` for detailed documentation on model customization.**
 
