@@ -10,4 +10,4 @@ echo "⚠️  Deprecated script name: check_ollama_models.sh"
 echo "   Using canonical script: check-ollama-models.sh"
 echo ""
 
-exec "${TARGET_SCRIPT}" "$@"
+exec bash "${TARGET_SCRIPT}" "$@"
