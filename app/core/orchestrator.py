@@ -436,7 +436,18 @@ class WorkflowOrchestrator:
             
             # RAG chain with proper document formatting
             if self.vector_store:
-                retriever = self.vector_store.get_retriever(k=4)
+                # MilvusVectorStore has similarity_search, not get_retriever; wrap for LCEL
+                def _retriever_fn(input_val):
+                    query = (
+                        input_val.get("question", input_val)
+                        if isinstance(input_val, dict)
+                        else input_val
+                    )
+                    if not isinstance(query, str):
+                        query = str(query)
+                    return self.vector_store.similarity_search(query, k=4)
+
+                retriever = RunnableLambda(_retriever_fn)
                 
                 # Format documents function - must be wrapped in RunnableLambda for pipe operator
                 def format_docs(docs):

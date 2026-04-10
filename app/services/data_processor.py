@@ -8,18 +8,24 @@ from typing import List, Dict, Optional
 import json
 from pathlib import Path
 from ..logging_config import get_logger
+from deepiri_dataset_processor.cleaning.text_cleaner import TextCleaner
+from deepiri_dataset_processor.deduplication.exact_dedup import ExactDeduplicator
 
 logger = get_logger("service.data")
+
+_text_cleaner = TextCleaner(min_length=10, remove_boilerplate=False)
+_deduplicator = ExactDeduplicator()
 
 
 class DataProcessor:
     """Process training data."""
-    
+
     def process_task_data(self, raw_data: List[Dict]) -> pd.DataFrame:
         """Process raw task data into training format."""
         df = pd.DataFrame(raw_data)
-        
-        df['text'] = df['title'].fillna('') + ' ' + df['description'].fillna('')
+
+        raw_text = df['title'].fillna('') + ' ' + df['description'].fillna('')
+        df['text'] = raw_text.apply(lambda t: _text_cleaner.clean(t) or t.strip())
         df['label'] = df['type'].fillna('manual')
         df['complexity_score'] = df['complexity'].map({'easy': 1, 'medium': 2, 'hard': 3, 'very_hard': 4})
         
@@ -51,6 +57,12 @@ class DataProcessor:
         
         return train, val
     
+    def deduplicate(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Remove exact duplicate records by text content."""
+        texts = df['text'].tolist()
+        unique_texts = set(_deduplicator.filter_duplicates(texts))
+        return df[df['text'].isin(unique_texts)].reset_index(drop=True)
+
     def augment_data(self, df: pd.DataFrame, augmentation_factor: int = 2) -> pd.DataFrame:
         """Augment dataset with variations."""
         augmented = [df]

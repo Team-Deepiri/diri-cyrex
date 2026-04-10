@@ -89,7 +89,7 @@ async def index_text(req: IndexTextRequest, request: Request):
         try:
             doc_type = B2BDocumentType(req.doc_type)
         except ValueError:
-            doc_type = B2BDocumentType.OTHER
+            doc_type = B2BDocumentType.LEGAL_DOCUMENT
         
         indexed_doc = await service.index_text(
             text=req.text,
@@ -138,7 +138,7 @@ async def index_file_upload(
       -F "industry=manufacturing"
     ```
     """
-    request_id = getattr(request.state, 'request_id', 'unknown')
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
     
     # Parse metadata if provided
     metadata_dict = {}
@@ -156,16 +156,18 @@ async def index_file_upload(
         
         # Create temp file
         suffix = Path(file.filename).suffix if file.filename else ""
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, mode='wb') as temp_file:
             content = await file.read()
             temp_file.write(content)
+            temp_file.flush()  # Ensure data is written to disk
             temp_file_path = temp_file.name
+        # File handle is now closed, but file remains on disk (delete=False)
         
         # Convert doc_type string to enum
         try:
             doc_type_enum = B2BDocumentType(doc_type)
         except ValueError:
-            doc_type_enum = B2BDocumentType.OTHER
+            doc_type_enum = B2BDocumentType.LEGAL_DOCUMENT
         
         # Index file
         indexed_doc = await service.index_file(
@@ -177,14 +179,18 @@ async def index_file_upload(
             metadata=metadata_dict,
         )
         
+        # Format response to match blueprint expected output
         return {
             "success": True,
+            "message": "Document indexed successfully!",
             "document_id": indexed_doc.document_id,
             "title": indexed_doc.title,
+            "chunks": indexed_doc.chunk_count,
             "format": indexed_doc.format.value,
-            "chunk_count": indexed_doc.chunk_count,
             "file_size": indexed_doc.file_size,
-            "indexed_at": indexed_doc.indexed_at.isoformat(),
+            "indexed_at": indexed_doc.indexed_at.isoformat() if indexed_doc.indexed_at else None,
+            "doc_type": doc_type,
+            "industry": industry,
             "request_id": request_id,
         }
     
@@ -233,25 +239,56 @@ async def index_batch(req: BatchIndexRequest, request: Request):
     try:
         service = await get_document_indexing_service()
         
-        # Convert file info
+        # Validate request
+        if not req.files:
+            raise HTTPException(status_code=400, detail="files list cannot be empty")
+        
+        # Convert file info - handle both dict and object access
         files_info = []
-        for file_info in req.files:
-            file_dict = {
-                "file_path": file_info["file_path"],
-                "document_id": file_info.get("document_id"),
-                "title": file_info.get("title"),
-                "doc_type": None,
-                "metadata": file_info.get("metadata", {}),
-            }
-            
-            # Convert doc_type if provided
-            if file_info.get("doc_type"):
-                try:
-                    file_dict["doc_type"] = B2BDocumentType(file_info["doc_type"])
-                except ValueError:
-                    file_dict["doc_type"] = B2BDocumentType.OTHER
-            
-            files_info.append(file_dict)
+        for i, file_info in enumerate(req.files):
+            try:
+                # Handle both dict and Pydantic model
+                if isinstance(file_info, dict):
+                    file_path = file_info.get("file_path")
+                    document_id = file_info.get("document_id")
+                    title = file_info.get("title")
+                    doc_type = file_info.get("doc_type")
+                    metadata = file_info.get("metadata", {})
+                else:
+                    # Pydantic model
+                    file_path = getattr(file_info, "file_path", None)
+                    document_id = getattr(file_info, "document_id", None)
+                    title = getattr(file_info, "title", None)
+                    doc_type = getattr(file_info, "doc_type", None)
+                    metadata = getattr(file_info, "metadata", {})
+                
+                if not file_path:
+                    logger.warning(f"File {i+1} missing file_path, skipping")
+                    continue
+                
+                file_dict = {
+                    "file_path": file_path,
+                    "document_id": document_id,
+                    "title": title,
+                    "doc_type": None,
+                    "metadata": metadata if metadata else {},
+                }
+                
+                # Convert doc_type if provided
+                if doc_type:
+                    try:
+                        file_dict["doc_type"] = B2BDocumentType(doc_type)
+                    except ValueError:
+                        file_dict["doc_type"] = B2BDocumentType.LEGAL_DOCUMENT
+                
+                files_info.append(file_dict)
+            except Exception as e:
+                logger.error(f"Error processing file {i+1} in batch request: {e}", exc_info=True)
+                # Continue with other files
+                continue
+        
+        if not files_info:
+            raise HTTPException(status_code=400, detail="No valid files to process after validation")
         
         # Index batch
         result = await service.index_batch(
@@ -270,9 +307,11 @@ async def index_batch(req: BatchIndexRequest, request: Request):
             "request_id": request_id,
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error batch indexing: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.post("/search")
@@ -341,12 +380,22 @@ async def delete_document(req: DeleteDocumentRequest, request: Request):
         service = await get_document_indexing_service()
         success = await service.delete_document(req.document_id)
         
+        if not success:
+            # Provide more detailed error message
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to delete document {req.document_id}. The document may not exist, or chunks may not be found in the vector store."
+            )
+        
         return {
-            "success": success,
+            "success": True,
             "document_id": req.document_id,
+            "message": f"Document {req.document_id} deleted successfully",
             "request_id": request_id,
         }
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting document: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -426,44 +475,100 @@ async def list_documents(
     request: Request = None,
 ):
     """List all indexed documents with optional filters"""
-    request_id = getattr(request.state, 'request_id', 'unknown')
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
     
     try:
         service = await get_document_indexing_service()
         
-        doc_type_enum = None
-        if doc_type:
-            try:
-                doc_type_enum = B2BDocumentType(doc_type)
-            except ValueError:
-                pass
-        
-        documents = service.list_indexed_documents(
-            doc_type=doc_type_enum,
+        result = await service.list_indexed_documents(
+            doc_type=doc_type,
             industry=industry,
         )
         
         return {
             "success": True,
-            "count": len(documents),
-            "documents": [
-                {
-                    "document_id": doc.document_id,
-                    "title": doc.title,
-                    "doc_type": doc.doc_type.value,
-                    "format": doc.format.value,
-                    "industry": doc.industry,
-                    "chunk_count": doc.chunk_count,
-                    "file_size": doc.file_size,
-                    "indexed_at": doc.indexed_at.isoformat(),
-                }
-                for doc in documents
-            ],
+            "count": result.get("total", 0),
+            "documents": result.get("documents", []),
             "request_id": request_id,
         }
     
     except Exception as e:
         logger.error(f"Error listing documents: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{document_id}/versions")
+async def get_document_versions(document_id: str, request: Request):
+    """
+    Get all versions of a document.
+    
+    Finds all documents that share the same contract_id, lease_id, or regulation_id
+    as the given document_id, and returns them sorted by version/date.
+    
+    **Use Case:** Version drift detection, clause evolution tracking
+    
+    **Example:**
+    ```bash
+    GET /api/v1/documents/CONTRACT-001-v2.0/versions
+    ```
+    
+    Returns all versions of CONTRACT-001 (v1.0, v2.0, v2.1, etc.)
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    try:
+        service = await get_document_indexing_service()
+        result = await service.get_document_versions(document_id)
+        
+        return {
+            "success": True,
+            "base_document_id": result.get("base_document_id"),
+            "base_id_type": result.get("base_id_type"),
+            "versions": result.get("versions", []),
+            "total_versions": result.get("total_versions", 0),
+            "request_id": request_id,
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting document versions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{document_id}/obligations")
+async def get_document_obligations(document_id: str, request: Request):
+    """
+    Get obligations for a specific document.
+    
+    Extracts obligations from document metadata that were either:
+    - Manually provided during indexing
+    - Auto-extracted during indexing
+    
+    **Use Case:** Obligation tracking, deadline monitoring
+    
+    **Example:**
+    ```bash
+    GET /api/v1/documents/LEASE-001/obligations
+    ```
+    
+    Returns all obligations extracted from LEASE-001
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    try:
+        service = await get_document_indexing_service()
+        result = await service.get_document_obligations(document_id)
+        
+        return {
+            "success": True,
+            "document_id": result.get("document_id"),
+            "title": result.get("title"),
+            "obligations": result.get("obligations", []),
+            "total_obligations": result.get("total_obligations", 0),
+            "request_id": request_id,
+        }
+    
+    except Exception as e:
+        logger.error(f"Error getting document obligations: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -474,26 +579,14 @@ async def get_document(document_id: str, request: Request):
     
     try:
         service = await get_document_indexing_service()
-        doc = service.get_indexed_document(document_id)
+        doc = await service.get_indexed_document(document_id)
         
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         
         return {
             "success": True,
-            "document": {
-                "document_id": doc.document_id,
-                "title": doc.title,
-                "doc_type": doc.doc_type.value,
-                "format": doc.format.value,
-                "source": doc.source,
-                "industry": doc.industry,
-                "chunk_count": doc.chunk_count,
-                "file_size": doc.file_size,
-                "page_count": doc.page_count,
-                "indexed_at": doc.indexed_at.isoformat(),
-                "metadata": doc.metadata,
-            },
+            "document": doc,
             "request_id": request_id,
         }
     
@@ -501,6 +594,46 @@ async def get_document(document_id: str, request: Request):
         raise
     except Exception as e:
         logger.error(f"Error getting document: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/clear-all")
+async def clear_all_documents(
+    confirm: bool = False,
+    request: Request = None
+):
+    """
+    Clear ALL documents from the vector store.
+    
+    WARNING: This will delete ALL indexed documents and cannot be undone!
+    
+    **Example:**
+    ```bash
+    # This will NOT delete (safety check)
+    curl -X POST "http://localhost:8000/api/v1/documents/clear-all"
+    
+    # This WILL delete everything
+    curl -X POST "http://localhost:8000/api/v1/documents/clear-all?confirm=true"
+    ```
+    
+    Args:
+        confirm: Must be True to actually perform the deletion
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown') if request else 'unknown'
+    
+    try:
+        service = await get_document_indexing_service()
+        result = await service.clear_all_documents(confirm=confirm)
+        
+        return {
+            "success": result.get("success", False),
+            "message": result.get("message", ""),
+            "result": result,
+            "request_id": request_id,
+        }
+    
+    except Exception as e:
+        logger.error(f"Error clearing documents: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
