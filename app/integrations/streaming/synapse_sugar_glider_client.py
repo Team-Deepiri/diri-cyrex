@@ -19,7 +19,7 @@ _GEN_ROOT = Path(__file__).resolve().parent / "gen"
 if str(_GEN_ROOT) not in sys.path:
     sys.path.append(str(_GEN_ROOT))
 
-from proto.synapse.v1 import sidecar_pb2, sidecar_pb2_grpc  # type: ignore
+from proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc  # type: ignore
 
 
 class SidecarError(RuntimeError):
@@ -48,7 +48,7 @@ class SynapseSidecarClient:
         self.default_sender = default_sender
         self.grpc_addr = self._resolve_grpc_addr(base_url=self.base_url, explicit_grpc_addr=grpc_addr)
         self._channel = grpc.aio.insecure_channel(self.grpc_addr)
-        self._stub = sidecar_pb2_grpc.SynapseSidecarStub(self._channel)
+        self._stub = sugar_glider_pb2_grpc.SynapseSidecarStub(self._channel)
 
     @staticmethod
     def _resolve_grpc_addr(base_url: str, explicit_grpc_addr: Optional[str]) -> str:
@@ -76,7 +76,7 @@ class SynapseSidecarClient:
     async def ready(self) -> bool:
         try:
             response = await self._stub.Health(
-                sidecar_pb2.HealthRequest(),
+                sugar_glider_pb2.HealthRequest(),
                 timeout=self.timeout_sec,
             )
             return bool(response.healthy)
@@ -93,7 +93,7 @@ class SynapseSidecarClient:
         priority: str = "normal",
         ttl_sec: Optional[int] = None,
     ) -> Optional[str]:
-        req = sidecar_pb2.PublishRequest(
+        req = sugar_glider_pb2.PublishRequest(
             stream=stream,
             event_type=event_type,
             sender=sender or self.default_sender,
@@ -123,7 +123,7 @@ class SynapseSidecarClient:
         batch_size = max(1, min(int(count), 100))
         timeout_sec = max(self.timeout_sec, (max(1, int(block_ms)) / 1000.0) + 1.0)
 
-        request = sidecar_pb2.SubscribeRequest(
+        request = sugar_glider_pb2.SubscribeRequest(
             stream=stream,
             consumer_group=consumer_group,
             consumer_name=consumer_name,
@@ -166,7 +166,7 @@ class SynapseSidecarClient:
     async def ack(self, stream: str, consumer_group: str, entry_ids: List[str]) -> int:
         if not entry_ids:
             return 0
-        req = sidecar_pb2.AckRequest(
+        req = sugar_glider_pb2.AckRequest(
             stream=stream,
             consumer_group=consumer_group,
             entry_ids=entry_ids,

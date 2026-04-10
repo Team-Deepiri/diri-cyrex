@@ -19,7 +19,7 @@ from deepiri_modelkit import (
 from deepiri_modelkit.streaming.topics import StreamTopics
 
 from ...settings import settings
-from .synapse_sidecar_client import SidecarError, SynapseSidecarClient
+from .synapse_sugar_glider_client import SidecarError, SynapseSidecarClient
 
 logger = get_logger("cyrex.event_publisher")
 

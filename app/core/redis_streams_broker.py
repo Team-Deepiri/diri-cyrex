@@ -13,7 +13,7 @@ import os
 import uuid
 import redis.asyncio as aioredis
 from ..logging_config import get_logger
-from ..integrations.streaming.synapse_sidecar_client import SidecarError, SynapseSidecarClient
+from ..integrations.streaming.synapse_sugar_glider_client import SidecarError, SynapseSidecarClient
 from ..settings import settings
 from .types import MessagePriority
 
