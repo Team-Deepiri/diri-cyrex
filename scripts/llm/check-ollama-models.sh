@@ -1,5 +1,7 @@
 #!/bin/bash
 # Check if Ollama container has models, and prompt to pull models if none exist
+# GPU / VRAM tiering: also see deepiri-gpu-utils (`deepiri-gpu ollama recommend`, `validate`).
+# Cyrex Docker base image: scripts/utils/detect_gpu.sh → deepiri-gpu build-args.
 
 set -e
 
