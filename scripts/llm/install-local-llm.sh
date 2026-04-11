@@ -2,6 +2,7 @@
 # Install and setup local LLM (Ollama) as Docker container
 # Combines setup and model checking functionality
 # Works on Windows (WSL), Linux, and macOS
+# For unified GPU detection / setup hints: deepiri-gpu-utils (`deepiri-gpu doctor`, `setup`).
 
 set -e
 

@@ -12,6 +12,9 @@ from .rate_limit_tools import ToolRateLimitExceeded
 
 logger = get_logger("cyrex.tool_registry")
 
+# When a Redis/Lua limiter is attached, apply this default if metadata has no rate_limit.
+DEFAULT_TOOL_RATE_LIMIT_PER_MINUTE = 120
+
 # LangChain imports with graceful fallbacks
 HAS_LANGCHAIN_TOOLS = False
 try:
@@ -190,20 +193,27 @@ class ToolRegistry:
 
         metadata = self.get_metadata(tool_name)
 
-        # ✅ Rate limiting
-        if (
-            self._rate_limiter
-            and metadata
-            and metadata.rate_limit
-            and metadata.rate_limit > 0
-        ):
-            refill_rate = metadata.rate_limit / 60.0
-            cost = metadata.cost_per_call or 1.0
+        calls_per_minute = 0
+        if self._rate_limiter is not None:
+            if metadata is not None and metadata.rate_limit is not None:
+                rl = int(metadata.rate_limit)
+                if rl > 0:
+                    calls_per_minute = rl
+                # explicit 0 or negative: do not apply token bucket for this tool
+            else:
+                # Metadata missing or rate_limit unset — default cap so Lua bucket is always used
+                calls_per_minute = DEFAULT_TOOL_RATE_LIMIT_PER_MINUTE
+
+        if self._rate_limiter is not None and calls_per_minute > 0:
+            refill_rate = calls_per_minute / 60.0
+            cost = (metadata.cost_per_call if metadata else None) or 1.0
+            if cost <= 0:
+                cost = 1.0
 
             allowed, remaining = await self._rate_limiter.allow(
                 tool_name=tool_name,
                 user_id=user_id,
-                capacity=float(metadata.rate_limit),
+                capacity=float(calls_per_minute),
                 refill_rate=refill_rate,
                 cost=cost,
             )

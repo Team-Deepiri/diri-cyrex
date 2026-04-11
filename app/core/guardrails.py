@@ -351,7 +351,114 @@ class SafetyGuardrails:
                 message=f"Tool output validation error: {str(e)}",
                 score=0.5,
             )
-    
+
+    def validate_merged_tool_input(
+        self,
+        tool_input: Any,
+        *,
+        max_top_level_keys: int = 256,
+        max_nesting_depth: int = 12,
+        max_string_sample_chars: int = 100_000,
+        max_distinct_strings: int = 200,
+        max_aggregate_string_chars: int = 500_000,
+    ) -> SafetyCheckResult:
+        """
+        Structural + safety validation for merged workflow/tool payloads before invoke.
+
+        Ensures dict shape, bounded size, and runs prompt-style safety checks on all
+        string values (truncated per string for performance).
+        """
+        if not isinstance(tool_input, dict):
+            return SafetyCheckResult(
+                level=SafetyLevel.CRITICAL,
+                message=f"Tool input must be a dict, got {type(tool_input).__name__}",
+                score=1.0,
+            )
+
+        if len(tool_input) > max_top_level_keys:
+            return SafetyCheckResult(
+                level=SafetyLevel.BLOCKED,
+                message=f"Tool input has too many top-level keys ({len(tool_input)} > {max_top_level_keys})",
+                score=0.95,
+            )
+
+        worst = SafetyCheckResult(
+            level=SafetyLevel.SAFE,
+            message="Tool input validated",
+            score=0.0,
+        )
+        strings_scanned = 0
+        aggregate_chars = 0
+
+        def walk(obj: Any, depth: int) -> Optional[SafetyCheckResult]:
+            """Return a terminal failure result, or None to continue."""
+            nonlocal worst, strings_scanned, aggregate_chars
+
+            if depth > max_nesting_depth:
+                return SafetyCheckResult(
+                    level=SafetyLevel.BLOCKED,
+                    message=f"Tool input exceeds max nesting depth ({max_nesting_depth})",
+                    score=0.9,
+                )
+
+            if isinstance(obj, dict):
+                for key, val in obj.items():
+                    if isinstance(key, str) and len(key) > 512:
+                        return SafetyCheckResult(
+                            level=SafetyLevel.BLOCKED,
+                            message="Tool input contains an oversized dict key",
+                            score=0.85,
+                        )
+                    term = walk(val, depth + 1)
+                    if term is not None:
+                        return term
+            elif isinstance(obj, (list, tuple)):
+                if len(obj) > 10_000:
+                    return SafetyCheckResult(
+                        level=SafetyLevel.BLOCKED,
+                        message="Tool input list/tuple exceeds max elements (10000)",
+                        score=0.9,
+                    )
+                for item in obj:
+                    term = walk(item, depth + 1)
+                    if term is not None:
+                        return term
+            elif isinstance(obj, str):
+                strings_scanned += 1
+                if strings_scanned > max_distinct_strings:
+                    return SafetyCheckResult(
+                        level=SafetyLevel.BLOCKED,
+                        message=f"Tool input contains too many string values ({max_distinct_strings}+)",
+                        score=0.9,
+                    )
+                aggregate_chars += len(obj)
+                if aggregate_chars > max_aggregate_string_chars:
+                    return SafetyCheckResult(
+                        level=SafetyLevel.BLOCKED,
+                        message="Tool input exceeds aggregate string size limit",
+                        score=0.95,
+                    )
+                sample = obj[:max_string_sample_chars] if len(obj) > max_string_sample_chars else obj
+                if sample:
+                    res = self.check_prompt(sample)
+                    if res.score > worst.score:
+                        worst = res
+            elif isinstance(obj, (int, float, bool)) or obj is None:
+                pass
+            else:
+                self.logger.debug(
+                    "Skipping deep safety walk for non-JSON-like type",
+                    value_type=type(obj).__name__,
+                )
+
+            return None
+
+        terminal = walk(tool_input, 0)
+        if terminal is not None:
+            return terminal
+
+        return worst
+
     def should_block(self, result: SafetyCheckResult) -> bool:
         """Determine if result should be blocked"""
         return result.level in [SafetyLevel.BLOCKED, SafetyLevel.CRITICAL]
