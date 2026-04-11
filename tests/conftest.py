@@ -7,10 +7,8 @@ used across all Deepiri AI services. Cyrex-specific fixtures (orchestrator, tool
 samples, connection cleanup) are defined here.
 """
 import pytest
-import asyncio
 import os
-from unittest.mock import Mock, AsyncMock
-from typing import Generator
+from unittest.mock import Mock
 
 # diri-agent-testing-utils: shared mocks and test harness
 from diri_agent_testing_utils import (
