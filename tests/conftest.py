@@ -1,24 +1,18 @@
 """
 Shared pytest configuration and fixtures for all tests.
 
-Agent-level mocks (FakeLLMProvider, MockVectorStore, MockRedis, FakeToolRegistry,
-AgentTestHarness) come from diri-agent-testing-utils, the shared testing library
-used across all Deepiri AI services. Cyrex-specific fixtures (orchestrator, tool
-samples, connection cleanup) are defined here.
+Agent-level mocks and harness fixtures are loaded from
+diri-agent-testing-utils (shared across Deepiri services). Cyrex-specific
+fixtures (orchestrator wiring, tool samples, connection cleanup) are defined here.
 """
-import pytest
 import os
 from unittest.mock import Mock
 
-# diri-agent-testing-utils: shared mocks and test harness
-from diri_agent_testing_utils import (
-    FakeLLMProvider,
-    MockVectorStore,
-    MockRedis,
-    MockMemoryManager,
-    FakeToolRegistry,
-    AgentTestHarness,
-)
+import pytest
+from diri_agent_testing_utils import FakeLLMProvider
+
+# Load shared pytest fixtures from diri-agent-testing-utils.
+pytest_plugins = ("diri_agent_testing_utils.fixtures.pytest_fixtures",)
 
 # Set test environment variables
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
@@ -101,63 +95,8 @@ def mock_llm_provider():
 
 
 # ---------------------------------------------------------------------------
-# Vector store — from diri-agent-testing-utils
+# Tool registry — cyrex-specific (uses real ToolRegistry)
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def mock_vector_store():
-    """
-    In-memory vector store using diri-agent-testing-utils.
-
-    MockVectorStore does substring matching (no real embeddings).  The
-    asimilarity_search / similarity_search methods return dicts; wrap in
-    LangChain Documents only if a test needs that specific type.
-    """
-    return MockVectorStore()
-
-
-# ---------------------------------------------------------------------------
-# Redis mock — from diri-agent-testing-utils
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def mock_redis():
-    """
-    In-memory Redis mock using diri-agent-testing-utils.
-
-    Supports get/set/delete/exists/expire/keys/flushdb with TTL expiry.
-    Use this instead of AsyncMock(redis) to get realistic key-value behaviour.
-    """
-    return MockRedis()
-
-
-# ---------------------------------------------------------------------------
-# Memory manager — from diri-agent-testing-utils
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def mock_memory_manager():
-    """In-memory agent memory manager using diri-agent-testing-utils."""
-    return MockMemoryManager()
-
-
-# ---------------------------------------------------------------------------
-# Tool registry — cyrex-specific (uses real ToolRegistry) + shared FakeToolRegistry
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture
-def fake_tool_registry():
-    """
-    Isolated FakeToolRegistry from diri-agent-testing-utils.
-
-    Tracks every execute() call with timestamps.  Use this for testing
-    agent behaviour without pulling in cyrex's default tools.
-    """
-    return FakeToolRegistry()
 
 
 @pytest.fixture
@@ -179,12 +118,12 @@ def reset_tool_registry():
 
 
 # ---------------------------------------------------------------------------
-# Agent test harness — from diri-agent-testing-utils
+# Agent test harness — alias shared fixture name for cyrex tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def agent_harness_factory():
+def agent_harness_factory(agent_test_harness):
     """
     Factory fixture that wraps any cyrex agent in AgentTestHarness.
 
@@ -195,7 +134,7 @@ def agent_harness_factory():
             harness.assert_response_contains(trace, "task")
             harness.assert_no_error(trace)
     """
-    return AgentTestHarness
+    return agent_test_harness
 
 
 # ---------------------------------------------------------------------------
