@@ -27,7 +27,7 @@ Architecture:
 All data is processed asynchronously with back-pressure support.
 """
 
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Literal, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -36,6 +36,7 @@ import json
 import uuid
 import re
 import hashlib
+import traceback
 
 from ..logging_config import get_logger
 
@@ -386,8 +387,6 @@ class RealtimeDataPipeline:
     def __init__(self):
         self._redis = None
         self._redis_broker = None
-        self._postgres = None
-        self._helox_mirror_table_ready = False
         self._memory_manager = None
         self._synapse = None
         self._training_store = None
@@ -416,8 +415,6 @@ class RealtimeDataPipeline:
             "total_processed": 0,
             "helox_raw_sent": 0,
             "helox_structured_sent": 0,
-            "helox_postgres_mirrored": 0,
-            "helox_postgres_mirror_failures": 0,
             "cyrex_stored": 0,
             "validation_failures": 0,
             "duplicates_skipped": 0,
@@ -475,23 +472,6 @@ class RealtimeDataPipeline:
             self.logger.info("Pipeline connected to TrainingDataStore")
         except Exception as e:
             self.logger.warning(f"TrainingDataStore not available: {e}")
-
-        # Postgres mirror (durable Helox training history)
-        try:
-            from ..database.postgres import get_postgres_manager
-
-            self._postgres = await get_postgres_manager()
-            if getattr(self._postgres, "_pool", None) is None:
-                self.logger.warning(
-                    "Postgres manager available but pool not initialized; "
-                    "Helox Postgres mirror disabled"
-                )
-                self._postgres = None
-            else:
-                await self._ensure_helox_mirror_table()
-                self.logger.info("Pipeline connected to Helox Postgres mirror")
-        except Exception as e:
-            self.logger.warning(f"Postgres mirror not available: {e}")
 
         # Start background tasks
         self._flush_task = asyncio.create_task(self._flush_loop())
@@ -669,7 +649,6 @@ class RealtimeDataPipeline:
             "stats": self.get_stats(),
             "connections": {
                 "redis": self._redis is not None,
-                "postgres_mirror": self._postgres is not None,
                 "memory_manager": self._memory_manager is not None,
                 "synapse": self._synapse is not None,
                 "training_store": self._training_store is not None,
@@ -847,9 +826,6 @@ class RealtimeDataPipeline:
             payload = record.to_helox_raw_format()
             stat_key = "helox_raw_sent"
 
-        if await self._mirror_helox_payload_to_postgres(record, stream, payload):
-            self._stats["helox_postgres_mirrored"] += 1
-
         sent = False
 
         # Primary: Redis Streams
@@ -890,166 +866,6 @@ class RealtimeDataPipeline:
         else:
             self._stats["errors"] += 1
             self.logger.error(f"Helox route: all paths failed for {record.record_id}")
-
-    async def _ensure_helox_mirror_table(self) -> bool:
-        """Ensure the durable Helox Postgres mirror table exists."""
-        if self._helox_mirror_table_ready:
-            return True
-        if not self._postgres:
-            return False
-
-        try:
-            await self._postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
-            await self._postgres.execute(
-                """
-                CREATE TABLE IF NOT EXISTS cyrex.helox_training_samples (
-                    record_id TEXT PRIMARY KEY,
-                    stream_type TEXT NOT NULL CHECK (stream_type IN ('raw', 'structured')),
-                    producer TEXT NOT NULL DEFAULT 'language_intelligence',
-                    text TEXT NOT NULL,
-                    instruction TEXT,
-                    input_text TEXT,
-                    output_text TEXT,
-                    category TEXT,
-                    quality_score DOUBLE PRECISION NOT NULL DEFAULT 1.0,
-                    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            await self._postgres.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_helox_training_samples_created_at
-                ON cyrex.helox_training_samples (created_at DESC)
-                """
-            )
-            await self._postgres.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_helox_training_samples_stream_type
-                ON cyrex.helox_training_samples (stream_type)
-                """
-            )
-            await self._postgres.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_helox_training_samples_quality
-                ON cyrex.helox_training_samples (quality_score)
-                """
-            )
-            await self._postgres.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_helox_training_samples_producer
-                ON cyrex.helox_training_samples (producer)
-                """
-            )
-            self._helox_mirror_table_ready = True
-            return True
-        except Exception as e:
-            self.logger.warning(f"Failed to ensure Helox Postgres mirror table: {e}")
-            return False
-
-    async def _mirror_helox_payload_to_postgres(
-        self,
-        record: PipelineRecord,
-        stream: str,
-        payload: Dict[str, Any],
-    ) -> bool:
-        """
-        Mirror Helox payloads to Postgres for durable replay/backfill.
-        This path is best-effort and never blocks routing.
-        """
-        if not self._postgres:
-            return False
-        if not await self._ensure_helox_mirror_table():
-            return False
-
-        stream_type = "structured" if stream == self.HELOX_STRUCTURED_STREAM else "raw"
-        producer = str(record.metadata.get("producer") or "language_intelligence")
-
-        instruction = payload.get("instruction")
-        input_text = payload.get("input")
-        output_text = payload.get("output")
-        category = payload.get("category")
-
-        if stream_type == "structured":
-            text = (f"{instruction or ''} {input_text or ''}".strip()) or str(output_text or "")
-        else:
-            text = str(payload.get("text") or "")
-            instruction = None
-            input_text = None
-            output_text = None
-
-        if not text:
-            text = str(record.input_text or record.output_text or record.instruction or "")
-        if not text:
-            text = "<empty>"
-
-        quality_score = payload.get("quality_score", record.quality_score)
-        if quality_score is None:
-            quality_score = 1.0
-
-        metadata_json = json.dumps(
-            {
-                "stream_name": stream,
-                "route": "helox",
-                "record_category": record.category.value,
-                "payload": payload,
-                "record_metadata": record.metadata,
-                "tags": record.tags,
-            },
-            default=str,
-        )
-
-        try:
-            await self._postgres.execute(
-                """
-                INSERT INTO cyrex.helox_training_samples (
-                    record_id,
-                    stream_type,
-                    producer,
-                    text,
-                    instruction,
-                    input_text,
-                    output_text,
-                    category,
-                    quality_score,
-                    metadata_json,
-                    created_at
-                ) VALUES (
-                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb,
-                    COALESCE($11::timestamptz, NOW())
-                )
-                ON CONFLICT (record_id) DO UPDATE
-                SET
-                    stream_type = EXCLUDED.stream_type,
-                    producer = EXCLUDED.producer,
-                    text = EXCLUDED.text,
-                    instruction = EXCLUDED.instruction,
-                    input_text = EXCLUDED.input_text,
-                    output_text = EXCLUDED.output_text,
-                    category = EXCLUDED.category,
-                    quality_score = EXCLUDED.quality_score,
-                    metadata_json = EXCLUDED.metadata_json,
-                    created_at = EXCLUDED.created_at
-                """,
-                str(payload.get("id") or record.record_id),
-                stream_type,
-                producer,
-                text,
-                instruction,
-                input_text,
-                output_text,
-                category,
-                float(quality_score),
-                metadata_json,
-                payload.get("timestamp"),
-            )
-            return True
-        except Exception as e:
-            self._stats["helox_postgres_mirror_failures"] += 1
-            self.logger.warning(
-                f"Failed to mirror Helox payload to Postgres for {record.record_id}: {e}"
-            )
-            return False
 
     # ------------------------------------------------------------------
     # Route 2 – Cyrex (runtime context)
