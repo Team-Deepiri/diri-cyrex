@@ -760,8 +760,8 @@ if [ "$MODEL_COUNT" -eq 0 ]; then
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "⚠️  IMPORTANT: This project defaults to mistral:7b"
-echo "   Keep llama3:8b available for compatibility with existing agent/playground flows"
+echo "⚠️  IMPORTANT: This project uses mistral:7b as the DEFAULT model"
+echo "   It is recommended to install mistral:7b for compatibility with this project"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
@@ -775,13 +775,41 @@ echo ""
 # - Check Ollama's model library for latest: https://ollama.com/library
 #
 declare -a MODEL_LIST=(
-    "mistral:7b|4.1GB|⭐ DEFAULT - Primary project model"
-    "llama3:8b|4.7GB|Compatibility model for existing flows"
-    "codellama:7b|3.8GB|Coding-focused model"
-    "qwen2.5:7b|4.4GB|Alternative general-purpose model"
-    "qwen2.5-coder:7b|4.4GB|Alternative coding model"
-    "deepseek-coder:6.7b|4.1GB|Advanced coding model"
-    "phi3:mini|2.3GB|Low-resource fallback"
+    "mistral:7b|4.1GB|⭐ DEFAULT - Used by this project"
+    "llama3:8b|4.7GB|Alternative model"
+    "llama3.2:1b|1.3GB|Small, fast"
+    "llama3.2:3b|2.0GB|Balanced"
+    "llama3.1:8b|4.7GB|Latest Llama 3.1"
+    "llama3.1:70b|40GB|Large, powerful (requires 48GB+ VRAM)"
+    "mistral:7b|4.1GB|Efficient, high quality"
+    "mistral-nemo:12b|7.0GB|Enhanced Mistral"
+    "mixtral:8x7b|26GB|Mixture of experts"
+    "gemma2:2b|1.4GB|Small, efficient"
+    "gemma2:9b|5.4GB|Balanced"
+    "gemma2:27b|16GB|Large, powerful"
+    "gemma:7b|4.6GB|Google's Gemma"
+    "phi3:mini|2.3GB|Small, fast"
+    "phi3:medium|7.0GB|Balanced"
+    "codellama:7b|3.8GB|Code generation"
+    "codellama:13b|7.3GB|Larger code model"
+    "deepseek-coder:6.7b|4.1GB|Advanced coding"
+    "qwen2.5:7b|4.4GB|Alibaba's model"
+    "qwen2.5-coder:7b|4.4GB|Alibaba's coding model"
+    "neural-chat:7b|4.1GB|Conversational AI"
+    "yi:6b|3.8GB|Yi model 6B"
+    "yi:9b|5.4GB|Yi model 9B"
+    "openchat:7b|4.1GB|OpenChat model"
+    "zephyr:7b|4.1GB|Zephyr model"
+    "nous-hermes:7b|4.1GB|Nous Hermes"
+    "mythomax:7b|4.1GB|MythoMax"
+    "dolphin-mistral:7b|4.1GB|Dolphin Mistral"
+    "orca-mini:7b|4.1GB|Orca Mini"
+    "vicuna:13b|7.3GB|Vicuna 13B"
+    "falcon:11b|6.0GB|Falcon 11B"
+    "openhermes:13b|7.3GB|OpenHermes"
+    "starcoder2:7b|4.1GB|StarCoder2"
+    "wizardcoder:7b|4.1GB|WizardCoder 7B"
+    "wizardcoder:13b|7.3GB|WizardCoder 13B"
 )
 
 # Calculate option numbers for special actions
@@ -1196,3 +1224,4 @@ elif [ "$HANDLE_REMOVE" = false ] && [ "$HANDLE_RECHECK" = false ]; then
     echo "ℹ️  No models selected for installation."
     echo "   Select model numbers (1-17), custom model (18), remove models (19), or re-check hardware (20)"
 fi
+
