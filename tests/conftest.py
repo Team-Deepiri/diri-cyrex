@@ -5,6 +5,7 @@ Agent-level mocks and harness fixtures are loaded from
 diri-agent-testing-utils (shared across Deepiri services). Cyrex-specific
 fixtures (orchestrator wiring, tool samples, connection cleanup) are defined here.
 """
+
 import os
 from unittest.mock import Mock
 
@@ -59,7 +60,9 @@ def setup_test_env(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("LOCAL_LLM_BACKEND", "ollama")
     monkeypatch.setenv("LOCAL_LLM_MODEL", "llama3:8b")
-    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-minimum-32-characters-long-for-testing")
+    monkeypatch.setenv(
+        "JWT_SECRET", "test-jwt-secret-minimum-32-characters-long-for-testing"
+    )
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     monkeypatch.setenv("LANGSMITH_API_KEY", "")
     # Disable Milvus by default to prevent connection attempts
