@@ -12,9 +12,6 @@ from unittest.mock import Mock
 import pytest
 from diri_agent_testing_utils import FakeLLMProvider
 
-# Load shared pytest fixtures from diri-agent-testing-utils.
-pytest_plugins = ("diri_agent_testing_utils.fixtures.pytest_fixtures",)
-
 # Set test environment variables
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
 os.environ.setdefault("NODE_ENV", "test")
