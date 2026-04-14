@@ -1,6 +1,6 @@
-# Internal submodule packages
--e ./diri-agent-testing-utils
--e ./deepiri-dataset-processor[all]
+# Internal Deepiri packages pinned by git revision for deterministic builds
+diri-agent-testing-utils @ git+ssh://git@github.com/Team-Deepiri/diri-agent-testing-utils.git@a934468cd142e2cb38bd365e8548b4bdde77bf73
+deepiri-dataset-processor[all] @ git+ssh://git@github.com/Team-Deepiri/deepiri-dataset-processor.git@f564b41fc1e475be7fcd792703149daeb84056b7
 
 # Core dependencies (torch is already in base PyTorch image)
 fastapi==0.112.2
@@ -77,4 +77,3 @@ brotli>=1.1.0  # Alternative compression (brotli)
 
 # Local LLM Support
 ollama>=0.1.0
-
