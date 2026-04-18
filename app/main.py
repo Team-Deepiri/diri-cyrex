@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from collections import defaultdict
@@ -181,14 +181,18 @@ async def middleware(request: Request, call_next):
                     request_id,
                     path
                 )
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                response.headers["x-request-id"] = request_id
+                return response
             if is_desktop and api_key and api_key != settings.CYREX_API_KEY:
                 error_logger.log_api_error(
                     HTTPException(status_code=401, detail="Invalid API key"),
                     request_id,
                     path
                 )
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                response.headers["x-request-id"] = request_id
+                return response
 
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
@@ -223,7 +227,16 @@ async def health():
         "status": "healthy",
         "version": "3.0.0",
         "timestamp": time.time(),
-        "services": {"ai": "ready" if settings.OPENAI_API_KEY else "disabled"}
+        "services": {
+            "ai": "ready" if settings.OPENAI_API_KEY else "disabled",
+            "node_backend": "configured" if settings.NODE_BACKEND_URL else "not_configured",
+        },
+        "configuration": {
+            "cors_origin": settings.CORS_ORIGIN,
+            "node_backend_url": settings.NODE_BACKEND_URL,
+            "openai_model": settings.OPENAI_MODEL,
+            "api_key_required": bool(settings.CYREX_API_KEY),
+        },
     }
 
     # Redis health
@@ -240,6 +253,12 @@ async def health():
         health_status["services"]["redis"] = f"unhealthy: {e}"
 
     return health_status
+
+
+@app.options("/health")
+async def health_options_handler():
+    """Support bare OPTIONS /health checks in tests and simple preflight flows."""
+    return Response(status_code=204)
 
 # Metrics
 @app.get("/metrics")
@@ -273,11 +292,15 @@ class CompletionRequest(BaseModel):
 async def api_embeddings(req: EmbeddingRequest, request: Request):
     request_id = getattr(request.state, 'request_id', 'unknown')
     try:
-        from ..services.embedding_service import get_embedding_service
+        if not req.text or not req.text.strip():
+            raise HTTPException(status_code=422, detail="Text must not be empty")
+        from .services.embedding_service import get_embedding_service
         service = get_embedding_service()
         embedding_result = service.embed(req.text, use_cache=True)
         embedding_list = embedding_result.tolist() if isinstance(embedding_result, np.ndarray) else list(embedding_result)
         return {"embedding": embedding_list, "dimension": len(embedding_list), "model": req.model}
+    except HTTPException:
+        raise
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/embeddings")
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
@@ -301,6 +324,8 @@ async def api_complete(req: CompletionRequest, request: Request):
         return {"completion": completion.choices[0].message.content,
                 "tokens_used": completion.usage.total_tokens if completion.usage else 0,
                 "model": completion.model}
+    except HTTPException:
+        raise
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/complete")
         raise HTTPException(status_code=500, detail=f"Completion generation failed: {e}")

@@ -1154,6 +1154,15 @@ Check for correctness, error handling, code quality, and alignment with the plan
 _langgraph_workflow: Optional[LangGraphMultiAgentWorkflow] = None
 
 
+def get_langgraph_workflow_instance() -> Optional[LangGraphMultiAgentWorkflow]:
+    """
+    Return the current workflow singleton without triggering initialization.
+
+    This is used by lightweight health checks to avoid expensive startup paths.
+    """
+    return _langgraph_workflow
+
+
 async def get_langgraph_workflow(
     llm_provider=None,
     tool_registry=None,

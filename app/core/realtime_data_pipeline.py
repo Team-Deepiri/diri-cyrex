@@ -16,6 +16,7 @@ Architecture:
       ├── Route 1 ─ Helox Training
       │   ├── Raw data   → Redis Streams (pipeline.helox-training.raw)
       │   ├── Structured → Redis Streams (pipeline.helox-training.structured)
+      │   ├── Durable    → PostgreSQL (cyrex.helox_training_samples)
       │   └── Fallback   → local TrainingDataStore (CSV/JSONL)
       │
       ├── Route 2 ─ Cyrex Runtime
@@ -29,7 +30,7 @@ All data is processed asynchronously with back-pressure support.
 
 from typing import Dict, List, Optional, Any, Literal, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import asyncio
 import json
@@ -117,7 +118,7 @@ class PipelineRecord:
     execution_time_ms: Optional[float] = None
     tags: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Processing state
     status: RecordStatus = RecordStatus.PENDING
@@ -387,6 +388,7 @@ class RealtimeDataPipeline:
     def __init__(self):
         self._redis = None
         self._redis_broker = None
+        self._postgres = None
         self._memory_manager = None
         self._synapse = None
         self._training_store = None
@@ -415,6 +417,8 @@ class RealtimeDataPipeline:
             "total_processed": 0,
             "helox_raw_sent": 0,
             "helox_structured_sent": 0,
+            "helox_postgres_persisted": 0,
+            "helox_postgres_errors": 0,
             "cyrex_stored": 0,
             "validation_failures": 0,
             "duplicates_skipped": 0,
@@ -449,9 +453,28 @@ class RealtimeDataPipeline:
         except Exception as e:
             self.logger.warning(f"Redis not available for pipeline: {e}")
 
+        # PostgreSQL (durable training history for Helox)
+        try:
+            from ..database.postgres import get_postgres_manager
+
+            postgres = await get_postgres_manager()
+            if postgres and getattr(postgres, "_pool", None) is not None:
+                self._postgres = postgres
+                await self._ensure_helox_postgres_table()
+                self.logger.info(
+                    "Pipeline connected to PostgreSQL for Helox durable training records"
+                )
+            else:
+                self.logger.warning(
+                    "PostgreSQL unavailable for pipeline durable training records"
+                )
+        except Exception as e:
+            self.logger.warning(f"PostgreSQL not available for pipeline: {e}")
+
         # Memory manager (for Cyrex route)
         try:
             from .memory_manager import get_memory_manager
+
             self._memory_manager = await get_memory_manager()
             self.logger.info("Pipeline connected to MemoryManager")
         except Exception as e:
@@ -638,6 +661,7 @@ class RealtimeDataPipeline:
             "dedup_window_size": len(self._recent_hashes),
             "initialized": self._initialized,
             "redis_connected": self._redis is not None,
+            "postgres_connected": self._postgres is not None,
             "memory_manager_connected": self._memory_manager is not None,
             "synapse_connected": self._synapse is not None,
         }
@@ -649,6 +673,7 @@ class RealtimeDataPipeline:
             "stats": self.get_stats(),
             "connections": {
                 "redis": self._redis is not None,
+                "postgres": self._postgres is not None,
                 "memory_manager": self._memory_manager is not None,
                 "synapse": self._synapse is not None,
                 "training_store": self._training_store is not None,
@@ -661,6 +686,21 @@ class RealtimeDataPipeline:
                 health["connections"]["redis_healthy"] = True
             except Exception:
                 health["connections"]["redis_healthy"] = False
+                health["healthy"] = False
+
+        # Test PostgreSQL connectivity (non-fatal if unavailable)
+        if self._postgres:
+            try:
+                pg_health = await self._postgres.health_check()
+                health["connections"]["postgres_healthy"] = bool(
+                    pg_health.get("healthy", False)
+                )
+                health["postgres"] = pg_health
+                if not pg_health.get("healthy", False):
+                    health["healthy"] = False
+            except Exception as e:
+                health["connections"]["postgres_healthy"] = False
+                health["connections"]["postgres_error"] = str(e)
                 health["healthy"] = False
         return health
 
@@ -714,7 +754,7 @@ class RealtimeDataPipeline:
                         k: json.dumps(v) if not isinstance(v, (str, int, float)) else str(v)
                         for k, v in self._stats.items()
                     }
-                    metrics["timestamp"] = datetime.utcnow().isoformat()
+                    metrics["timestamp"] = datetime.now(timezone.utc).isoformat()
                     await self._redis.xadd(
                         self.METRICS_STREAM, metrics,
                         maxlen=5_000, approximate=True,
@@ -805,6 +845,7 @@ class RealtimeDataPipeline:
           (they still go to Cyrex if route=BOTH)
         - Raw data  → HELOX_RAW_STREAM
         - Structured → HELOX_STRUCTURED_STREAM
+        - Durable history → cyrex.helox_training_samples (Postgres)
         Fallback: local TrainingDataStore (CSV/JSONL)
         """
         # Quality gate
@@ -821,12 +862,22 @@ class RealtimeDataPipeline:
             stream = self.HELOX_STRUCTURED_STREAM
             payload = record.to_helox_training_format()
             stat_key = "helox_structured_sent"
+            stream_type = "structured"
         else:
             stream = self.HELOX_RAW_STREAM
             payload = record.to_helox_raw_format()
             stat_key = "helox_raw_sent"
+            stream_type = "raw"
 
         sent = False
+
+        # Durable history in Postgres (side-effect for replay/historical training).
+        if self._postgres:
+            await self._persist_helox_record_to_postgres(
+                record=record,
+                payload=payload,
+                stream_type=stream_type,
+            )
 
         # Primary: Redis Streams
         if self._redis:
@@ -952,7 +1003,7 @@ class RealtimeDataPipeline:
                         "category": record.category.value,
                         "errors": json.dumps(record.errors),
                         "retry_count": str(record.retry_count),
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                         "input_text": record.input_text[:500],  # truncate
                     }
                     await self._redis.xadd(
@@ -976,7 +1027,7 @@ class RealtimeDataPipeline:
     def _is_duplicate(self, content_hash: str) -> bool:
         """Check if we've seen this content recently"""
         if content_hash in self._recent_hashes:
-            if self._recent_hashes[content_hash] > datetime.utcnow():
+            if self._recent_hashes[content_hash] > datetime.now(timezone.utc):
                 return True
             else:
                 del self._recent_hashes[content_hash]
@@ -984,16 +1035,170 @@ class RealtimeDataPipeline:
 
     def _mark_seen(self, content_hash: str):
         """Mark content as seen within the dedup window"""
-        self._recent_hashes[content_hash] = (
-            datetime.utcnow() + timedelta(seconds=self._dedup_window_seconds)
+        self._recent_hashes[content_hash] = datetime.now(timezone.utc) + timedelta(
+            seconds=self._dedup_window_seconds
         )
 
     def _prune_dedup_window(self):
         """Remove expired entries from the dedup window"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired = [h for h, exp in self._recent_hashes.items() if exp <= now]
         for h in expired:
             del self._recent_hashes[h]
+
+    # ------------------------------------------------------------------
+    # Helox durable Postgres
+    # ------------------------------------------------------------------
+
+    async def _ensure_helox_postgres_table(self):
+        """
+        Ensure durable table for Helox training records exists.
+
+        This uses the real shared table (`cyrex.helox_training_samples`) so Helox
+        can read directly from Postgres without any mirror-table indirection.
+        """
+        if not self._postgres:
+            return
+
+        await self._postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
+        await self._postgres.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cyrex.helox_training_samples (
+                id BIGSERIAL PRIMARY KEY,
+                record_id TEXT UNIQUE NOT NULL,
+                stream_type TEXT NOT NULL,
+                category TEXT,
+                text TEXT NOT NULL,
+                instruction TEXT,
+                input_text TEXT,
+                output_text TEXT,
+                context TEXT,
+                quality_score DOUBLE PRECISION,
+                producer TEXT NOT NULL DEFAULT 'cyrex_realtime_pipeline',
+                agent_id TEXT,
+                session_id TEXT,
+                user_id TEXT,
+                tool_name TEXT,
+                model_name TEXT,
+                schema_version TEXT,
+                payload JSONB NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+        await self._postgres.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_helox_training_samples_created_at
+            ON cyrex.helox_training_samples (created_at)
+            """
+        )
+        await self._postgres.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_helox_training_samples_stream_type
+            ON cyrex.helox_training_samples (stream_type)
+            """
+        )
+        await self._postgres.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_helox_training_samples_producer
+            ON cyrex.helox_training_samples (producer)
+            """
+        )
+
+    @staticmethod
+    def _build_training_text(record: PipelineRecord, payload: Dict[str, Any]) -> str:
+        """Normalize a single training text field used by Helox PostgresDataSource."""
+        text = payload.get("text")
+        if text:
+            return str(text)
+
+        parts = [record.instruction, record.input_text, record.output_text]
+        combined = "\n\n".join(part for part in parts if part)
+        if combined:
+            return combined
+
+        return json.dumps(payload, default=str)
+
+    async def _persist_helox_record_to_postgres(
+        self,
+        record: PipelineRecord,
+        payload: Dict[str, Any],
+        stream_type: str,
+    ):
+        """Persist Helox-bound training payload to durable Postgres history."""
+        if not self._postgres:
+            return
+
+        try:
+            text = self._build_training_text(record, payload)
+            category = payload.get("category") or record.category.value
+            quality_score = (
+                float(payload["quality_score"])
+                if payload.get("quality_score") is not None
+                else (
+                    float(record.quality_score)
+                    if record.quality_score is not None
+                    else None
+                )
+            )
+
+            await self._postgres.execute(
+                """
+                INSERT INTO cyrex.helox_training_samples (
+                    record_id, stream_type, category, text, instruction,
+                    input_text, output_text, context, quality_score, producer,
+                    agent_id, session_id, user_id, tool_name, model_name,
+                    schema_version, payload
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15,
+                    $16, $17::jsonb
+                )
+                ON CONFLICT (record_id) DO UPDATE SET
+                    stream_type = EXCLUDED.stream_type,
+                    category = EXCLUDED.category,
+                    text = EXCLUDED.text,
+                    instruction = EXCLUDED.instruction,
+                    input_text = EXCLUDED.input_text,
+                    output_text = EXCLUDED.output_text,
+                    context = EXCLUDED.context,
+                    quality_score = EXCLUDED.quality_score,
+                    agent_id = EXCLUDED.agent_id,
+                    session_id = EXCLUDED.session_id,
+                    user_id = EXCLUDED.user_id,
+                    tool_name = EXCLUDED.tool_name,
+                    model_name = EXCLUDED.model_name,
+                    schema_version = EXCLUDED.schema_version,
+                    payload = EXCLUDED.payload,
+                    updated_at = NOW()
+                """,
+                record.record_id,
+                stream_type,
+                category,
+                text,
+                record.instruction or payload.get("instruction"),
+                record.input_text or payload.get("input"),
+                record.output_text or payload.get("output"),
+                record.context,
+                quality_score,
+                "cyrex_realtime_pipeline",
+                record.agent_id,
+                record.session_id,
+                record.user_id,
+                record.tool_name,
+                record.model_name,
+                record.schema_version,
+                json.dumps(payload, default=str),
+            )
+            self._stats["helox_postgres_persisted"] += 1
+        except Exception as e:
+            self._stats["helox_postgres_errors"] += 1
+            self.logger.warning(
+                f"Failed to persist Helox training record {record.record_id} to Postgres: {e}"
+            )
 
     # ------------------------------------------------------------------
     # Helpers
