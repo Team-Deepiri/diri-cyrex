@@ -6,7 +6,7 @@ Integrates with Prometheus and persists summaries to PostgreSQL.
 """
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 import statistics
 import asyncio
@@ -162,7 +162,8 @@ class AgentMetricsCollector:
             return
         try:
             from ..database.postgres import get_postgres_manager
-            postgres = await get_postgres_manager()
+            # Avoid long connection retry backoff in request paths.
+            postgres = await asyncio.wait_for(get_postgres_manager(), timeout=1.0)
             exists = await postgres.fetchval("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables
@@ -174,6 +175,8 @@ class AgentMetricsCollector:
                 return
             self._db_initialized = True
             logger.debug("Agent metrics DB table verified")
+        except TimeoutError:
+            logger.warning("Timed out while checking agent_metrics table; skipping DB flush for now")
         except Exception as e:
             logger.warning(f"Could not verify agent_metrics table: {e}")
 
@@ -195,7 +198,7 @@ class AgentMetricsCollector:
         self._roles[agent_id] = role
 
         record = AgentInvokeRecord(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             duration_ms=duration_ms,
             success=success,
             confidence=confidence,
@@ -292,6 +295,9 @@ class AgentMetricsCollector:
     async def flush_to_db(self):
         """Persist current window summaries to PostgreSQL."""
         await self.ensure_db()
+        if not self._db_initialized:
+            # DB is unavailable or table isn't ready yet; keep in-memory metrics.
+            return
         if not self._records:
             return
 
@@ -299,7 +305,7 @@ class AgentMetricsCollector:
             from ..database.postgres import get_postgres_manager
             import json
             postgres = await get_postgres_manager()
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             window_start = now - timedelta(hours=1)
 
             for agent_id in list(self._records.keys()):

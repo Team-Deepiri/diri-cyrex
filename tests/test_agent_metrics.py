@@ -9,7 +9,7 @@ Covers:
 import pytest
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.agents.metrics import (
     AgentMetricsCollector,
@@ -201,7 +201,7 @@ class TestAgentMetricsCollector:
         assert p == 99.0
 
     def test_last_invoked_at_updated(self, collector):
-        t_before = datetime.utcnow()
+        t_before = datetime.now(timezone.utc)
         collector.record("A", "r", 100.0, True, 0.8, [])
         s = collector.get_summary("A")
         assert s.last_invoked_at >= t_before
