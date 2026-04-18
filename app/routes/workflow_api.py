@@ -240,9 +240,10 @@ async def workflow_health() -> Dict[str, Any]:
             "langgraph_available": workflow.graph is not None,
             "checkpointing_available": workflow.checkpointer is not None,
         }
-    except Exception as e:
+    except Exception:
+        logger.exception("Workflow health check failed")
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "An internal error has occurred",
         }
 
