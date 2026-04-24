@@ -368,18 +368,13 @@ class TestAgentCommunication:
         mock_broker.publish = AsyncMock(return_value="msg-id-123")
         mock_broker.subscribe = AsyncMock(return_value="sub-id-1")
 
-        with patch(
-            "app.agents.base_agent.get_synapse_broker",
-            new_callable=AsyncMock,
-            return_value=mock_broker,
-        ):
-            # Inject broker directly to skip _initialize_broker
-            mock_agent._broker = mock_broker
-
-            msg_id = await mock_agent.send_message(
-                recipient_agent_id="agent-B",
-                payload={"task": "analyze"},
-            )
+        # Inject broker directly to skip _initialize_broker.
+        # This test validates send_message publish semantics only.
+        mock_agent._broker = mock_broker
+        msg_id = await mock_agent.send_message(
+            recipient_agent_id="agent-B",
+            payload={"task": "analyze"},
+        )
 
         assert msg_id == "msg-id-123"
         mock_broker.publish.assert_called_once()
