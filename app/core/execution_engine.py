@@ -23,13 +23,11 @@ _TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,128}$")
 HAS_LANGCHAIN_RUNNABLES = False
 try:
     from langchain_core.runnables import Runnable, RunnableConfig
-    from langchain_core.callbacks import CallbackManager
     HAS_LANGCHAIN_RUNNABLES = True
 except ImportError as e:
     logger.warning(f"LangChain runnables not available: {e}")
     Runnable = None
     RunnableConfig = None
-    CallbackManager = None
 
 
 class ExecutionStatus(str, Enum):
