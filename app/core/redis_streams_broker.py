@@ -9,13 +9,42 @@ from dataclasses import dataclass, field
 from enum import Enum
 import asyncio
 import json
+import os
 import uuid
 import redis.asyncio as aioredis
 from ..logging_config import get_logger
+from ..integrations.streaming.synapse_sugar_glider_client import SidecarError, SynapseSidecarClient
 from ..settings import settings
 from .types import MessagePriority
 
 logger = get_logger("cyrex.redis_streams")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("Invalid float env %s=%r; using %s", name, raw, default)
+        return default
+
+
+def _to_text(data: Dict[str, Any]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {}
+    for key, value in data.items():
+        if value is None:
+            normalized[key] = ""
+        elif isinstance(value, str):
+            normalized[key] = value
+        elif isinstance(value, bytes):
+            normalized[key] = value.decode("utf-8", errors="replace")
+        elif isinstance(value, (dict, list)):
+            normalized[key] = json.dumps(value)
+        else:
+            normalized[key] = str(value)
+    return normalized
 
 
 class StreamEventType(str, Enum):
@@ -116,6 +145,29 @@ class RedisStreamsBroker:
         self.redis_url = redis_url
         self.max_stream_length = max_stream_length
         self.cleanup_interval = cleanup_interval
+        self.transport = (os.getenv("SYNAPSE_TRANSPORT", "redis") or "redis").strip().lower()
+        self.use_sidecar = self.transport == "sidecar"
+        self.sidecar_url = (
+            os.getenv("SYNAPSE_SIDECAR_URL", "http://synapse-sidecar:8081").rstrip("/")
+        )
+        self.sidecar_grpc_addr = os.getenv("SYNAPSE_GRPC_ADDR")
+        self.sidecar_timeout_sec = _env_float("SYNAPSE_SIDECAR_TIMEOUT_SEC", 5.0)
+        self.sidecar_sender = os.getenv("SYNAPSE_SIDECAR_SENDER", "cyrex")
+        self.sidecar_subscriber_group_suffix = os.getenv(
+            "SYNAPSE_SIDECAR_SUBSCRIBER_GROUP_SUFFIX",
+            "subscribers",
+        )
+        self.sidecar_consumer_name_prefix = os.getenv("SYNAPSE_CONSUMER_NAME", "cyrex")
+        self._sidecar: Optional[SynapseSidecarClient] = (
+            SynapseSidecarClient(
+                base_url=self.sidecar_url,
+                timeout_sec=self.sidecar_timeout_sec,
+                default_sender=self.sidecar_sender,
+                grpc_addr=self.sidecar_grpc_addr,
+            )
+            if self.use_sidecar
+            else None
+        )
         self._redis: Optional[aioredis.Redis] = None
         self._subscribers: Dict[str, Set[Callable]] = {}
         self._consumer_tasks: Dict[str, asyncio.Task] = {}
@@ -124,6 +176,15 @@ class RedisStreamsBroker:
     
     async def connect(self) -> bool:
         """Connect to Redis with retry logic"""
+        if self.use_sidecar and self._sidecar:
+            ready = await self._sidecar.ready()
+            self._running = ready
+            if ready:
+                self.logger.info("Connected to Synapse sidecar for streams broker")
+            else:
+                self.logger.warning("Synapse sidecar is not ready for streams broker")
+            return ready
+
         max_retries = 3
         retry_delay = 1.0
         
@@ -191,6 +252,13 @@ class RedisStreamsBroker:
     
     async def _ensure_connected(self):
         """Ensure Redis connection is active, reconnect if needed"""
+        if self.use_sidecar and self._sidecar:
+            if not self._running:
+                await self.connect()
+            if not self._running:
+                raise SidecarError("synapse sidecar is unavailable")
+            return
+
         if not self._redis or not self._running:
             await self.connect()
         else:
@@ -228,43 +296,58 @@ class RedisStreamsBroker:
         Returns:
             Redis stream entry ID, or None if failed
         """
+        message = StreamMessage(
+            stream=stream,
+            event_type=event_type,
+            sender=sender,
+            recipient=recipient,
+            priority=priority,
+            payload=payload,
+            ttl=ttl,
+        )
+
         try:
             await self._ensure_connected()
-            
-            if not self._redis:
-                self.logger.warning("Redis not connected, cannot publish message")
-                return None
-            
-            message = StreamMessage(
-                stream=stream,
-                event_type=event_type,
-                sender=sender,
-                recipient=recipient,
-                priority=priority,
-                payload=payload,
-                ttl=ttl,
-            )
-            
-            # Add to stream with automatic trimming
-            entry_id = await self._redis.xadd(
-                stream,
-                message.to_dict(),
-                maxlen=self.max_stream_length,
-            )
-            
+
+            if self.use_sidecar and self._sidecar:
+                entry_id = await self._sidecar.publish(
+                    stream=stream,
+                    event_type=event_type.value,
+                    sender=sender,
+                    recipient=recipient,
+                    priority=priority.value,
+                    payload=payload,
+                    ttl_sec=ttl,
+                )
+            else:
+                if not self._redis:
+                    self.logger.warning("Redis not connected, cannot publish message")
+                    return None
+
+                # Add to stream with automatic trimming
+                entry_id = await self._redis.xadd(
+                    stream,
+                    message.to_dict(),
+                    maxlen=self.max_stream_length,
+                )
+
             # Notify in-memory subscribers
             await self._notify_subscribers(stream, message)
-            
+
             self.logger.debug(
                 f"Published message to {stream}: {message.message_id}",
                 event_type=event_type.value
             )
-            
+
             return entry_id
         except Exception as e:
-            self.logger.warning(f"Failed to publish message to Redis: {e}")
+            transport = "sidecar" if self.use_sidecar else "redis"
+            self.logger.warning(f"Failed to publish message via {transport}: {e}")
             # Try to reconnect for next time
-            self._redis = None
+            if not self.use_sidecar:
+                self._redis = None
+            else:
+                self._running = False
             return None
     
     async def publish_batch(
@@ -275,7 +358,15 @@ class RedisStreamsBroker:
     ) -> List[str]:
         """Publish multiple messages in a pipeline"""
         await self._ensure_connected()
-        
+
+        if self.use_sidecar and self._sidecar:
+            entry_ids: List[str] = []
+            for msg_data in messages:
+                entry_id = await self.publish(stream, event_type, msg_data)
+                if entry_id:
+                    entry_ids.append(entry_id)
+            return entry_ids
+
         entry_ids = []
         async with self._redis.pipeline(transaction=True) as pipe:
             for msg_data in messages:
@@ -285,10 +376,10 @@ class RedisStreamsBroker:
                     payload=msg_data,
                 )
                 pipe.xadd(stream, message.to_dict(), maxlen=self.max_stream_length)
-            
+
             results = await pipe.execute()
             entry_ids = [r for r in results if r]
-        
+
         return entry_ids
     
     # ========================================================================
@@ -315,7 +406,13 @@ class RedisStreamsBroker:
             List of StreamMessage objects
         """
         await self._ensure_connected()
-        
+
+        if self.use_sidecar:
+            self.logger.warning(
+                "consume() is not supported in sidecar mode (use consume_group instead)"
+            )
+            return []
+
         result = await self._redis.xread(
             {stream: last_id},
             count=count,
@@ -341,7 +438,24 @@ class RedisStreamsBroker:
         Supports message acknowledgment and redelivery
         """
         await self._ensure_connected()
-        
+
+        if self.use_sidecar and self._sidecar:
+            sidecar_events = await self._sidecar.read(
+                stream=group.stream,
+                consumer_group=group.name,
+                consumer_name=group.consumer_name,
+                count=group.count,
+                block_ms=group.block_ms,
+            )
+            messages: List[StreamMessage] = []
+            for event in sidecar_events:
+                data = _to_text(event.fields)
+                msg = StreamMessage.from_dict(data, event.entry_id)
+                msg.message_id = event.entry_id
+                msg.stream = event.stream
+                messages.append(msg)
+            return messages
+
         # Ensure consumer group exists
         try:
             await self._redis.xgroup_create(
@@ -378,7 +492,10 @@ class RedisStreamsBroker:
         
         if not message_ids:
             return 0
-        
+
+        if self.use_sidecar and self._sidecar:
+            return await self._sidecar.ack(stream, group, message_ids)
+
         return await self._redis.xack(stream, group, *message_ids)
     
     async def get_pending(
@@ -390,7 +507,11 @@ class RedisStreamsBroker:
     ) -> List[Dict[str, Any]]:
         """Get pending (unacknowledged) messages"""
         await self._ensure_connected()
-        
+
+        if self.use_sidecar:
+            self.logger.warning("get_pending() is not supported in sidecar mode")
+            return []
+
         result = await self._redis.xpending_range(
             stream,
             group,
@@ -420,7 +541,11 @@ class RedisStreamsBroker:
     ) -> List[StreamMessage]:
         """Claim messages from other consumers (for recovery)"""
         await self._ensure_connected()
-        
+
+        if self.use_sidecar:
+            self.logger.warning("claim_messages() is not supported in sidecar mode")
+            return []
+
         result = await self._redis.xclaim(
             stream,
             group,
@@ -475,6 +600,36 @@ class RedisStreamsBroker:
     
     async def _consumer_loop(self, stream: str):
         """Background consumer loop for subscriptions"""
+        if self.use_sidecar and self._sidecar:
+            consumer_group = ConsumerGroup(
+                name=f"{stream}:{self.sidecar_subscriber_group_suffix}",
+                stream=stream,
+                consumer_name=f"{self.sidecar_consumer_name_prefix}-{uuid.uuid4().hex[:8]}",
+                start_id=">",
+                block_ms=5000,
+                count=10,
+            )
+
+            while self._running:
+                try:
+                    messages = await self.consume_group(consumer_group)
+                    if not messages:
+                        continue
+
+                    ack_ids: List[str] = []
+                    for msg in messages:
+                        await self._notify_subscribers(stream, msg)
+                        ack_ids.append(msg.message_id)
+
+                    if ack_ids:
+                        await self.acknowledge(stream, consumer_group.name, ack_ids)
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    self.logger.error(f"Sidecar consumer loop error: {e}")
+                    await asyncio.sleep(1)
+            return
+
         last_id = "$"
         
         while self._running:
@@ -518,7 +673,11 @@ class RedisStreamsBroker:
     async def get_stream_info(self, stream: str) -> Dict[str, Any]:
         """Get stream information"""
         await self._ensure_connected()
-        
+
+        if self.use_sidecar:
+            self.logger.warning("get_stream_info() is not supported in sidecar mode")
+            return {"length": 0, "exists": False, "transport": "sidecar"}
+
         try:
             info = await self._redis.xinfo_stream(stream)
             return {
@@ -533,23 +692,35 @@ class RedisStreamsBroker:
     async def get_stream_length(self, stream: str) -> int:
         """Get number of messages in stream"""
         await self._ensure_connected()
+        if self.use_sidecar:
+            self.logger.warning("get_stream_length() is not supported in sidecar mode")
+            return 0
         return await self._redis.xlen(stream)
     
     async def trim_stream(self, stream: str, max_length: Optional[int] = None) -> int:
         """Trim stream to max length"""
         await self._ensure_connected()
+        if self.use_sidecar:
+            self.logger.warning("trim_stream() is not supported in sidecar mode")
+            return 0
         max_len = max_length or self.max_stream_length
         return await self._redis.xtrim(stream, maxlen=max_len)
     
     async def delete_stream(self, stream: str) -> bool:
         """Delete a stream entirely"""
         await self._ensure_connected()
+        if self.use_sidecar:
+            self.logger.warning("delete_stream() is not supported in sidecar mode")
+            return False
         result = await self._redis.delete(stream)
         return result > 0
     
     async def list_streams(self, pattern: str = "cyrex:*") -> List[str]:
         """List all streams matching pattern"""
         await self._ensure_connected()
+        if self.use_sidecar:
+            self.logger.warning("list_streams() is not supported in sidecar mode")
+            return []
         keys = await self._redis.keys(pattern)
         
         streams = []
@@ -572,7 +743,11 @@ class RedisStreamsBroker:
     ) -> bool:
         """Create a consumer group"""
         await self._ensure_connected()
-        
+
+        if self.use_sidecar:
+            # Sidecar auto-creates groups via /v1/read.
+            return True
+
         try:
             await self._redis.xgroup_create(
                 stream,
@@ -589,13 +764,20 @@ class RedisStreamsBroker:
     async def delete_consumer_group(self, stream: str, group: str) -> bool:
         """Delete a consumer group"""
         await self._ensure_connected()
+        if self.use_sidecar:
+            self.logger.warning("delete_consumer_group() is not supported in sidecar mode")
+            return False
         result = await self._redis.xgroup_destroy(stream, group)
         return result > 0
     
     async def list_consumer_groups(self, stream: str) -> List[Dict[str, Any]]:
         """List consumer groups for a stream"""
         await self._ensure_connected()
-        
+
+        if self.use_sidecar:
+            self.logger.warning("list_consumer_groups() is not supported in sidecar mode")
+            return []
+
         try:
             groups = await self._redis.xinfo_groups(stream)
             return [
@@ -644,6 +826,19 @@ class RedisStreamsBroker:
     ) -> List[StreamMessage]:
         """Get messages from dead letter queue"""
         dlq_stream = f"{stream}:dlq"
+        if self.use_sidecar:
+            group = ConsumerGroup(
+                name=f"{dlq_stream}:dlq-reader",
+                stream=dlq_stream,
+                consumer_name=f"{self.sidecar_consumer_name_prefix}-dlq",
+                start_id=">",
+                block_ms=0,
+                count=count,
+            )
+            messages = await self.consume_group(group)
+            if messages:
+                await self.acknowledge(dlq_stream, group.name, [m.message_id for m in messages])
+            return messages
         return await self.consume(dlq_stream, count=count, last_id="0", block_ms=0)
 
 
@@ -669,4 +864,3 @@ async def close_redis_streams_broker():
     if _streams_broker:
         await _streams_broker.disconnect()
         _streams_broker = None
-
