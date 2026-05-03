@@ -7,12 +7,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 import json
-import os
 import sys
 
 import grpc
+from deepiri_modelkit.streaming.sidecar_utils import resolve_grpc_addr
 
 # Generated stubs import `proto.synapse.v1...`, so add the gen root to sys.path.
 _GEN_ROOT = Path(__file__).resolve().parent / "gen"
@@ -46,32 +45,9 @@ class SynapseSidecarClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_sec = timeout_sec
         self.default_sender = default_sender
-        self.grpc_addr = self._resolve_grpc_addr(base_url=self.base_url, explicit_grpc_addr=grpc_addr)
+        self.grpc_addr = resolve_grpc_addr(base_url=self.base_url, explicit_grpc_addr=grpc_addr)
         self._channel = grpc.aio.insecure_channel(self.grpc_addr)
         self._stub = sugar_glider_pb2_grpc.SynapseSidecarStub(self._channel)
-
-    @staticmethod
-    def _resolve_grpc_addr(base_url: str, explicit_grpc_addr: Optional[str]) -> str:
-        env_addr = os.getenv("SYNAPSE_GRPC_ADDR")
-        if explicit_grpc_addr:
-            return explicit_grpc_addr
-        if env_addr:
-            return env_addr
-
-        parsed = urlparse(base_url)
-        if parsed.scheme in {"http", "https"}:
-            host = parsed.hostname or "localhost"
-            port = parsed.port
-            if port is None:
-                port = 443 if parsed.scheme == "https" else 80
-            # Sidecar HTTP default is 8081; gRPC default is 50051.
-            if port == 8081:
-                port = 50051
-            return f"{host}:{port}"
-
-        if base_url:
-            return base_url
-        return "localhost:50051"
 
     async def ready(self) -> bool:
         try:

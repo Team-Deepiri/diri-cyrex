@@ -4,7 +4,6 @@ Publishes events to Redis Streams for cross-service communication
 Used for inference events, model status, and AGI decisions
 """
 import asyncio
-import json
 from typing import Dict, Any, Optional, AsyncIterator, Callable
 from datetime import datetime
 import os
@@ -17,6 +16,7 @@ from deepiri_modelkit import (
     get_logger
 )
 from deepiri_modelkit.streaming.topics import StreamTopics
+from deepiri_modelkit.streaming.sidecar_utils import env_float, sidecar_payload_from_fields
 
 from ...settings import settings
 from .synapse_sugar_glider_client import SidecarError, SynapseSidecarClient
@@ -32,17 +32,6 @@ def _redis_url() -> str:
     if settings.REDIS_PASSWORD:
         return f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
     return f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        logger.warning("invalid_float_env", name=name, raw_value=raw, fallback=default)
-        return default
 
 
 def _stream_name(value: Any) -> str:
@@ -217,7 +206,7 @@ class CyrexEventPublisher:
 
             ack_ids = []
             for item in events:
-                event_data = self._payload_from_sidecar_fields(item.fields)
+                event_data = sidecar_payload_from_fields(item.fields)
                 await self._emit_callback(callback, event_data)
 
                 if event_data.get("event") == "model-ready":
@@ -297,29 +286,6 @@ class CyrexEventPublisher:
         result = callback(event_data)
         if asyncio.iscoroutine(result):
             await result
-
-    @staticmethod
-    def _payload_from_sidecar_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
-        payload = fields.get("payload", {})
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except ValueError:
-                payload = {}
-        elif not isinstance(payload, dict):
-            payload = {}
-
-        if "event" not in payload and fields.get("event_type"):
-            payload["event"] = fields.get("event_type")
-
-        if "timestamp" not in payload and fields.get("timestamp"):
-            payload["timestamp"] = fields.get("timestamp")
-
-        if "sender" not in payload and fields.get("sender"):
-            payload["sender"] = fields.get("sender")
-
-        return payload
-
 
 # Singleton instance
 _publisher: Optional[CyrexEventPublisher] = None
