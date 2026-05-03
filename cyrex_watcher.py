@@ -11,7 +11,7 @@ import subprocess
 import signal
 import socket
 from pathlib import Path
-from typing import Set, Optional
+from typing import Optional
 import logging
 
 # Setup logging first (before other imports that might use logger)
