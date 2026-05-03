@@ -360,7 +360,8 @@ class CyrexWatcher:
                         f"({retry_count + 1}/{max_retries})..."
                     )
                     time.sleep(wait_time)
-                    return self._start_app(retry_count=retry_count + 1, max_retries=max_retries)
+                    self._start_app(retry_count=retry_count + 1, max_retries=max_retries)
+                    return
                 else:
                     logger.error(
                         f"Port {self.port} is still in use after {max_retries} retries. "
@@ -398,7 +399,8 @@ class CyrexWatcher:
                 wait_time = (retry_count + 1) * 2
                 logger.info(f"Retrying in {wait_time}s...")
                 time.sleep(wait_time)
-                return self._start_app(retry_count=retry_count + 1, max_retries=max_retries)
+                self._start_app(retry_count=retry_count + 1, max_retries=max_retries)
+                return
             else:
                 raise
     
