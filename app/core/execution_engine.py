@@ -134,7 +134,7 @@ class TaskExecutionEngine:
                 self.state_manager.save_state(state)
                 
                 # Create checkpoint before step
-                checkpoint = self.state_manager.create_checkpoint(
+                self.state_manager.create_checkpoint(
                     workflow_id,
                     step_name,
                     state_data=state.state_data.copy(),
