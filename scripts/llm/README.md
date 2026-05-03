@@ -22,19 +22,15 @@ powershell -ExecutionPolicy Bypass -File scripts/llm/install-local-llm.ps1
 - Configures Docker for GPU support (if applicable)
 - Sets up environment variables
 
-### `check-ollama-models.sh`
+### `check-ollama-models.sh` / `check_ollama_models.sh`
 Checks Ollama container for models and prompts to pull if none exist.
 
 **Usage:**
 ```bash
+# Canonical script name
 bash scripts/llm/check-ollama-models.sh
-```
 
-### `check_ollama_models.sh` (compatibility alias)
-Legacy snake_case wrapper that forwards to the canonical script.
-
-**Usage:**
-```bash
+# Compatibility alias (snake_case)
 bash scripts/llm/check_ollama_models.sh
 ```
 

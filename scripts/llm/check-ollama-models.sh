@@ -1,5 +1,7 @@
 #!/bin/bash
 # Check if Ollama container has models, and prompt to pull models if none exist
+# When deepiri-gpu-utils is installed, we run validate + ollama recommend here.
+# Cyrex Docker base image: scripts/utils/detect_gpu.sh → deepiri-gpu build-args.
 
 set -e
 
@@ -13,6 +15,26 @@ echo ""
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
+
+# deepiri-gpu-utils: aggregate check + Ollama model tiers (hint only if CLI missing).
+run_deepiri_gpu_ollama_hints() {
+    if ! command_exists deepiri-gpu; then
+        echo "ℹ️  deepiri-gpu not on PATH — install deepiri-gpu-utils for validate / ollama recommend:"
+        echo "    pip install -e \"\$(git rev-parse --show-toplevel 2>/dev/null)/../deepiri-gpu-utils\""
+        echo "    docs/operations/GPU_UTILS_HOST.md"
+        echo ""
+        return 0
+    fi
+    echo "deepiri-gpu validate"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    deepiri-gpu validate
+    echo ""
+    echo "deepiri-gpu ollama recommend"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    deepiri-gpu ollama recommend
+    echo ""
+}
+run_deepiri_gpu_ollama_hints
 
 # Function to detect system RAM
 detect_system_ram() {

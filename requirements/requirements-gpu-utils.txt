@@ -1,0 +1,11 @@
+# Optional host-only dependency for scripts/utils/detect_gpu.{sh,ps1}
+# Not installed automatically with Cyrex app requirements.
+#
+# Monorepo:
+#   pip install -e "../../../deepiri-gpu-utils"
+# (from deepiri-platform/diri-cyrex: three levels up to Deepiri/, then into deepiri-gpu-utils)
+#
+# Or from GitHub:
+#   pip install "git+https://github.com/Team-Deepiri/deepiri-gpu-utils.git"
+#
+# See docs/operations/GPU_UTILS_HOST.md
