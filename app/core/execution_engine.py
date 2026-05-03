@@ -11,7 +11,7 @@ from datetime import datetime
 from ..logging_config import get_logger
 from .tool_registry import ToolRegistry, get_tool_registry
 from .rate_limit_tools import ToolRateLimitExceeded
-from .state_manager import WorkflowStateManager, WorkflowState, StateStatus
+from .state_manager import WorkflowStateManager, StateStatus
 from .guardrails import SafetyGuardrails, get_guardrails
 
 logger = get_logger("cyrex.execution_engine")
