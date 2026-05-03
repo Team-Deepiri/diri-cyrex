@@ -2,7 +2,7 @@
 Task Execution Engine
 Orchestrates tool execution, manages execution trees, and handles step-by-step decomposition
 """
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
