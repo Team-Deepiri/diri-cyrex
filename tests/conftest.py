@@ -107,8 +107,11 @@ def clean_tool_registry():
 
 
 @pytest.fixture(autouse=True)
-def reset_tool_registry():
+def reset_tool_registry(request):
     """Reset tool registry before each test to ensure isolation"""
+    if request.node.get_closest_marker("no_registry_reset"):
+        yield
+        return
     from app.core.tool_registry import get_tool_registry
     yield
     # After test, reset the global registry

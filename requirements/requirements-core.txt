@@ -1,3 +1,6 @@
+# Portable agent tools (local monorepo: from diri-cyrex use pip install -e ../../diri-agent-toolbox)
+diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git
+
 # Internal submodule packages
 -e ./diri-agent-testing-utils
 -e ./deepiri-dataset-processor[all]
