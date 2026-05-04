@@ -163,10 +163,11 @@ For MacBook development, use a hybrid approach.
 
 ### Building Docker Images for Apple Silicon
 
-Specify the platform when building images.
+The image copies `diri-cyrex/…` and `deepiri-modelkit` from the build context, so the context must be the **parent directory** that contains both folders (for example your `deepiri` checkout), not the `diri-cyrex` directory alone. Docker Desktop must use that same folder as the build context when you pick “context” in the UI.
 
 ```bash
-docker build --platform linux/arm64 -t deepiri-cyrex:arm64 .
+cd /path/to/deepiri   # parent of diri-cyrex and deepiri-modelkit
+docker build --platform linux/arm64 -f diri-cyrex/Dockerfile -t deepiri-cyrex:arm64 .
 ```
 
 Or use docker-compose with platform specification:
@@ -176,9 +177,11 @@ services:
   cyrex:
     platform: linux/arm64
     build:
-      context: .
+      context: ..          # directory that contains diri-cyrex and deepiri-modelkit
       dockerfile: ./diri-cyrex/Dockerfile
 ```
+
+Requires BuildKit (enabled by default in Docker Desktop), because the Dockerfile starts with a `# syntax=docker/dockerfile:1` directive for embedded scripts.
 
 **Note:** These containers will run on CPU only, not GPU.
 

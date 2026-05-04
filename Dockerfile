@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # =============================================================================
 # HYBRID DOCKERFILE: Prebuilt OR From-Scratch with Staged Downloads
 # =============================================================================
@@ -544,10 +545,21 @@ RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
-# Copy K8s env loader scripts (before switching user)
-COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
-COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+# Entrypoint scripts (inlined so builds work whether context is the monorepo root or diri-cyrex/)
+COPY --chown=root:root --chmod=755 <<'EOF' /usr/local/bin/load-k8s-env.sh
+#!/usr/bin/env bash
+# Optional: extend to load mounted secrets or env when running in Kubernetes.
+set -euo pipefail
+EOF
+COPY --chown=root:root --chmod=755 <<'EOF' /usr/local/bin/docker-entrypoint.sh
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -x /usr/local/bin/load-k8s-env.sh ]; then
+  # shellcheck source=/dev/null
+  source /usr/local/bin/load-k8s-env.sh || true
+fi
+exec "$@"
+EOF
 
 # Switch to non-root user
 USER appuser
@@ -886,10 +898,21 @@ RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
-# Copy K8s env loader scripts (before switching user)
-COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
-COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+# Entrypoint scripts (inlined so builds work whether context is the monorepo root or diri-cyrex/)
+COPY --chown=root:root --chmod=755 <<'EOF' /usr/local/bin/load-k8s-env.sh
+#!/usr/bin/env bash
+# Optional: extend to load mounted secrets or env when running in Kubernetes.
+set -euo pipefail
+EOF
+COPY --chown=root:root --chmod=755 <<'EOF' /usr/local/bin/docker-entrypoint.sh
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -x /usr/local/bin/load-k8s-env.sh ]; then
+  # shellcheck source=/dev/null
+  source /usr/local/bin/load-k8s-env.sh || true
+fi
+exec "$@"
+EOF
 
 # Switch to non-root user
 USER appuser
