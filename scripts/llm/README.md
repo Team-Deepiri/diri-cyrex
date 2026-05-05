@@ -95,7 +95,7 @@ bash scripts/llm/test-ollama-connection.sh
 docker-compose build ollama
 
 # Customize which models to pre-pull
-docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b qwen2.5:7b qwen2.5-coder:7b deepseek-coder:6.7b phi3:mini" ollama
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b qwen3:8b deepseek-r1:8b gemma3:4b qwen3-coder:30b devstral:24b phi4-mini:3.8b" ollama
 ```
 
 **Option 2: Use Installation Script**
@@ -116,6 +116,16 @@ ollama pull qwen2.5:7b
 ollama pull qwen2.5-coder:7b
 ollama pull deepseek-coder:6.7b
 ollama pull phi3:mini
+
+# Pull newer open-source / open-weight options
+ollama pull qwen3:8b
+ollama pull deepseek-r1:8b
+ollama pull gemma3:4b
+ollama pull phi4-mini:3.8b
+ollama pull granite3.3:8b
+ollama pull olmo-3:7b
+ollama pull qwen3-coder:30b
+ollama pull devstral:24b
 ```
 
 ### List Models
@@ -142,7 +152,7 @@ The project includes a custom Dockerfile that pre-pulls models during build:
 docker-compose build ollama
 
 # Customize models to pre-pull
-docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b qwen2.5:7b qwen2.5-coder:7b deepseek-coder:6.7b phi3:mini" ollama
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b qwen3:8b deepseek-r1:8b gemma3:4b qwen3-coder:30b devstral:24b phi4-mini:3.8b" ollama
 
 # Disable pre-pull (use check-ollama-models.sh script instead)
 docker-compose build --build-arg PRE_PULL_MODELS=false ollama
@@ -156,7 +166,7 @@ ollama:
     dockerfile: Dockerfile
     args:
       PRE_PULL_MODELS: "true"  # Enable/disable pre-pull
-      MODELS: "mistral:7b llama3:8b codellama:7b qwen2.5:7b qwen2.5-coder:7b deepseek-coder:6.7b phi3:mini"  # Space-separated list
+      MODELS: "mistral:7b llama3:8b qwen3:8b deepseek-r1:8b gemma3:4b qwen3-coder:30b devstral:24b phi4-mini:3.8b"  # Space-separated list
 ```
 
 ### Manual Docker Run
@@ -179,6 +189,15 @@ docker run -d -p 11434:11434 --name ollama ollama/ollama
 - `qwen2.5-coder:7b` (4.4GB) - Alternative coding model
 - `deepseek-coder:6.7b` (4.1GB) - Advanced coding model
 - `phi3:mini` (2.3GB) - Low-resource fallback
+
+**Current Open-Source / Open-Weight Options Added to the Checker:**
+- `qwen3:0.6b`, `qwen3:1.7b`, `qwen3:4b`, `qwen3:8b`, `qwen3:14b`, `qwen3:30b`, `qwen3:32b`, `qwen3:235b`
+- `deepseek-r1:1.5b`, `deepseek-r1:7b`, `deepseek-r1:8b`, `deepseek-r1:14b`, `deepseek-r1:32b`, `deepseek-r1:70b`
+- `gemma3:270m`, `gemma3:1b`, `gemma3:4b`, `gemma3:12b`, `gemma3:27b`
+- `gemma4:e2b`, `gemma4:e4b`, `gemma4:26b`, `gemma4:31b`
+- `phi4:14b`, `phi4-mini:3.8b`, `granite3.3:2b`, `granite3.3:8b`, `olmo-3:7b`, `olmo-3:32b`
+- `qwen3-coder:30b`, `qwen3-coder:480b`, `devstral:24b`, `devstral-small-2:24b`, `deepcoder:1.5b`, `deepcoder:14b`, `yi-coder:9b`
+- `llama4:scout`, `llama4:maverick`
 
 **See `docker/ollama/README.md` for detailed documentation on model customization.**
 

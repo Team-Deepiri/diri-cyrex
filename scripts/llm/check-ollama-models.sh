@@ -114,7 +114,7 @@ categorize_model() {
     # Categorize based on model name and setup
     case "$model_name" in
         # Small models (1-3B) - Safe on all setups
-        "llama3.2:1b"|"llama3.2:3b"|"gemma2:2b"|"phi3:mini")
+        "llama3.2:1b"|"llama3.2:3b"|"gemma2:2b"|"phi3:mini"|"phi4-mini:3.8b"|"qwen3:0.6b"|"qwen3:1.7b"|"gemma3:270m"|"gemma3:1b"|"deepseek-r1:1.5b"|"deepcoder:1.5b"|"granite3.3:2b")
             if [ "$ram_gb" -ge 8 ]; then
                 echo "recommended"
             else
@@ -123,7 +123,7 @@ categorize_model() {
             ;;
         
         # 7B models - Safe on Setup 1+
-        "mistral:7b"|"neural-chat:7b"|"qwen2.5:7b"|"gemma:7b"|"yi:6b"|"openchat:7b"|"zephyr:7b"|"nous-hermes:7b"|"mythomax:7b"|"dolphin-mistral:7b"|"orca-mini:7b")
+        "mistral:7b"|"neural-chat:7b"|"qwen2.5:7b"|"gemma:7b"|"yi:6b"|"openchat:7b"|"zephyr:7b"|"nous-hermes:7b"|"mythomax:7b"|"dolphin-mistral:7b"|"orca-mini:7b"|"qwen3:4b"|"gemma3:4b")
             # For high-end GPU setups, prioritize VRAM over system RAM
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
@@ -139,7 +139,7 @@ categorize_model() {
             ;;
         
         # 8B models
-        "llama3:8b"|"llama3.1:8b")
+        "llama3:8b"|"llama3.1:8b"|"qwen3:8b"|"deepseek-r1:7b"|"deepseek-r1:8b"|"granite3.3:8b"|"olmo-3:7b")
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
             elif [ "$setup" = "setup1" ]; then
@@ -165,7 +165,7 @@ categorize_model() {
             ;;
         
         # 11-12B models
-        "mistral-nemo:12b"|"falcon:11b")
+        "mistral-nemo:12b"|"falcon:11b"|"gemma3:12b"|"qwen3:14b"|"deepseek-r1:14b"|"deepcoder:14b"|"phi4:14b"|"gemma4:e2b"|"gemma4:e4b")
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
             elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 8 ]; then
@@ -187,7 +187,7 @@ categorize_model() {
             ;;
         
         # 27B models
-        "gemma2:27b")
+        "gemma2:27b"|"gemma3:27b"|"gemma4:26b"|"gemma4:31b"|"qwen3:30b"|"qwen3:32b"|"deepseek-r1:32b"|"olmo-3:32b")
             if [ "$setup" = "setup5" ]; then
                 echo "recommended"
             elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 10 ]; then
@@ -198,7 +198,7 @@ categorize_model() {
             ;;
         
         # Mixture of experts
-        "mixtral:8x7b")
+        "mixtral:8x7b"|"devstral:24b"|"devstral-small-2:24b"|"qwen3-coder:30b")
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ]; then
                 echo "marginal"
             else
@@ -207,7 +207,7 @@ categorize_model() {
             ;;
         
         # 70B models - only for 48GB+ VRAM
-        "llama3.1:70b")
+        "llama3.1:70b"|"deepseek-r1:70b"|"llama4:scout"|"llama4:maverick"|"qwen3:235b"|"qwen3-coder:480b")
             if [ "$vram_gb" -ge 48 ]; then
                 echo "marginal"
             else
@@ -216,7 +216,7 @@ categorize_model() {
             ;;
         
         # Coding models - 7B
-        "codellama:7b"|"deepseek-coder:6.7b"|"qwen2.5-coder:7b"|"starcoder2:7b"|"wizardcoder:7b")
+        "codellama:7b"|"deepseek-coder:6.7b"|"qwen2.5-coder:7b"|"starcoder2:7b"|"wizardcoder:7b"|"yi-coder:9b")
             # For high-end GPU setups, prioritize VRAM over system RAM
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
@@ -799,6 +799,44 @@ echo ""
 declare -a MODEL_LIST=(
     "mistral:7b|4.1GB|⭐ DEFAULT - Used by this project"
     "llama3:8b|4.7GB|Alternative model"
+    "qwen3:0.6b|523MB|Latest Qwen 3 tiny reasoning model"
+    "qwen3:1.7b|1.4GB|Latest Qwen 3 small reasoning model"
+    "qwen3:4b|2.5GB|Latest Qwen 3 efficient reasoning model"
+    "qwen3:8b|5.2GB|Latest Qwen 3 balanced reasoning model"
+    "qwen3:14b|9.3GB|Latest Qwen 3 stronger reasoning model"
+    "qwen3:30b|19GB|Latest Qwen 3 MoE workstation model"
+    "qwen3:32b|20GB|Latest Qwen 3 large dense model"
+    "qwen3:235b|142GB|Latest Qwen 3 flagship MoE model"
+    "deepseek-r1:1.5b|1.1GB|Small open reasoning model"
+    "deepseek-r1:7b|4.7GB|Open reasoning model"
+    "deepseek-r1:8b|5.2GB|Updated open reasoning model"
+    "deepseek-r1:14b|9.0GB|Stronger open reasoning model"
+    "deepseek-r1:32b|20GB|Large open reasoning model"
+    "deepseek-r1:70b|43GB|Very large open reasoning model"
+    "gemma3:270m|292MB|Tiny Gemma 3 text model"
+    "gemma3:1b|815MB|Small Gemma 3 text model"
+    "gemma3:4b|3.3GB|Gemma 3 multimodal model"
+    "gemma3:12b|8.1GB|Gemma 3 larger multimodal model"
+    "gemma3:27b|17GB|Gemma 3 large multimodal model"
+    "gemma4:e2b|7.2GB|Latest Gemma 4 edge multimodal model"
+    "gemma4:e4b|9.6GB|Latest Gemma 4 edge multimodal model"
+    "gemma4:26b|18GB|Latest Gemma 4 MoE workstation model"
+    "gemma4:31b|20GB|Latest Gemma 4 dense workstation model"
+    "phi4:14b|9.1GB|Microsoft Phi-4 reasoning model"
+    "phi4-mini:3.8b|2.5GB|Microsoft Phi-4 mini tools model"
+    "granite3.3:2b|1.5GB|IBM Granite long-context small model"
+    "granite3.3:8b|4.9GB|IBM Granite long-context model"
+    "olmo-3:7b|4.5GB|Fully open OLMo 3 model"
+    "olmo-3:32b|19GB|Fully open OLMo 3 large model"
+    "devstral:24b|14GB|Open coding-agent model"
+    "devstral-small-2:24b|14GB|Updated open coding-agent model"
+    "qwen3-coder:30b|19GB|Latest Qwen agentic coding model"
+    "qwen3-coder:480b|290GB|Flagship Qwen agentic coding model"
+    "deepcoder:1.5b|1.1GB|Small open code reasoning model"
+    "deepcoder:14b|9.0GB|Open code reasoning model"
+    "yi-coder:9b|5.4GB|Efficient open coding model"
+    "llama4:scout|67GB|Llama 4 multimodal MoE model"
+    "llama4:maverick|245GB|Llama 4 flagship multimodal MoE model"
     "llama3.2:1b|1.3GB|Small, fast"
     "llama3.2:3b|2.0GB|Balanced"
     "llama3.1:8b|4.7GB|Latest Llama 3.1"
@@ -1244,6 +1282,5 @@ elif [ "$HANDLE_REMOVE" = false ] && [ "$HANDLE_RECHECK" = false ]; then
     # Only show this message if user didn't select any management options or models
     echo ""
     echo "ℹ️  No models selected for installation."
-    echo "   Select model numbers (1-17), custom model (18), remove models (19), or re-check hardware (20)"
+    echo "   Select model numbers (1-$TOTAL_MODELS), custom model ($CUSTOM_OPTION), remove models ($REMOVE_OPTION), or re-check hardware ($RECHECK_OPTION)"
 fi
-
