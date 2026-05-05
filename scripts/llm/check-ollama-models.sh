@@ -114,7 +114,7 @@ categorize_model() {
     # Categorize based on model name and setup
     case "$model_name" in
         # Small models (1-3B) - Safe on all setups
-        "llama3.2:1b"|"llama3.2:3b"|"gemma2:2b"|"phi3:mini"|"phi4-mini:3.8b"|"qwen3:0.6b"|"qwen3:1.7b"|"gemma3:270m"|"gemma3:1b"|"deepseek-r1:1.5b"|"deepcoder:1.5b"|"granite3.3:2b")
+        "llama3.2:1b"|"llama3.2:3b"|"gemma2:2b"|"phi3:mini"|"phi4-mini:3.8b"|"qwen3:0.6b"|"qwen3:1.7b"|"gemma3:270m"|"gemma3:1b"|"deepseek-r1:1.5b"|"deepcoder:1.5b"|"granite3.3:2b"|"qwen3.5:0.8b"|"qwen3.5:2b"|"granite4:350m"|"granite4:1b"|"granite4:3b"|"granite4.1:3b"|"ministral-3:3b"|"nemotron-3-nano:4b"|"medgemma1.5:4b"|"medgemma:4b")
             if [ "$ram_gb" -ge 8 ]; then
                 echo "recommended"
             else
@@ -123,7 +123,7 @@ categorize_model() {
             ;;
         
         # 7B models - Safe on Setup 1+
-        "mistral:7b"|"neural-chat:7b"|"qwen2.5:7b"|"gemma:7b"|"yi:6b"|"openchat:7b"|"zephyr:7b"|"nous-hermes:7b"|"mythomax:7b"|"dolphin-mistral:7b"|"orca-mini:7b"|"qwen3:4b"|"gemma3:4b")
+        "mistral:7b"|"neural-chat:7b"|"qwen2.5:7b"|"gemma:7b"|"yi:6b"|"openchat:7b"|"zephyr:7b"|"nous-hermes:7b"|"mythomax:7b"|"dolphin-mistral:7b"|"orca-mini:7b"|"qwen3:4b"|"gemma3:4b"|"qwen3.5:4b")
             # For high-end GPU setups, prioritize VRAM over system RAM
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
@@ -139,7 +139,7 @@ categorize_model() {
             ;;
         
         # 8B models
-        "llama3:8b"|"llama3.1:8b"|"qwen3:8b"|"deepseek-r1:7b"|"deepseek-r1:8b"|"granite3.3:8b"|"olmo-3:7b")
+        "llama3:8b"|"llama3.1:8b"|"qwen3:8b"|"deepseek-r1:7b"|"deepseek-r1:8b"|"granite3.3:8b"|"olmo-3:7b"|"qwen3.5:9b"|"ministral-3:8b"|"granite4.1:8b")
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
             elif [ "$setup" = "setup1" ]; then
@@ -165,7 +165,7 @@ categorize_model() {
             ;;
         
         # 11-12B models
-        "mistral-nemo:12b"|"falcon:11b"|"gemma3:12b"|"qwen3:14b"|"deepseek-r1:14b"|"deepcoder:14b"|"phi4:14b"|"gemma4:e2b"|"gemma4:e4b")
+        "mistral-nemo:12b"|"falcon:11b"|"gemma3:12b"|"qwen3:14b"|"deepseek-r1:14b"|"deepcoder:14b"|"phi4:14b"|"gemma4:e2b"|"gemma4:e4b"|"ministral-3:14b"|"gpt-oss:20b")
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ] || [ "$setup" = "setup3" ] || [ "$setup" = "setup2" ]; then
                 echo "recommended"
             elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 8 ]; then
@@ -187,7 +187,7 @@ categorize_model() {
             ;;
         
         # 27B models
-        "gemma2:27b"|"gemma3:27b"|"gemma4:26b"|"gemma4:31b"|"qwen3:30b"|"qwen3:32b"|"deepseek-r1:32b"|"olmo-3:32b")
+        "gemma2:27b"|"gemma3:27b"|"gemma4:26b"|"gemma4:31b"|"qwen3:30b"|"qwen3:32b"|"deepseek-r1:32b"|"olmo-3:32b"|"qwen3.5:27b"|"qwen3.5:35b"|"qwen3.6:27b"|"qwen3.6:35b"|"granite4.1:30b"|"nemotron-cascade-2:30b"|"nemotron-3-nano:30b"|"nemotron3:33b"|"laguna-xs.2:nvfp4"|"laguna-xs.2:q4_K_M"|"medgemma:27b")
             if [ "$setup" = "setup5" ]; then
                 echo "recommended"
             elif [ "$ram_gb" -ge 32 ] && [ "$vram_gb" -ge 10 ]; then
@@ -198,7 +198,7 @@ categorize_model() {
             ;;
         
         # Mixture of experts
-        "mixtral:8x7b"|"devstral:24b"|"devstral-small-2:24b"|"qwen3-coder:30b")
+        "mixtral:8x7b"|"devstral:24b"|"devstral-small-2:24b"|"qwen3-coder:30b"|"lfm2:24b"|"laguna-xs.2:latest")
             if [ "$setup" = "setup5" ] || [ "$setup" = "setup4" ]; then
                 echo "marginal"
             else
@@ -207,7 +207,7 @@ categorize_model() {
             ;;
         
         # 70B models - only for 48GB+ VRAM
-        "llama3.1:70b"|"deepseek-r1:70b"|"llama4:scout"|"llama4:maverick"|"qwen3:235b"|"qwen3-coder:480b")
+        "llama3.1:70b"|"deepseek-r1:70b"|"llama4:scout"|"llama4:maverick"|"qwen3:235b"|"qwen3-coder:480b"|"qwen3.5:122b"|"gpt-oss:120b"|"qwen3-next:80b"|"qwen3-coder-next:latest"|"devstral-2:123b"|"mistral-medium-3.5:128b")
             if [ "$vram_gb" -ge 48 ]; then
                 echo "marginal"
             else
@@ -807,6 +807,16 @@ declare -a MODEL_LIST=(
     "qwen3:30b|19GB|Latest Qwen 3 MoE workstation model"
     "qwen3:32b|20GB|Latest Qwen 3 large dense model"
     "qwen3:235b|142GB|Latest Qwen 3 flagship MoE model"
+    "qwen3.5:0.8b|1.0GB|Qwen 3.5 tiny multimodal model"
+    "qwen3.5:2b|2.7GB|Qwen 3.5 small multimodal model"
+    "qwen3.5:4b|3.4GB|Qwen 3.5 efficient multimodal model"
+    "qwen3.5:9b|6.6GB|Qwen 3.5 balanced multimodal model"
+    "qwen3.5:27b|17GB|Qwen 3.5 workstation multimodal model"
+    "qwen3.5:35b|24GB|Qwen 3.5 large multimodal model"
+    "qwen3.5:122b|81GB|Qwen 3.5 flagship local model"
+    "qwen3.6:27b|17GB|Qwen 3.6 coding/general model"
+    "qwen3.6:35b|24GB|Qwen 3.6 latest coding/general model"
+    "qwen3-next:80b|50GB|Qwen3-Next efficient MoE model"
     "deepseek-r1:1.5b|1.1GB|Small open reasoning model"
     "deepseek-r1:7b|4.7GB|Open reasoning model"
     "deepseek-r1:8b|5.2GB|Updated open reasoning model"
@@ -822,16 +832,41 @@ declare -a MODEL_LIST=(
     "gemma4:e4b|9.6GB|Latest Gemma 4 edge multimodal model"
     "gemma4:26b|18GB|Latest Gemma 4 MoE workstation model"
     "gemma4:31b|20GB|Latest Gemma 4 dense workstation model"
+    "gpt-oss:20b|14GB|OpenAI open-weight reasoning model"
+    "gpt-oss:120b|65GB|OpenAI large open-weight reasoning model"
     "phi4:14b|9.1GB|Microsoft Phi-4 reasoning model"
     "phi4-mini:3.8b|2.5GB|Microsoft Phi-4 mini tools model"
     "granite3.3:2b|1.5GB|IBM Granite long-context small model"
     "granite3.3:8b|4.9GB|IBM Granite long-context model"
+    "granite4:350m|708MB|IBM Granite 4 tiny tools model"
+    "granite4:1b|3.3GB|IBM Granite 4 small tools model"
+    "granite4:3b|2.1GB|IBM Granite 4 micro tools model"
+    "granite4.1:3b|2.1GB|IBM Granite 4.1 small tools model"
+    "granite4.1:8b|5.3GB|IBM Granite 4.1 tools model"
+    "granite4.1:30b|17GB|IBM Granite 4.1 large tools model"
     "olmo-3:7b|4.5GB|Fully open OLMo 3 model"
     "olmo-3:32b|19GB|Fully open OLMo 3 large model"
+    "ministral-3:3b|3.0GB|Mistral edge multimodal model"
+    "ministral-3:8b|6.0GB|Mistral edge multimodal model"
+    "ministral-3:14b|9.1GB|Mistral edge multimodal model"
+    "lfm2:24b|14GB|Liquid AI efficient local MoE model"
+    "laguna-xs.2:latest|23GB|Poolside local-ready coding MoE model"
+    "laguna-xs.2:nvfp4|22GB|Poolside coding MoE NVFP4 model"
+    "laguna-xs.2:q4_K_M|23GB|Poolside coding MoE Q4 model"
+    "nemotron-cascade-2:30b|24GB|NVIDIA open reasoning MoE model"
+    "nemotron-3-nano:4b|2.8GB|NVIDIA efficient open reasoning model"
+    "nemotron-3-nano:30b|24GB|NVIDIA open reasoning MoE model"
+    "nemotron3:33b|28GB|NVIDIA multimodal open model"
+    "medgemma1.5:4b|3.3GB|Medical Gemma 1.5 multimodal model"
+    "medgemma:4b|3.3GB|Medical Gemma multimodal model"
+    "medgemma:27b|17GB|Medical Gemma large multimodal model"
     "devstral:24b|14GB|Open coding-agent model"
     "devstral-small-2:24b|14GB|Updated open coding-agent model"
+    "devstral-2:123b|75GB|Large open coding-agent model"
     "qwen3-coder:30b|19GB|Latest Qwen agentic coding model"
     "qwen3-coder:480b|290GB|Flagship Qwen agentic coding model"
+    "qwen3-coder-next:latest|52GB|Qwen3-Coder-Next agentic coding model"
+    "mistral-medium-3.5:128b|80GB|Mistral flagship open-weight model"
     "deepcoder:1.5b|1.1GB|Small open code reasoning model"
     "deepcoder:14b|9.0GB|Open code reasoning model"
     "yi-coder:9b|5.4GB|Efficient open coding model"
