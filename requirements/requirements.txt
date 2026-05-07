@@ -83,15 +83,12 @@ langchain-openai==0.1.22
 langchain-milvus==0.1.4
 langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
 langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
-langchain-classic>=0.0.20  # Provides deprecated AgentExecutor and other legacy functionality for LangChain 0.2.x
-langchain-experimental>=0.4.0  # Experimental agent functionality
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
 # LangGraph for tool-calling agents and multi-agent workflows
 # The primary agent execution path uses langgraph.prebuilt.create_react_agent
 # which provides native tool calling via ChatOllama (no ReAct text parsing needed)
 langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows with native tool calling
-langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)
 ollama>=0.1.0  # Ollama API client for local models
@@ -114,3 +111,6 @@ pdf2image>=1.16.0  # PDF to image conversion for OCR
 beautifulsoup4>=4.12.0  # HTML parsing
 openpyxl>=3.1.0  # Excel file reading/writing
 # docling>=1.0.0  # DocLayNet for advanced layout detection (optional, install separately if needed)
+
+# Host-only (not for Cyrex container): deepiri-gpu-utils powers scripts/utils/detect_gpu.{sh,ps1}
+# See requirements/requirements-gpu-utils.txt and docs/operations/GPU_UTILS_HOST.md

@@ -2,6 +2,8 @@
 # Install and setup local LLM (Ollama) as Docker container
 # Combines setup and model checking functionality
 # Works on Windows (WSL), Linux, and macOS
+# Unified host checks: when deepiri-gpu-utils is installed we run doctor + setup (dry-run
+# runbook). See docs/operations/GPU_UTILS_HOST.md.
 
 set -e
 
@@ -16,6 +18,29 @@ echo ""
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
+
+# Run deepiri-gpu-utils when available (read-only doctor + setup plan; no sudo).
+run_deepiri_gpu_host_checks() {
+    if ! command_exists deepiri-gpu; then
+        echo "ℹ️  deepiri-gpu not on PATH — install deepiri-gpu-utils for unified GPU/Docker checks:"
+        echo "    pip install -e \"\$(git rev-parse --show-toplevel 2>/dev/null)/../deepiri-gpu-utils\""
+        echo "    (from monorepo root: pip install -e deepiri-gpu-utils)"
+        echo "    docs/operations/GPU_UTILS_HOST.md"
+        echo ""
+        return 0
+    fi
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "🩺 deepiri-gpu doctor"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    deepiri-gpu doctor
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📋 deepiri-gpu setup --device auto (dry-run runbook; no privileged steps)"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    deepiri-gpu setup --device auto
+    echo ""
+}
+run_deepiri_gpu_host_checks
 
 # Detect operating system
 OS_TYPE="unknown"
