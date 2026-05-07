@@ -10,7 +10,9 @@ import os
 from unittest.mock import Mock
 
 import pytest
-from diri_agent_testing_utils import FakeLLMProvider
+
+# Shared agent fixtures are auto-registered by diri-agent-testing-utils through
+# its pytest11 entry point. This file only adapts Cyrex-specific fixture shapes.
 
 # Set test environment variables
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
@@ -73,15 +75,16 @@ def setup_test_env(monkeypatch):
 
 
 @pytest.fixture
-def mock_llm_provider():
+def mock_llm_provider(fake_llm):
     """
-    Deterministic fake LLM provider using diri-agent-testing-utils.
+    Cyrex-shaped deterministic LLM provider backed by diri-agent-testing-utils.
 
-    Uses FakeLLMProvider which records all calls and returns a configurable
+    Uses the shared fake_llm fixture, which records all calls and returns a configurable
     default response.  Override responses per-test with:
         mock_llm_provider.response_map["prompt fragment"] = "desired response"
     """
-    provider = FakeLLMProvider(default_response="Test response from LLM")
+    provider = fake_llm
+    provider.default_response = "Test response from LLM"
     # Expose health_check and is_available in the shape cyrex code expects
     provider.health_check = Mock(
         return_value={"status": "healthy", "backend": "fake", "model": "test-model"}
