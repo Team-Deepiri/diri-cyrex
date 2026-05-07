@@ -11,12 +11,7 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime
 
-from app.agents.metrics import (
-    AgentMetricsCollector,
-    get_agent_metrics_collector,
-    AgentMetricsSummary,
-    AgentInvokeRecord,
-)
+from app.agents.metrics import get_agent_metrics_collector
 from diri_agent_testing_utils import (
     AgentTestHarness,
     FakeLLMProvider,
