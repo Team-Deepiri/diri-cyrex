@@ -40,6 +40,12 @@ The consumer is disabled by default and can be enabled with:
 CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED=true
 ```
 
+This PR does not implement the LIS `process-and-route` API or make Cyrex the
+document router. LIS remains the owner of document ingestion, source metadata,
+MinIO persistence, and conditional publication to `document.vectorize`,
+`document.training`, and `document.structured`. The Cyrex subscriber only reacts
+to the artifact-oriented routes LIS has already emitted.
+
 ## Data Rules
 
 - `document.vectorize`: searchable document content derived from LIS-owned
@@ -52,3 +58,9 @@ CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED=true
 All artifact events should carry `document_id`, `manifest_version`, optional
 `manifest_id`, optional `source_doc_hash`, and provenance pointing back to the
 source stream entry.
+
+The intended idempotency key for downstream consumers is:
+
+```text
+documentId + route + manifestVersion
+```

@@ -145,6 +145,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             await document_stream_task
         except asyncio.CancelledError:
+            # Expected during FastAPI shutdown after cancelling the subscriber task.
             pass
 
     try:
