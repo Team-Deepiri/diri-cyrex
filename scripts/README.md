@@ -20,7 +20,7 @@ scripts/
 
 ### LLM Setup
 - **Install Ollama**: `llm/install-local-llm.sh`
-- **Check Models**: `llm/check-ollama-models.sh`
+- **Check Models**: `llm/check-ollama-models.sh` (or `llm/check_ollama_models.sh`)
 - **Test Connection**: `llm/test-ollama-connection.sh`
 
 ### Development
@@ -69,6 +69,9 @@ bash scripts/gpu/install-nvidia-container-toolkit.sh
 
 # Example: Check Ollama models
 bash scripts/llm/check-ollama-models.sh
+
+# Compatible alias (snake_case)
+bash scripts/llm/check_ollama_models.sh
 
 # Example: Run tests
 python3 scripts/dev/run_tests.py

@@ -217,6 +217,31 @@ class TestToolRegistryRateLimit:
         assert result == "result"
         mock_tool.ainvoke.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_default_rate_limit_when_metadata_has_no_rate(self):
+        """With a limiter attached, tools without rate_limit still hit the Lua bucket (default cap)."""
+        registry = ToolRegistry(load_defaults=False)
+        mock_limiter = AsyncMock()
+        mock_limiter.allow = AsyncMock(return_value=(True, 119.0))
+        registry.set_rate_limiter(mock_limiter)
+
+        mock_tool = MagicMock()
+        mock_tool.name = "bare_tool"
+        mock_tool.description = "Default metadata, no rate_limit"
+        mock_tool.ainvoke = AsyncMock(return_value="ok")
+        registry.register_tool(mock_tool, metadata=None)
+
+        result = await registry.aexecute_tool(
+            tool_name="bare_tool",
+            tool_input={"x": 1},
+            user_id="user1",
+        )
+        assert result == "ok"
+        mock_limiter.allow.assert_called_once()
+        kwargs = mock_limiter.allow.call_args.kwargs
+        assert kwargs["capacity"] == 120.0
+        assert kwargs["refill_rate"] == pytest.approx(2.0)
+
 
 class TestExecutionEngineRateLimit:
     """Integration tests for TaskExecutionEngine with rate limiting."""
