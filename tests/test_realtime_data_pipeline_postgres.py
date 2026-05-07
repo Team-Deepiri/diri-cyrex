@@ -74,6 +74,21 @@ def build_record(*, data_format: DataFormat = DataFormat.RAW, quality_score: flo
     )
 
 
+def build_document_record(*, training_signal: bool = False):
+    record = PipelineRecord(
+        category=DataCategory.DOCUMENT_PROCESSING,
+        route=RouteTarget.HELOX,
+        data_format=DataFormat.STRUCTURED,
+        input_text="source document text for routing",
+        output_text="document extraction output",
+        structured_payload={"clauses": ["A", "B"]},
+        quality_score=0.9,
+    )
+    if training_signal:
+        record.metadata["training_signal"] = True
+    return record
+
+
 @pytest.mark.asyncio
 async def test_ensure_helox_postgres_table_creates_real_table():
     pipeline = RealtimeDataPipeline()
@@ -155,6 +170,32 @@ async def test_quality_filter_skips_training_routes():
     pipeline._redis.xadd.assert_not_called()
     assert len(pipeline._postgres.calls) == 0
     assert pipeline._stats["quality_filtered"] == 1
+
+
+@pytest.mark.asyncio
+async def test_source_documents_are_deferred_from_generic_helox_route():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres()
+    pipeline._redis = AsyncMock()
+
+    await pipeline._route_to_helox(build_document_record(training_signal=False))
+
+    pipeline._redis.xadd.assert_not_called()
+    assert len(pipeline._postgres.calls) == 0
+    assert pipeline._stats["document_records_deferred"] == 1
+
+
+@pytest.mark.asyncio
+async def test_document_training_signal_can_use_generic_training_route():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres()
+    pipeline._redis = AsyncMock()
+
+    await pipeline._route_to_helox(build_document_record(training_signal=True))
+
+    pipeline._redis.xadd.assert_called_once()
+    assert pipeline._stats["helox_structured_sent"] == 1
+    assert pipeline._stats["helox_postgres_persisted"] == 1
 
 
 @pytest.mark.asyncio

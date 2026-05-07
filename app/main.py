@@ -11,6 +11,7 @@ import uuid
 import logging
 import asyncio
 import numpy as np
+import os
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
@@ -120,9 +121,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Rate limiter disabled: {e}")
 
+    document_stream_task: Optional[asyncio.Task] = None
+    if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        try:
+            from .core.document_stream_consumer import get_document_artifact_stream_consumer
+
+            document_consumer = await get_document_artifact_stream_consumer()
+            document_stream_task = asyncio.create_task(document_consumer.run_forever())
+            app.state.document_stream_consumer_task = document_stream_task
+            logger.info("Document stream artifact consumer enabled")
+        except Exception as e:
+            logger.warning(f"Document stream artifact consumer disabled: {e}")
+
     yield
 
     # Shutdown systems
+    if document_stream_task:
+        document_stream_task.cancel()
+        try:
+            await document_stream_task
+        except asyncio.CancelledError:
+            pass
+
     try:
         system = await get_system_initializer()
         await system.shutdown_all()

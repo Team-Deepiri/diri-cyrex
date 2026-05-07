@@ -423,6 +423,7 @@ class RealtimeDataPipeline:
             "validation_failures": 0,
             "duplicates_skipped": 0,
             "quality_filtered": 0,
+            "document_records_deferred": 0,
             "dlq_count": 0,
             "dlq_retried": 0,
             "errors": 0,
@@ -843,11 +844,30 @@ class RealtimeDataPipeline:
         Send record to Helox for training.
         - Quality gate: records below MIN_HELOX_QUALITY are skipped for training
           (they still go to Cyrex if route=BOTH)
+        - Source documents are not persisted through this generic pipeline.
+          LIS owns document ingestion and publishes document.training when a
+          document-derived artifact is explicitly eligible for training.
         - Raw data  → HELOX_RAW_STREAM
         - Structured → HELOX_STRUCTURED_STREAM
         - Durable history → cyrex.helox_training_samples (Postgres)
         Fallback: local TrainingDataStore (CSV/JSONL)
         """
+        # Connor's document-routing plan keeps source document ingestion under
+        # LIS ownership. Cyrex should consume document.* streams and produce
+        # artifacts; it should not write arbitrary source documents into the
+        # generic agent-interaction training table.
+        if (
+            record.category == DataCategory.DOCUMENT_PROCESSING
+            and not record.metadata.get("training_signal", False)
+        ):
+            self._stats["document_records_deferred"] += 1
+            self.logger.info(
+                "Deferred document_processing record from generic Helox route; "
+                "use document.training for eligible document-derived training data",
+                record_id=record.record_id,
+            )
+            return
+
         # Quality gate
         if record.quality_score is not None and record.quality_score < self.MIN_HELOX_QUALITY:
             self._stats["quality_filtered"] += 1
