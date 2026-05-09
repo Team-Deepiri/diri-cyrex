@@ -11,8 +11,16 @@ from unittest.mock import Mock
 
 import pytest
 
-# Shared agent fixtures are auto-registered by diri-agent-testing-utils through
-# its pytest11 entry point. This file only adapts Cyrex-specific fixture shapes.
+from diri_agent_testing_utils.fixtures.pytest_fixtures import (  # noqa: F401
+    agent_test_harness,
+    fake_llm,
+    mock_memory_manager,
+    mock_redis,
+    mock_vector_store,
+)
+
+# Shared fixture functions are imported from diri-agent-testing-utils above.
+# This file only adapts Cyrex-specific fixture shapes.
 
 # Set test environment variables
 os.environ.setdefault("OPENAI_API_KEY", "test-key")
