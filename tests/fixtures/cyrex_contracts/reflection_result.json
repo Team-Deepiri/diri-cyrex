@@ -1,0 +1,28 @@
+{
+  "passed": false,
+  "issues": [
+    {
+      "code": "missing_citation",
+      "severity": "error",
+      "field_name": "termination_notice",
+      "message": "Field has no supporting citation."
+    },
+    {
+      "code": "low_confidence",
+      "severity": "warning",
+      "field_name": "maintenance_obligation",
+      "message": "Field confidence (0.52) is below the floor (0.60)."
+    },
+    {
+      "code": "quote_not_found",
+      "severity": "error",
+      "field_name": "rent_adjustment",
+      "citation_id": "cit_bad_001",
+      "message": "Citation quote ('rent is 5000') does not appear verbatim in source text."
+    }
+  ],
+  "low_confidence_fields": ["maintenance_obligation"],
+  "missing_citation_fields": ["termination_notice"],
+  "unverifiable_citations": ["cit_bad_001"],
+  "confidence_floor": 0.60
+}

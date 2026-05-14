@@ -35,7 +35,11 @@ def cleanup_async_resources():
                     connections.disconnect("default")
             except Exception:
                 pass
-    except (ImportError, AttributeError, Exception):
+    except ImportError:
+        # pymilvus not installed — skip cleanup
+        pass
+    except Exception:
+        # Non-import errors are benign for tests
         pass
 
 
@@ -108,12 +112,24 @@ def clean_tool_registry():
 
 @pytest.fixture(autouse=True)
 def reset_tool_registry():
-    """Reset tool registry before each test to ensure isolation"""
-    from app.core.tool_registry import get_tool_registry
+    """Reset tool registry before each test to ensure isolation.
+
+    Defensive: silently skip if the tool registry is not available
+    (e.g. in contract-layer tests that don't use the app framework).
+    """
+    try:
+        from app.core.tool_registry import get_tool_registry
+    except (ImportError, ModuleNotFoundError):
+        yield
+        return
     yield
     # After test, reset the global registry
-    registry = get_tool_registry()
-    registry.reset()
+    try:
+        registry = get_tool_registry()
+        registry.reset()
+    except Exception:
+        # Non-critical: skip reset if the registry is in a bad state
+        pass
 
 
 @pytest.fixture
