@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, Protocol
 
 from .models import (
     ArtifactBundle,
-    CitedField,
+    Citation,
     DuelState,
     PredictionRecord,
     PressureCell,
@@ -143,7 +143,7 @@ class CorrectionWriterPort(Protocol):
         artifact_id: str,
         field_name: str,
         corrected_value: Any,
-        corrected_citation: Dict[str, Any],
+        corrected_citation: Citation,
         actor_id: str,
     ) -> ArtifactBundle:
         """Submit a correction. Returns the stored LearningArtifact bundle."""

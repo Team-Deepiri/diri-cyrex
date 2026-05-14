@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict, List, Optional
 
 from app.pipeline.contracts.models import ArtifactBundle
@@ -52,7 +51,8 @@ class InMemoryArtifactStore(ArtifactStorePort):
         ]
 
     async def list_versions(self, document_id: str) -> List[int]:
-        return sorted({b.version for b in self.list_by_document(document_id)})
+        bundles = await self.list_by_document(document_id)
+        return sorted({b.version for b in bundles})
 
     async def resolve_version(
         self,
