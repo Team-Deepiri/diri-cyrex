@@ -1,0 +1,3244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cyrex Artifact Engine — Technical Spec</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font-sans); background: var(--color-background-secondary); }
+    .spec { max-width: 1000px; padding: 2rem; margin: 0 auto; }
+    .header { margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 0.5px solid var(--color-border-tertiary); }
+    .header h1 { font-size: 22px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 4px; }
+    .header p { font-size: 14px; color: var(--color-text-secondary); }
+    .badges { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+    .badge { font-size: 12px; padding: 3px 10px; border-radius: var(--border-radius-md); font-weight: 500; }
+    .badge-blue { background: #E6F1FB; color: #0C447C; }
+    .badge-teal { background: #E1F5EE; color: #085041; }
+    .badge-amber { background: #FAEEDA; color: #633806; }
+    .badge-purple { background: #EEEDFE; color: #3C3489; }
+    .section { margin-bottom: 2rem; }
+    .section-title { font-size: 13px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 1rem; }
+    .card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 1.5rem; margin-bottom: 1rem; }
+    .card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; border-bottom: 1px solid var(--color-border-tertiary); padding-bottom: 0.5rem; }
+    .card h3 { font-size: 0.95rem; font-weight: 600; margin: 1.5rem 0 0.5rem; }
+    .card h4 { font-size: 0.85rem; font-weight: 600; margin: 1rem 0 0.5rem; color: var(--color-text-secondary); }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 0.85em; font-family: "SF Mono", Monaco, monospace; }
+    pre { background: #1a1a1a; color: #e0e0e0; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.75rem; line-height: 1.5; margin: 0.5rem 0; }
+    pre .comment { color: #6a9955; }
+    pre .string { color: #ce9178; }
+    pre .keyword { color: #569cd6; }
+    pre .function { color: #dcdcaa; }
+    pre .number { color: #b5cea8; }
+    .path { font-family: "SF Mono", Monaco, monospace; font-size: 0.75rem; background: #e8f4fd; padding: 0.25rem 0.5rem; border-radius: 4px; }
+    .tag { display: inline-block; font-size: 0.6rem; padding: 2px 8px; border-radius: 4px; font-weight: 600; margin-right: 0.5rem; text-transform: uppercase; }
+    .tag.new { background: #e8e5f6; color: #4a3f9f; }
+    .tag.core { background: #e0f0e8; color: #2d6b4a; }
+    .tag.frontier { background: #fce8d5; color: #8a4a1a; }
+    .tag.test { background: #FCEBEB; color: #A32D2D; }
+    .highlight { background: #fff8e0; padding: 1rem; border-radius: 8px; margin: 1rem 0; border-left: 4px solid #f0ad00; }
+    .test-steps { background: #f9f9f9; padding: 1rem; border-radius: 8px; margin-top: 0.5rem; }
+    .test-steps ol { margin: 0; padding-left: 1.25rem; }
+    .test-steps li { font-size: 0.85rem; color: #444; margin-bottom: 0.5rem; }
+    .connection-box { background: #f0f7ff; border: 1px solid #cce4ff; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .connection-box h4 { margin-top: 0; color: #004080; }
+    .connection-box ul { margin: 0.5rem 0 0 1rem; }
+    .connection-box li { font-size: 0.85rem; color: #333; }
+    .note { background: #fef3cd; padding: 0.75rem; border-radius: 4px; font-size: 0.85rem; border-left: 3px solid #ffc107; margin: 0.5rem 0; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 1.5rem; border-bottom: 0.5px solid var(--color-border-tertiary); flex-wrap: wrap; }
+    .tab { font-size: 13px; padding: 8px 14px; cursor: pointer; color: var(--color-text-secondary); border-bottom: 2px solid transparent; }
+    .tab.active { color: var(--color-text-primary); border-bottom-color: var(--color-text-primary); font-weight: 500; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── 2026 FRONTIER ADDITIONS ── */
+    .section-divider { border: none; border-top: 2px dashed var(--color-border-tertiary, #ddd); margin: 2.5rem 0 1.5rem; }
+    .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #888; margin-bottom: 1.2rem; }
+    .tag.shift { background: #fff0e0; color: #7a3800; }
+    .tag.bleed { background: #fce8f6; color: #6b1060; }
+    .tier-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin: 1rem 0; }
+    .tier-grid.two { grid-template-columns: 1fr 1fr; }
+    .tier-grid.four { grid-template-columns: 1fr 1fr 1fr 1fr; }
+    @media (max-width: 700px) { .tier-grid, .tier-grid.two, .tier-grid.four { grid-template-columns: 1fr; } }
+    .tier { border-radius: 8px; padding: 0.85rem 1rem; font-size: 0.82rem; line-height: 1.55; }
+    .tier h5 { font-size: 0.78rem; font-weight: 700; margin-bottom: 0.4rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .tier ul { margin: 0; padding-left: 1.1rem; }
+    .tier li { margin-bottom: 0.25rem; }
+    .tier.gen1 { background: #f5f5f5; border: 1px solid #ddd; }
+    .tier.gen2 { background: #eef5ff; border: 1px solid #c3d9f7; }
+    .tier.gen3 { background: #eaf6ef; border: 1px solid #b2dfc7; }
+    .tier.bleed { background: #fceef9; border: 1px solid #e4b2da; }
+    .tier.model { background: #fdf4e3; border: 1px solid #f0d49a; }
+    .tier.agent { background: #f0eeff; border: 1px solid #cbc6f7; }
+    .tier.infra { background: #f0f9ff; border: 1px solid #b9e4fd; }
+    .tier.safety { background: #fff3f3; border: 1px solid #f7c5c5; }
+    .arch-map { background: #111; color: #e0e0e0; border-radius: 10px; padding: 1.2rem 1.5rem; font-family: "SF Mono", Monaco, monospace; font-size: 0.75rem; line-height: 2; margin: 1rem 0; }
+    .arch-map .layer { display: flex; align-items: flex-start; gap: 0.75rem; }
+    .arch-map .num { color: #569cd6; font-weight: 700; min-width: 20px; }
+    .arch-map .lname { color: #dcdcaa; font-weight: 600; min-width: 210px; }
+    .arch-map .ldetail { color: #9cdcfe; }
+    .chip-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0.5rem 0; }
+    .chip { display: inline-block; font-size: 0.72rem; padding: 3px 9px; border-radius: 20px; font-weight: 500; background: #f0f0f0; color: #333; border: 1px solid #ddd; }
+    .chip.blue { background: #e6f1fb; color: #0C447C; border-color: #b3d3f0; }
+    .chip.green { background: #e1f5ee; color: #085041; border-color: #a8dcc8; }
+    .chip.purple { background: #eeedfe; color: #3C3489; border-color: #c8c5f9; }
+    .chip.orange { background: #faeeda; color: #633806; border-color: #f0cfa0; }
+    .chip.pink { background: #fce8f6; color: #6b1060; border-color: #e4b2da; }
+    .chip.red { background: #FCEBEB; color: #A32D2D; border-color: #f0c0c0; }
+    .insight { background: #1a1a2e; color: #e2e2f8; border-radius: 8px; padding: 0.85rem 1rem; margin: 0.75rem 0; font-size: 0.82rem; line-height: 1.6; border-left: 4px solid #6060cc; }
+    .insight strong { color: #a0a0ff; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+    @media (max-width: 600px) { .two-col { grid-template-columns: 1fr; } }
+    .col-block { background: #f9f9f9; border: 1px solid #eaeaea; border-radius: 8px; padding: 0.85rem; font-size: 0.82rem; line-height: 1.6; }
+    .col-block h5 { font-size: 0.78rem; font-weight: 700; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.04em; color: #555; }
+    .col-block ul { margin: 0; padding-left: 1.1rem; }
+    .col-block li { margin-bottom: 0.3rem; }
+    .verdict { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 0.85rem 1rem; margin: 0.75rem 0; font-size: 0.82rem; line-height: 1.6; }
+    .verdict strong { color: #065f46; }
+    .warn { background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 0.85rem 1rem; margin: 0.75rem 0; font-size: 0.82rem; line-height: 1.6; }
+    .warn strong { color: #92400e; }
+    .viz-catalog { margin: 0.75rem 0 1.25rem; }
+    .viz-catalog h3 { font-size: 0.95rem; font-weight: 600; margin: 1.25rem 0 0.5rem; color: var(--color-text-primary, #111); }
+    .viz-catalog h3:first-child { margin-top: 0.25rem; }
+    .spec-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; line-height: 1.5; margin: 0.35rem 0 0.5rem; }
+    .spec-table th, .spec-table td { border: 1px solid var(--color-border-tertiary, #ddd); padding: 0.45rem 0.6rem; text-align: left; vertical-align: top; }
+    .spec-table th { background: #f0f4f8; font-weight: 600; font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.04em; color: #444; width: 28%; }
+    .spec-table td { background: var(--color-background-primary, #fff); color: #333; }
+    .spec-table tr:nth-child(even) td { background: #fafbfc; }
+    .viz-map { background: #f6f8fa; border: 1px solid #e5e8eb; border-radius: 8px; padding: 0.85rem 1rem; margin-top: 1rem; font-size: 0.82rem; line-height: 1.6; }
+    .viz-map ul { margin: 0.4rem 0 0; padding-left: 1.15rem; }
+    .viz-map li { margin-bottom: 0.3rem; }
+    /* CRAZIER!! — moonshot section */
+    .crazier-card {
+      background: linear-gradient(145deg, #160d1c 0%, #251428 45%, #1a0f22 100%);
+      color: #ece6f5;
+      border: 1px solid #7c3a9a;
+      border-radius: var(--border-radius-lg);
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      box-shadow: 0 0 0 1px rgba(255, 0, 150, 0.08), 0 12px 40px rgba(0, 0, 0, 0.35);
+    }
+    .crazier-card h2 {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #ff4db8;
+      text-shadow: 0 0 24px rgba(255, 77, 184, 0.35);
+      margin-bottom: 0.75rem;
+      border-bottom: 1px solid #5a2d6e;
+      padding-bottom: 0.65rem;
+    }
+    .crazier-card h3 { font-size: 0.9rem; font-weight: 700; margin: 1.15rem 0 0.45rem; color: #c9a0ff; }
+    .crazier-card p { font-size: 0.88rem; line-height: 1.65; color: #ddd5eb; margin: 0.35rem 0; }
+    .crazier-card ul { margin: 0.4rem 0 0; padding-left: 1.2rem; font-size: 0.86rem; line-height: 1.65; color: #ddd5eb; }
+    .crazier-card li { margin-bottom: 0.55rem; }
+    .crazier-card code { background: #3d1f4d; color: #ffb8e6; border: 1px solid #6b4080; }
+    .crazier-card .tag.crazy { background: rgba(255, 0, 110, 0.2); color: #ffb3d9; border: 1px solid #ff006e; }
+    .crazier-kicker {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #888;
+      margin-bottom: 0.25rem;
+    }
+    .crazier-pull {
+      font-size: 0.95rem;
+      font-style: italic;
+      color: #fff;
+      margin: 0.5rem 0 1rem;
+      padding-left: 0.85rem;
+      border-left: 3px solid #ff4db8;
+    }
+  </style>
+</head>
+<body>
+  <div class="spec">
+    <div class="header">
+      <h1>Cyrex Artifact Engine — Technical Spec</h1>
+      <p>Owner: DeepIRI &nbsp;·&nbsp; Last updated: 2026-05-09 &nbsp;·&nbsp; Connected to diri-cyrex</p>
+      <div class="badges">
+        <span class="badge badge-blue">3+ devs</span>
+        <span class="badge badge-teal">8–10 weeks</span>
+        <span class="badge badge-purple">Technical Draft</span>
+      </div>
+    </div>
+
+    <!-- TAB NAV -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab(this,'overview')">Overview</div>
+      <div class="tab" onclick="switchTab(this,'experience')">MCP &amp; Experience</div>
+      <div class="tab" onclick="switchTab(this,'tasks')">Pipeline Tasks</div>
+      <div class="tab" onclick="switchTab(this,'documents')">Documents &amp; Q&amp;A</div>
+      <div class="tab" onclick="switchTab(this,'stack')">2026 Stack</div>
+      <div class="tab" onclick="switchTab(this,'frontier')">Frontier</div>
+    </div>
+
+    <!-- TAB: OVERVIEW -->
+    <div class="tab-panel active" id="tab-overview">
+
+    <!-- DIFFERENTIATORS -->
+    <div class="card">
+      <h2>Core Differentiators</h2>
+      <p><strong>Artifacts are computed, not just stored.</strong> The Artifact Engine is a <em>generalized</em> system — it works on any document type (contracts, research papers, financial reports, policies, emails). Every claim it produces is traceable back to an exact source location. Every artifact knows what it depends on and what depends on it.</p>
+
+      <h3>The Four Pillars</h3>
+      <ul>
+        <li>
+          <strong>Verifiable Citations.</strong> Every extracted field, every answer, every reasoning step carries a <code>Citation</code> — the verbatim quote, page/character offsets, and confidence score. Nothing is asserted without a pointer back to its source. Citations are first-class schema objects, not metadata.
+        </li>
+        <li>
+          <strong>Bidirectional References.</strong> The registry stores both directions: source document → produced artifacts (forward) and artifact → source document + parent artifacts (backward). Changing a source document automatically invalidates and requeues dependent artifacts. Cross-artifact links (a reasoning artifact that references an extraction artifact) are stored as typed edges, not loose string IDs.
+        </li>
+        <li>
+          <strong>Multi-Pass Synthesis Extraction.</strong> Run 3+ passes (regex → LLM → cross-reference), synthesize results, flag discrepancies between passes. The synthesis result carries a pass-level provenance chain so you know exactly which pass produced each field.
+        </li>
+        <li>
+          <strong>Entity Canonicalization.</strong> The same entity (person, organization, date, amount) appearing across multiple documents maps to one canonical artifact. All references point to it. Cross-document entity resolution is built into the extraction pass, not bolted on later.
+        </li>
+        <li>
+          <strong>Continuous Training Signal.</strong> Every user correction is immediately stored as a <code>LearningArtifact</code> and replayed as a few-shot example in future extractions — no batch retraining needed.
+        </li>
+        <li>
+          <strong>Domain-Agnostic by Design.</strong> Extraction is driven by a pluggable <code>DocumentProcessor</code> interface — not hardcoded to any document type. New document domains (invoices, research papers, medical records) are added by registering a new processor, not by changing the pipeline.
+        </li>
+      </ul>
+    </div>
+
+    <!-- MODULAR ARCHITECTURE -->
+    <div class="card">
+      <h2>Modular Pipeline Architecture</h2>
+      <pre>app/pipeline/
+├── orchestrator.py              # Stage coordinator + error handling
+├── stages/
+│   ├── parse.py               # Uses: DocumentParserService (exists)
+│   ├── classify.py           # Document categorization  
+│   ├── extract.py            # Multi-pass synthesis extraction
+│   ├── reason.py            # Uses: clause_evolution_tracker (exists)
+│   ├── transform.py         # Version diffs
+│   ├── anticipate.py       # Proactive insights
+│   └── workflow.py         # Action generation
+├── registry/
+│   ├── artifact_store.py    # Abstract interface
+│   ├── sqlite_store.py    # SQLite implementation
+│   └── cache.py           # Redis caching
+├── tools/
+│   ├── think.py            # Planning tool - agent plans before acting
+│   ├── mcp/                # MCP CLIENT — call external servers (Task 5)
+│   │   ├── __init__.py     # Public API (re-export router)
+│   │   ├── router.py       # Facade: list_tools, call_tool
+│   │   ├── client.py       # Transport / MCP session
+│   │   ├── config.py       # Env, server registry, timeouts
+│   │   └── errors.py       # MCP-specific exceptions
+│   ├── reflect.py          # Self-verification tool
+│   └── memory.py          # Memory tools (episodic + semantic)
+└── schemas/
+    └── artifact.py        # All Pydantic models + provenance
+
+servers/cyrex_mcp/         # MCP SERVER — publish Cyrex to IDEs/agents (Task 7); repo-root sibling of app/</pre>
+    </div>
+
+    <!-- ENGINE IMPLEMENTATION PLAN -->
+    <div class="card">
+      <h2>Engine implementation plan</h2>
+      <p>Ordered delivery aligned with tasks below. <strong>Two MCP roles:</strong> (1) <em>Consumer</em> — <span class="path">app/pipeline/tools/mcp/</span> calls third-party MCP servers (Task 5). (2) <em>Publisher</em> — <span class="path">servers/cyrex_mcp/</span> is a first-party MCP server that exposes artifacts, citations, and graph operations to IDEs and external agents (Task 7).</p>
+      <ol style="margin: 0.5rem 0 0 1.25rem; font-size: 0.9rem; color: #333; line-height: 1.6;">
+        <li><strong>Task 1</strong> — Artifact schemas + provenance</li>
+        <li><strong>Task 2</strong> — Multi-pass extraction</li>
+        <li><strong>Task 3</strong> — Orchestrator + working memory</li>
+        <li><strong>Task 4</strong> — Registry / SQLite store</li>
+        <li><strong>Task 5</strong> — Cognitive tools + <strong>MCP client module</strong> (<code>tools/mcp/</code>): <code>client</code> + <code>config</code> first, then <code>router</code> facade, <code>__init__</code> exports, tests</li>
+        <li><strong>Task 6</strong> — API routes</li>
+        <li><strong>Task 7</strong> — <strong>Cyrex MCP server</strong> (<code>servers/cyrex_mcp/</code>): stdio/HTTP transport, org-scoped tools + optional resources, contract tests; see Pipeline Tasks tab</li>
+      </ol>
+    </div>
+
+    <!-- PITCH -->
+    <div class="highlight">
+      <h3>The Pitch (2026 Edition)</h3>
+      <p><em>"Upload or connect your documents. We store them, version them, and build a dependency graph of extracted knowledge. Ask anything — get cited answers from Cyrex agents with real-time metrics embedded in every artifact. Multi-pass extraction, self-verification, agentic retrieval, multi-model routing. Not chat with your documents. Not a search box. Document infrastructure — the kind that gets smarter every time you correct it."</em></p>
+    </div>
+
+    </div><!-- /tab-overview -->
+
+    <!-- TAB: MCP & EXPERIENCE (flagship + brainstorm) -->
+    <div class="tab-panel" id="tab-experience">
+
+    <div class="card">
+      <h2>First-party Cyrex MCP server <span class="tag core">Plan</span></h2>
+      <p>Task 5’s <code>MCPToolRouter</code> is how <em>Cyrex agents call out</em>. Task 7 is the inverse: a <strong>publishable MCP server</strong> so Cursor, Claude Desktop, internal tools, and partner agents can <em>call into</em> the artifact registry with the same citation and provenance contracts as the product API.</p>
+      <h3>Why it matters</h3>
+      <ul style="margin: 0.5rem 0 0 1.25rem; font-size: 0.9rem; line-height: 1.6;">
+        <li><strong>Distribution:</strong> “Cyrex in every IDE” without building N bespoke plugins first.</li>
+        <li><strong>Audit surface:</strong> External agents retrieve bundles and locators through typed tools, not scraped HTML.</li>
+        <li><strong>Symmetry:</strong> Ingest → artifacts → MCP tools mirrors how Cyrex itself uses MCP as a client.</li>
+      </ul>
+      <h3>Illustrative tool surface (version with Task 7)</h3>
+      <div class="chip-list">
+        <span class="chip blue">cyrex_list_artifacts</span>
+        <span class="chip blue">cyrex_get_bundle</span>
+        <span class="chip green">cyrex_get_citations</span>
+        <span class="chip green">cyrex_graph_neighborhood</span>
+        <span class="chip purple">cyrex_explain_provenance</span>
+        <span class="chip orange">cyrex_search_entities</span>
+        <span class="chip pink">cyrex_submit_correction</span>
+      </div>
+      <p style="font-size: 0.85rem; color: #555; margin-top: 0.75rem;">Optional MCP <em>resources</em> (e.g. <code>cyrex://artifact/{id}</code>) for snapshot reads; all writes go through authenticated tools. Sandboxing and org isolation match the Security section of the Frontier tab.</p>
+    </div>
+
+    <div class="card">
+      <h2>Flagship experience: what could be the “main attraction” <span class="tag frontier">Brainstorm</span></h2>
+      <p>Most doc-AI products stop at chat + highlights. Cyrex’s structural edge is <strong>computed artifacts + bidirectional provenance</strong>. The attraction should make that <em>felt</em>, not explained.</p>
+
+      <h3>Lead concept — <em>Witness Graph</em> (working name)</h3>
+      <p class="insight" style="margin-top: 0.75rem;"><strong>One-sentence pitch:</strong> A live, navigable map where every extracted fact is a node, every citation is an edge to an exact span in the PDF, and every model pass is a layer you can peel back — “time travel” for how the machine knew what it knew.</p>
+      <ul style="margin: 0.75rem 0 0 1.25rem; font-size: 0.9rem; line-height: 1.65;">
+        <li><strong>Visitation:</strong> Click any node → PDF scrolls to the witness quote; shift-click → show sibling artifacts that disagree (multi-pass discrepancy view).</li>
+        <li><strong>Differentiator:</strong> Competitors show RAG chunks; you show a <em>dependency DAG</em> with invalidation when source docs change (build-system metaphor from Core Differentiators).</li>
+        <li><strong>Implementation path:</strong> Start in <span class="path">cyrex-interface</span> with 2D force-directed graph + PDF pane; optional WebGL layer for large corpora; MCP server can power a “headless” graph for external clients.</li>
+      </ul>
+
+      <h3>Visual ideas that reinforce the same story</h3>
+      <div class="tier-grid two">
+        <div class="tier gen3">
+          <h5>Provenance strip</h5>
+          <p style="font-size:0.8rem;margin:0.35rem 0;">Filmstrip of extraction passes (regex → LLM → cross-ref) with diff heat per field; scrub to see field values evolve.</p>
+        </div>
+        <div class="tier gen3">
+          <h5>Entity constellation</h5>
+          <p style="font-size:0.8rem;margin:0.35rem 0;">Canonical entities as stars; edges are obligations, amounts, dates; cross-document resolution lights up “bridges” between files.</p>
+        </div>
+        <div class="tier bleed">
+          <h5>Version delta theater</h5>
+          <p style="font-size:0.8rem;margin:0.35rem 0;">Two document versions side by side; only artifacts touched by the diff pulse; replay what invalidated downstream reasoning.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Agent flight recorder</h5>
+          <p style="font-size:0.8rem;margin:0.35rem 0;">Timeline of Think → tools (including MCP) → Reflect; exportable for compliance — “black box” for doc agents.</p>
+        </div>
+      </div>
+
+      <h3>“Nobody has thought of it” — speculative plays <span class="tag test">Hypothesis</span></h3>
+      <p style="font-size: 0.88rem; line-height: 1.6; color: #333;">These are deliberately sharp; validate before build.</p>
+      <ul style="margin: 0.5rem 0 0 1.25rem; font-size: 0.88rem; line-height: 1.65;">
+        <li><strong>Contradiction room:</strong> Auto-cluster conflicting extractions across passes and docs into a single spatial “debate” UI; human resolves once → becomes a <code>LearningArtifact</code> with replay.</li>
+        <li><strong>Shared witness sessions:</strong> Multi-cursor provenance tour — counsel and ops see the same highlighted DAG with presence (Figma-style) for diligence.</li>
+        <li><strong>Artifact permalinks in contracts:</strong> Export a signed summary where each numeric claim links back to Cyrex artifact IDs + locators (extreme audit trail for closing binders).</li>
+        <li><strong>Inverse Q&amp;A:</strong> “What in this room would change if clause 7.2 were rewritten?” — forward simulation using dependency edges, not generic LLM speculation.</li>
+      </ul>
+
+      <div class="verdict">
+        <strong>Recommendation:</strong> Ship <strong>Witness Graph + Provenance strip</strong> as the public demo spine; ship <strong>Cyrex MCP server</strong> so the same graph data is reachable from Cursor and automation. Treat “Contradiction room” and “inverse Q&amp;A” as Phase 2 once Task 4–7 are stable.
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Visualization UI catalog — backend mapping <span class="tag core">Reference</span></h2>
+      <p>Concrete UI concepts mappable to Cyrex artifacts, citations, provenance, graph edges, versions, and learning signals. Use for <span class="path">cyrex-interface</span> roadmapping and MCP tool parity.</p>
+
+      <div class="viz-catalog">
+        <h3>1. Provenance &amp; multi-pass extraction</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Pass filmstrip</strong></td><td><code>Provenance.passes[]</code>, <code>ExtractionMethod</code>, per-pass timing; scrub time → field values after each pass.</td></tr>
+            <tr><td><strong>Field evolution lanes</strong></td><td><code>CitedField</code> + <code>Citation.extraction_pass</code> — swimlanes per field; diverge/merge when passes disagree.</td></tr>
+            <tr><td><strong>Discrepancy heatmap</strong></td><td>Multi-pass synthesis: flag fields where regex vs LLM vs cross-ref differ; color by delta type / confidence.</td></tr>
+            <tr><td><strong>Confidence topography</strong></td><td>Per-field <code>confidence</code>; layout by page or doc order → height or color = uncertainty.</td></tr>
+            <tr><td><strong>Citation microscope</strong></td><td><code>Citation</code> + <code>CitationLocator</code> — zoom to <code>quote</code>, char/page range, <code>element_id</code> (tables/forms).</td></tr>
+          </tbody>
+        </table>
+
+        <h3>2. Graph &amp; dependencies</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Witness graph</strong> (force / layered DAG)</td><td><code>Provenance.depends_on</code>, <code>depended_on_by</code>, <code>cross_references</code>; nodes = artifacts or fields.</td></tr>
+            <tr><td><strong>Impact cone</strong></td><td>Backward star from <code>depended_on_by</code> — “if this changes, what recomputes?”</td></tr>
+            <tr><td><strong>Source-of-truth fan</strong></td><td>One PDF region → all <code>CitedField</code> / bundles citing it (inverse citation index).</td></tr>
+            <tr><td><strong>Cross-doc bridge view</strong></td><td><code>cross_references</code> + canonical entity IDs; two docs side by side with bridge edges.</td></tr>
+            <tr><td><strong>Minimal cut set</strong></td><td>Highlight smallest explanatory path from <code>Answer</code> / <code>Reasoning</code> to <code>Extraction</code> on the DAG.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>3. Documents, versions, diffs</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Version timeline</strong></td><td><code>document_id</code>, <code>version</code>, <code>source_doc_hash</code>; horizontal timeline of bundles.</td></tr>
+            <tr><td><strong>Diff-aligned PDF</strong></td><td><code>Transformation</code> artifacts + two hashes; aligned scroll, changed spans highlighted.</td></tr>
+            <tr><td><strong>Invalidation pulse</strong></td><td>New upload → animate nodes affected by recompute (expose job / queue state from pipeline + registry).</td></tr>
+            <tr><td><strong>Hash fingerprint strip</strong></td><td>Compact per-version: hash, <code>model_id</code>, <code>prompt_version</code> — audit / trust strip.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>4. Entities &amp; canonicalization</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Entity constellation</strong></td><td><code>ArtifactType.CANONICAL</code> + edges to extractions; clusters by entity kind.</td></tr>
+            <tr><td><strong>Entity merge review</strong></td><td>Duplicate candidates → one canonical node; ties to <code>LearningArtifact</code> / resolution events.</td></tr>
+            <tr><td><strong>Amount / date sanity board</strong></td><td>All <code>CitedField</code> with <code>value_type</code> currency/date; charts + outliers + contradiction links if reflection signals persist.</td></tr>
+          </tbody>
+        </table>
+
+        <h3>5. Q&amp;A, answers, retrieval</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Answer decomposition tree</strong></td><td><code>Answer</code> + citations + <code>Retrieval</code> artifact IDs — claim → chunk → doc span.</td></tr>
+            <tr><td><strong>Chunk orbit</strong></td><td>Retrieved segments as nodes around the question; radius or order from stored scores.</td></tr>
+            <tr><td><strong>Grounding meter</strong></td><td>Per-sentence coverage vs citation spans (needs answer segmentation + locator overlap).</td></tr>
+          </tbody>
+        </table>
+
+        <h3>6. Agents, tools, observability</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Flight recorder timeline</strong></td><td><code>ArtifactType.SYSTEM</code> / run metadata + stage logs: Think → extract → MCP → Reflect; OpenTelemetry spans if enabled.</td></tr>
+            <tr><td><strong>MCP tool galaxy</strong></td><td>External tool calls, args summaries, success/failure from <code>MCPToolRouter</code> / traces.</td></tr>
+            <tr><td><strong>Retry / repair loop</strong></td><td>Visual loops when <code>ReflectTool</code> fails until re-extraction (persist reflection results).</td></tr>
+          </tbody>
+        </table>
+
+        <h3>7. Human-in-the-loop &amp; learning</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Correction stream</strong></td><td><code>LearningArtifact</code> timeline — who fixed what, link to source citation.</td></tr>
+            <tr><td><strong>Few-shot preview</strong></td><td>“Next doc sees these examples” from recent <code>LearningArtifact</code> payloads.</td></tr>
+            <tr><td><strong>Review queue Kanban</strong></td><td>Low confidence / failed reflection → columns (flags on <code>CitedField</code> / job state).</td></tr>
+          </tbody>
+        </table>
+
+        <h3>8. Spatial / high-impact (optional)</h3>
+        <table class="spec-table" role="table">
+          <thead><tr><th>UI idea</th><th>Backend source</th></tr></thead>
+          <tbody>
+            <tr><td><strong>3D corpus room</strong></td><td>Same DAG data as Witness graph; documents as floors/walls — demo-first.</td></tr>
+            <tr><td><strong>Clause topology map</strong></td><td><code>Reasoning</code> keyed by clause / section IDs; “risk” encoding needs domain tags.</td></tr>
+            <tr><td><strong>Sankey: ingest → artifacts</strong></td><td>Volume by stage from metrics on bundles / <code>SYSTEM</code> artifacts.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="viz-map">
+        <strong>Cross-cutting backend map</strong>
+        <ul>
+          <li><strong>Nodes / edges:</strong> <code>ArtifactBundle</code>, <code>Provenance.depends_on</code>, <code>depended_on_by</code>, <code>cross_references</code></li>
+          <li><strong>Pins on PDF or text:</strong> <code>Citation</code>, <code>CitationLocator</code></li>
+          <li><strong>Multi-pass story:</strong> <code>ProvenancePass</code>, <code>Citation.extraction_pass</code></li>
+          <li><strong>Trust:</strong> <code>confidence</code>, persisted reflection outputs, <code>LearningArtifact</code></li>
+          <li><strong>Versions:</strong> <code>document_id</code>, <code>version</code>, <code>Transformation</code>, <code>source_doc_hash</code></li>
+          <li><strong>IDE / agent parity:</strong> same JSON via REST + Cyrex MCP server tools (Task 7)</li>
+        </ul>
+      </div>
+
+      <div class="verdict" style="margin-top: 1rem;">
+        <strong>Suggested first build trio:</strong> (1) Witness graph + citation microscope, (2) pass filmstrip or field evolution lanes, (3) answer decomposition tree.
+      </div>
+    </div>
+
+    <div class="crazier-card">
+      <p class="crazier-kicker">Moonshot / positioning</p>
+      <h2>CRAZIER!! <span class="tag crazy">Speculative</span></h2>
+      <p class="crazier-pull">Everyone ships “upload docs → get answers.” Cyrex’s artifact graph enables modes where the document is not the starting line — it’s evidence that arrives <em>after</em> the claim structure exists.</p>
+      <p>None of this replaces Tasks 1–7. Treat as R&amp;D hooks: if the backend stays honest (citations, <code>depends_on</code>, versions), the UI can go absolutely feral.</p>
+
+      <h3>Evidence-last ingestion</h3>
+      <ul>
+        <li><strong>Claim graph first.</strong> User defines obligations, amounts, parties, or a “thesis” as empty typed nodes. Cyrex shows a pulsing witness graph with <em>holes</em>. Uploading PDFs is how you <strong>close</strong> locators — not how you bootstrap. Turns the mental model from file cabinet → <strong>structured doubt</strong>.</li>
+        <li><strong>Maps to:</strong> canonical entities, <code>Citation</code> resolution, <code>ArtifactBundle</code> attachment to pre-declared node IDs.</li>
+      </ul>
+
+      <h3>Ghost artifacts &amp; “rebase witness”</h3>
+      <ul>
+        <li><strong>Superseded truth doesn’t vanish.</strong> Old versions stay as grey “ghost” nodes/edges until a human explicitly rebases or dismisses them. Makes invalidation visceral — you <em>see</em> what the model used to swear by.</li>
+        <li><strong>Maps to:</strong> <code>source_doc_hash</code>, version lineage, <code>Transformation</code>, <code>depended_on_by</code> replay.</li>
+      </ul>
+
+      <h3>Living obligations (docs as sensors)</h3>
+      <ul>
+        <li><strong>Reality feeds the graph.</strong> Calendar milestones, billing feeds, FX rates, IoT, CRM — stream events into artifact conditions. When the world diverges from the clause, the graph throws a <strong>witness alert</strong> before anyone opens chat.</li>
+        <li><strong>Maps to:</strong> invalidation queue, <code>Workflow</code> / <code>Anticipate</code> stages, optional webhooks + MCP triggers.</li>
+      </ul>
+
+      <h3>Adversarial extraction arena</h3>
+      <ul>
+        <li><strong>Two pipelines enter, discrepancies win.</strong> Run two models (or two full passes with different seeds/prompts) as a <strong>duel</strong>. The UI foregrounds <em>disagreement</em>, not a blended average — productized epistemic conflict.</li>
+        <li><strong>Maps to:</strong> multi-pass synthesis, discrepancy artifacts, <code>ReflectTool</code> output as first-class UI state.</li>
+      </ul>
+
+      <h3>Artifact notary (Merkle witness)</h3>
+      <ul>
+        <li><strong>Cryptographic receipt for a whole DAG.</strong> Timestamp or anchor a hash of the provenance subgraph backing a decision. “This conclusion, with these citations, existed in this exact form at T.” Not a screenshot — a <strong>verifiable bundle commitment</strong>.</li>
+        <li><strong>Maps to:</strong> stable serialization of <code>Provenance</code> + <code>Citation</code> chain; export API.</li>
+      </ul>
+
+      <h3>Multiplayer diligence (MMO mode)</h3>
+      <ul>
+        <li><strong>Same corpus, different lenses.</strong> Counsel, finance, ops each wear a role-specific graph filter; presence cursors; live merges into <code>LearningArtifact</code> with conflict resolution — Figma energy for diligence.</li>
+        <li><strong>Maps to:</strong> org-scoped store, audit log, real-time streaming pipeline (Frontier).</li>
+      </ul>
+
+      <h3>Documents as event emitters</h3>
+      <ul>
+        <li><strong>When this field changes, blow the whistle.</strong> Users wire edges to webhooks, Slack, Jira, or MCP clients. Files stop being passive blobs — they’re <strong>monitored subgraphs</strong> with subscriptions.</li>
+        <li><strong>Maps to:</strong> Task 7 tools + <code>depended_on_by</code> diff on new version.</li>
+      </ul>
+
+      <h3>Voice of the document (bounded persona)</h3>
+      <ul>
+        <li><strong>Only ever quote itself.</strong> A “persona” or voice mode that answers strictly by stitching cited spans — no extra uncited narrative. Uncanny, demo-killer, and <strong>honest</strong> in a way generic RAG personas are not.</li>
+        <li><strong>Maps to:</strong> <code>Answer</code> + hard citation gate; retrieval scope = witness set only.</li>
+      </ul>
+
+      <h3>Graph diff as product (two orgs, zero raw leak)</h3>
+      <ul>
+        <li><strong>Compare structure without sharing PDFs.</strong> Moonshot: exchange summaries of entity/clause <em>topology</em> or hashed artifact shapes for alignment checks — useful for buyer/seller diligence choreography (heavy legal + crypto design — flag as research).</li>
+        <li><strong>Maps to:</strong> canonical graph export, redaction tier, optional secure enclave story.</li>
+      </ul>
+
+      <p style="margin-top: 1.1rem; font-size: 0.78rem; color: #9a8fb0; line-height: 1.55;">
+        <strong>North star:</strong> If it still feels like “another upload box,” kill it. CRAZIER!! modes should make users feel like they’re operating a <em>build system for truth</em>, not a chat wrapper.
+      </p>
+    </div>
+
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         CRAZIER v3 — 5 REVOLUTIONARY VISUALIZED IDEAS
+         ═══════════════════════════════════════════════════════════════ -->
+    <style>
+      /* ── shared v3 shell ── */
+      .v3-card {
+        background: linear-gradient(160deg, #020917 0%, #080e1f 50%, #050c18 100%);
+        color: #cdd6f4;
+        border: 1px solid #1e3a5f;
+        border-radius: var(--border-radius-lg, 12px);
+        padding: 1.5rem;
+        margin-bottom: 1.25rem;
+        box-shadow: 0 0 0 1px rgba(56,189,248,0.06), 0 16px 48px rgba(0,0,0,0.5);
+        position: relative;
+        overflow: hidden;
+      }
+      .v3-card::before {
+        content: '';
+        position: absolute;
+        top: -80px; right: -80px;
+        width: 240px; height: 240px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(56,189,248,0.07) 0%, transparent 70%);
+        pointer-events: none;
+      }
+      .v3-card h2 {
+        font-size: 1.2rem; font-weight: 800; letter-spacing: 0.05em;
+        margin-bottom: 0.6rem;
+        padding-bottom: 0.6rem;
+        border-bottom: 1px solid #1e3a5f;
+      }
+      .v3-card h3 { font-size: 0.88rem; font-weight: 700; margin: 1.1rem 0 0.4rem; color: #93c5fd; }
+      .v3-card p  { font-size: 0.86rem; line-height: 1.65; color: #bac8e0; margin: 0.35rem 0; }
+      .v3-card ul { margin: 0.4rem 0 0; padding-left: 1.2rem; font-size: 0.84rem; line-height: 1.65; color: #bac8e0; }
+      .v3-card li { margin-bottom: 0.5rem; }
+      .v3-card code { background: #0f2040; color: #7dd3fc; border: 1px solid #1e4080; padding: 1px 5px; border-radius: 3px; }
+      .v3-kicker { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; color: #4a6fa5; margin-bottom: 0.2rem; }
+      .v3-pull { font-size: 0.93rem; font-style: italic; color: #e2e8f0; margin: 0.5rem 0 1rem; padding-left: 0.85rem; border-left: 3px solid; }
+      .maps-to { background: #060f20; border: 1px solid #1a3050; border-radius: 6px; padding: 0.6rem 0.85rem; margin-top: 0.85rem; font-size: 0.78rem; color: #64748b; }
+      .maps-to strong { color: #475569; }
+
+      /* ── viz containers ── */
+      .viz-frame {
+        background: #030a14;
+        border: 1px solid #1a3050;
+        border-radius: 10px;
+        padding: 1rem;
+        margin: 1rem 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 140px;
+        overflow: hidden;
+      }
+
+      /* ── IDEA 1: Temporal Belief Cinema ── */
+      .v3-card.cinema h2 { color: #f59e0b; }
+      .v3-pull.cinema { border-color: #f59e0b; }
+      .film-strip {
+        display: flex; gap: 3px; align-items: center;
+        font-family: "SF Mono", monospace; font-size: 0.62rem;
+      }
+      .film-frame {
+        background: #0a1628;
+        border: 1px solid #1e3a5f;
+        border-radius: 3px;
+        width: 56px; min-height: 72px;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 3px; padding: 4px 3px;
+        position: relative; flex-shrink: 0;
+        transition: transform 0.2s;
+      }
+      .film-frame.active-frame {
+        border-color: #f59e0b;
+        box-shadow: 0 0 12px rgba(245,158,11,0.4);
+        transform: scale(1.08);
+        background: #120f00;
+      }
+      .film-dot { width: 8px; height: 8px; border-radius: 50%; }
+      .film-label { font-size: 0.52rem; color: #4a6fa5; text-align: center; line-height: 1.2; }
+      .film-val { font-size: 0.58rem; font-weight: 700; text-align: center; }
+      .scrub-bar {
+        width: 100%; height: 4px;
+        background: #0a1628; border-radius: 2px;
+        margin-top: 6px; position: relative;
+      }
+      .scrub-thumb {
+        position: absolute; top: -4px; left: 32%;
+        width: 12px; height: 12px; border-radius: 50%;
+        background: #f59e0b;
+        box-shadow: 0 0 8px rgba(245,158,11,0.6);
+      }
+
+      /* ── IDEA 2: Epistemic Pressure Map ── */
+      .v3-card.pressure h2 { color: #ef4444; }
+      .v3-pull.pressure { border-color: #ef4444; }
+      .topo-grid {
+        display: grid; grid-template-columns: repeat(12, 1fr);
+        gap: 2px; width: 100%; max-width: 420px;
+      }
+      .topo-cell {
+        aspect-ratio: 1;
+        border-radius: 2px;
+      }
+
+      /* ── IDEA 3: Dead Reckoning Mode ── */
+      .v3-card.dead-reckoning h2 { color: #a78bfa; }
+      .v3-pull.dead-reckoning { border-color: #a78bfa; }
+      .dr-row {
+        display: flex; align-items: center; gap: 8px;
+        font-family: "SF Mono", monospace; font-size: 0.7rem;
+        margin: 3px 0;
+      }
+      .dr-label { color: #64748b; width: 90px; text-align: right; flex-shrink: 0; }
+      .dr-bar-wrap { flex: 1; height: 12px; background: #0a1628; border-radius: 6px; overflow: hidden; }
+      .dr-bar { height: 100%; border-radius: 6px; }
+      .dr-delta { font-size: 0.62rem; width: 36px; text-align: right; flex-shrink: 0; }
+
+      /* ── IDEA 4: Artifact Immune System ── */
+      .v3-card.immune h2 { color: #34d399; }
+      .v3-pull.immune { border-color: #34d399; }
+      @keyframes pulse-red {
+        0%,100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.7); }
+        50%      { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+      }
+      @keyframes pulse-green {
+        0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,0.7); }
+        50%      { box-shadow: 0 0 0 6px rgba(52,211,153,0); }
+      }
+      @keyframes flow-right {
+        0%   { stroke-dashoffset: 24; }
+        100% { stroke-dashoffset: 0; }
+      }
+
+      /* ── IDEA 5: Clause DNA Sequencer ── */
+      .v3-card.dna h2 { color: #f472b6; }
+      .v3-pull.dna { border-color: #f472b6; }
+      @keyframes helix-bob {
+        0%,100% { transform: translateY(0); }
+        50%      { transform: translateY(-3px); }
+      }
+
+      /* ── CRAZIER v4 — world-scale ideas ── */
+      .v3-card.fork h2 { color: #22d3ee; }
+      .v3-pull.fork { border-color: #22d3ee; }
+      .v3-card.treaty h2 { color: #fbbf24; }
+      .v3-pull.treaty { border-color: #fbbf24; }
+      .v3-card.escrow h2 { color: #4ade80; }
+      .v3-pull.escrow { border-color: #4ade80; }
+      .v3-card.exocortex h2 { color: #c084fc; }
+      .v3-pull.exocortex { border-color: #c084fc; }
+      .v3-card.dreammine h2 { color: #818cf8; }
+      .v3-pull.dreammine { border-color: #818cf8; }
+      .v4-banner {
+        background: linear-gradient(90deg, #0c1222 0%, #1a0a2e 50%, #0c1222 100%);
+        border: 1px dashed #4c1d95;
+        border-radius: 10px;
+        padding: 0.65rem 1rem;
+        margin: 0 0 1rem;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: #a78bfa;
+        text-align: center;
+      }
+    </style>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         IDEA 1 — TEMPORAL BELIEF CINEMA
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card cinema">
+      <p class="v3-kicker">Idea 1 / 5 &nbsp;·&nbsp; Visualization</p>
+      <h2>Temporal Belief Cinema <span class="tag crazy">Speculative</span></h2>
+      <p class="v3-pull cinema">Every correction, every re-extraction, every model pass is a frame. You don't read the final answer — you <em>watch the document's truth evolve</em> like a film.</p>
+
+      <h3>The idea</h3>
+      <p>Render the entire correction history of a field as a <strong>scrubbable film strip</strong>. Each frame = a moment the system held a different belief. Scrub left → the model said "$42,500/mo." Scrub right → after 3 corrections it says "$43,250/mo." Between frames: animated confidence fade, citation witness changing. The artifact isn't static. It's a recording.</p>
+
+      <div class="viz-frame">
+        <div style="width:100%;max-width:480px;">
+          <div style="font-family:'SF Mono',monospace;font-size:0.62rem;color:#4a6fa5;margin-bottom:6px;">FIELD: monthly_rent &nbsp;·&nbsp; 7 belief states &nbsp;·&nbsp; scrub ←→ to travel</div>
+          <div class="film-strip" style="overflow-x:auto;padding-bottom:6px;">
+            <div class="film-frame">
+              <div class="film-dot" style="background:#ef4444;"></div>
+              <div class="film-label">Pass 1<br>regex</div>
+              <div class="film-val" style="color:#ef4444;">$42,500</div>
+              <div class="film-label" style="color:#ef4444;">0.61</div>
+            </div>
+            <div style="color:#1e3a5f;font-size:1rem;">→</div>
+            <div class="film-frame">
+              <div class="film-dot" style="background:#f59e0b;"></div>
+              <div class="film-label">Pass 2<br>LLM</div>
+              <div class="film-val" style="color:#f59e0b;">$42,500</div>
+              <div class="film-label" style="color:#f59e0b;">0.78</div>
+            </div>
+            <div style="color:#1e3a5f;font-size:1rem;">→</div>
+            <div class="film-frame">
+              <div class="film-dot" style="background:#f59e0b;"></div>
+              <div class="film-label">Pass 3<br>x-ref</div>
+              <div class="film-val" style="color:#f59e0b;">$42,500</div>
+              <div class="film-label" style="color:#f59e0b;">0.74</div>
+            </div>
+            <div style="color:#1e3a5f;font-size:1rem;">→</div>
+            <div class="film-frame active-frame">
+              <div class="film-dot" style="background:#f59e0b;box-shadow:0 0 6px #f59e0b;"></div>
+              <div class="film-label" style="color:#f59e0b;">★ human</div>
+              <div class="film-val" style="color:#f59e0b;">$43,250</div>
+              <div class="film-label" style="color:#f59e0b;">1.00</div>
+            </div>
+            <div style="color:#1e3a5f;font-size:1rem;">→</div>
+            <div class="film-frame">
+              <div class="film-dot" style="background:#34d399;"></div>
+              <div class="film-label">Re-pass<br>LLM</div>
+              <div class="film-val" style="color:#34d399;">$43,250</div>
+              <div class="film-label" style="color:#34d399;">0.95</div>
+            </div>
+            <div style="color:#1e3a5f;font-size:1rem;">→</div>
+            <div class="film-frame">
+              <div class="film-dot" style="background:#34d399;"></div>
+              <div class="film-label">Doc v2<br>recheck</div>
+              <div class="film-val" style="color:#34d399;">$43,250</div>
+              <div class="film-label" style="color:#34d399;">0.97</div>
+            </div>
+          </div>
+          <div class="scrub-bar">
+            <div class="scrub-thumb"></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-family:'SF Mono',monospace;font-size:0.56rem;color:#334155;margin-top:2px;">
+            <span>← PAST (wrong)</span><span>NOW</span><span>→ FUTURE (predicted)</span>
+          </div>
+        </div>
+      </div>
+
+      <h3>Why this destroys competitors</h3>
+      <ul>
+        <li>Every other doc-AI shows you the <em>current answer</em>. Cyrex shows you <strong>every answer the system ever held</strong>, traceable to the exact correction or model pass that changed it.</li>
+        <li>For legal diligence: "show me exactly when and why the system changed its interpretation of the rent escalator clause" becomes a one-second playback.</li>
+        <li>Future extension: extend timeline right → <em>predicted future states</em> based on pending document versions in the queue.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> <code>LearningArtifact</code> timeline, <code>ProvenancePass[]</code>, <code>source_doc_hash</code> version lineage, <code>Citation.extraction_pass</code>, correction event log</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         IDEA 2 — EPISTEMIC PRESSURE MAP
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card pressure">
+      <p class="v3-kicker">Idea 2 / 5 &nbsp;·&nbsp; Visualization</p>
+      <h2>Epistemic Pressure Map <span class="tag crazy">Speculative</span></h2>
+      <p class="v3-pull pressure">Render the entire corpus as a living topographic map. <em>Pressure</em> = contradiction density. Fault zones pulse red where passes disagree most violently. You don't review documents — you <strong>survey the terrain of contested truth</strong>.</p>
+
+      <h3>The idea</h3>
+      <p>Each document section maps to a cell in a 2D grid. Color encodes <strong>epistemic pressure</strong>: how many multi-pass discrepancies, failed reflections, or low-confidence fields exist in that zone. High-pressure zones are "seismic faults" — click any cell → drill into the discrepancy cluster. Documents with zero conflict are geological bedrock. Documents full of contradictions glow volcanic.</p>
+
+      <div class="viz-frame">
+        <div style="width:100%;max-width:480px;">
+          <div style="font-family:'SF Mono',monospace;font-size:0.62rem;color:#4a6fa5;margin-bottom:8px;">CORPUS PRESSURE MAP &nbsp;·&nbsp; 24 docs &nbsp;·&nbsp; cell = section &nbsp;·&nbsp; color = discrepancy density</div>
+          <svg viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:400px;">
+            <defs>
+              <radialGradient id="hotspot1" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#ef4444" stop-opacity="0.9"/>
+                <stop offset="100%" stop-color="#7f1d1d" stop-opacity="0.3"/>
+              </radialGradient>
+              <radialGradient id="hotspot2" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.8"/>
+                <stop offset="100%" stop-color="#451a03" stop-opacity="0.2"/>
+              </radialGradient>
+            </defs>
+            <!-- bedrock cells (safe) -->
+            <rect x="2"   y="2"  width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="32"  y="2"  width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="62"  y="2"  width="28" height="28" rx="3" fill="#122840" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="92"  y="2"  width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="122" y="2"  width="28" height="28" rx="3" fill="#0d1f38" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="152" y="2"  width="28" height="28" rx="3" fill="#17412a" stroke="#1e5a3f" stroke-width="0.5"/><!-- low pressure green -->
+            <rect x="182" y="2"  width="28" height="28" rx="3" fill="#1a3a18" stroke="#2a5a28" stroke-width="0.5"/>
+            <rect x="212" y="2"  width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <!-- row 2 -->
+            <rect x="2"   y="32" width="28" height="28" rx="3" fill="#122840" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="32"  y="32" width="28" height="28" rx="3" fill="#2d1507" stroke="#5a3010" stroke-width="0.5"/><!-- medium amber -->
+            <rect x="62"  y="32" width="28" height="28" rx="3" fill="#3d1a07" stroke="#6a3a10" stroke-width="0.5"/>
+            <rect x="92"  y="32" width="28" height="28" rx="3" fill="#4d2008" stroke="#7a4010" stroke-width="0.5"/>
+            <rect x="122" y="32" width="28" height="28" rx="3" fill="#5d1010" stroke="#8a2020" stroke-width="0.5"/><!-- warming red -->
+            <rect x="152" y="32" width="28" height="28" rx="3" fill="#6d0e0e" stroke="#9a2020" stroke-width="0.5"/>
+            <rect x="182" y="32" width="28" height="28" rx="3" fill="#4d2008" stroke="#7a4010" stroke-width="0.5"/>
+            <rect x="212" y="32" width="28" height="28" rx="3" fill="#1a2f10" stroke="#3a5f20" stroke-width="0.5"/>
+            <!-- row 3 — fault zone erupts -->
+            <rect x="2"   y="62" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="32"  y="62" width="28" height="28" rx="3" fill="#3d1a07" stroke="#6a3a10" stroke-width="0.5"/>
+            <rect x="62"  y="62" width="28" height="28" rx="3" fill="#7f0f0f" stroke="#af2020" stroke-width="0.5"/><!-- HOT -->
+            <rect x="92"  y="62" width="28" height="28" rx="3" fill="#991111" stroke="#cc2828" stroke-width="0.5"/><!-- VOLCANO -->
+            <rect x="122" y="62" width="28" height="28" rx="3" fill="#7f0f0f" stroke="#af2020" stroke-width="0.5"/>
+            <rect x="152" y="62" width="28" height="28" rx="3" fill="#3d1507" stroke="#6a3010" stroke-width="0.5"/>
+            <rect x="182" y="62" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="212" y="62" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <!-- row 4 -->
+            <rect x="2"   y="92" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="32"  y="92" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="62"  y="92" width="28" height="28" rx="3" fill="#2d1507" stroke="#5a3010" stroke-width="0.5"/>
+            <rect x="92"  y="92" width="28" height="28" rx="3" fill="#3d1a07" stroke="#6a3a10" stroke-width="0.5"/>
+            <rect x="122" y="92" width="28" height="28" rx="3" fill="#1a2f10" stroke="#3a5f20" stroke-width="0.5"/>
+            <rect x="152" y="92" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="182" y="92" width="28" height="28" rx="3" fill="#0f2040" stroke="#1e3a5f" stroke-width="0.5"/>
+            <rect x="212" y="92" width="28" height="28" rx="3" fill="#122840" stroke="#1e3a5f" stroke-width="0.5"/>
+            <!-- volcanic highlight ring -->
+            <rect x="90" y="60" width="32" height="32" rx="4" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.8"/>
+            <!-- legend -->
+            <rect x="250" y="10" width="12" height="12" rx="2" fill="#0f2040"/>
+            <text x="266" y="20" font-family="monospace" font-size="9" fill="#4a6fa5">no conflict</text>
+            <rect x="250" y="30" width="12" height="12" rx="2" fill="#3d1a07"/>
+            <text x="266" y="40" font-family="monospace" font-size="9" fill="#f59e0b">low conflict</text>
+            <rect x="250" y="50" width="12" height="12" rx="2" fill="#7f0f0f"/>
+            <text x="266" y="60" font-family="monospace" font-size="9" fill="#ef4444">high conflict</text>
+            <rect x="250" y="70" width="12" height="12" rx="2" fill="#991111"/>
+            <text x="266" y="80" font-family="monospace" font-size="9" fill="#fca5a5">→ fault zone</text>
+            <rect x="250" y="90" width="12" height="12" rx="2" fill="#17412a"/>
+            <text x="266" y="100" font-family="monospace" font-size="9" fill="#34d399">confirmed clean</text>
+            <!-- fault zone label -->
+            <text x="78" y="58" font-family="monospace" font-size="7" fill="#ef4444">⚡ FAULT</text>
+          </svg>
+          <div style="font-family:'SF Mono',monospace;font-size:0.56rem;color:#334155;margin-top:4px;">← click any cell → drill into discrepancy cluster with pass-level citations</div>
+        </div>
+      </div>
+
+      <h3>Why this is insane (in a good way)</h3>
+      <ul>
+        <li><strong>Geological metaphor = instant intuition.</strong> Users immediately understand "fault zone" without training. Pressure is a physical feeling — competitors show tables of accuracy numbers.</li>
+        <li><strong>Triage at a glance.</strong> 300-document corpus, 2 minutes to know which 4 sections need human review. No scrolling, no scanning — the map tells you where the truth is fragile.</li>
+        <li><strong>Fault zone becomes a workflow trigger:</strong> auto-assign human review for cells above a pressure threshold → <code>WorkflowStage</code> fires before anyone complains.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> multi-pass <code>discrepancies[]</code>, <code>confidence</code> per field, <code>ReflectTool</code> failure flags, document grid by section/page, aggregate by <code>document_id</code></div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         IDEA 3 — DEAD RECKONING MODE
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card dead-reckoning">
+      <p class="v3-kicker">Idea 3 / 5 &nbsp;·&nbsp; Mode</p>
+      <h2>Dead Reckoning Mode <span class="tag crazy">Speculative</span></h2>
+      <p class="v3-pull dead-reckoning">Before you upload a document, Cyrex already knows what it probably says. Upload is a <em>confirmation event</em>, not a discovery event. Artifacts that match predictions are green. Artifacts that surprise the system are red. You're not processing documents — you're <strong>falsifying hypotheses</strong>.</p>
+
+      <h3>The idea</h3>
+      <p>After processing N similar documents, Cyrex builds a <strong>prior distribution</strong> for every field in that document class. New upload triggers a pre-extraction prediction. Post-extraction, each field is tagged: <em>Confirmed</em> (within 1σ), <em>Anomalous</em> (outside 2σ), or <em>Novel</em> (field never seen before). Anomalous fields are the interesting ones — those are where the deal is unusual. Delta view: predicted vs reality, with corpus statistics inline.</p>
+
+      <div class="viz-frame">
+        <div style="width:100%;max-width:420px;">
+          <div style="font-family:'SF Mono',monospace;font-size:0.62rem;color:#4a6fa5;margin-bottom:8px;">DEAD RECKONING — lease_002.pdf &nbsp;·&nbsp; prior built from 147 similar leases</div>
+          <div class="dr-row">
+            <div class="dr-label">monthly_rent</div>
+            <div class="dr-bar-wrap">
+              <div class="dr-bar" style="width:82%;background:linear-gradient(90deg,#1d4ed8,#3b82f6);"></div>
+            </div>
+            <div class="dr-delta" style="color:#34d399;">✓ $43k</div>
+          </div>
+          <div style="font-family:'SF Mono',monospace;font-size:0.54rem;color:#334155;padding-left:98px;margin-bottom:4px;">predicted $38k–$48k · actual $43,250 · confirmed</div>
+          <div class="dr-row">
+            <div class="dr-label">lease_term</div>
+            <div class="dr-bar-wrap">
+              <div class="dr-bar" style="width:91%;background:linear-gradient(90deg,#1d4ed8,#3b82f6);"></div>
+            </div>
+            <div class="dr-delta" style="color:#34d399;">✓ 5yr</div>
+          </div>
+          <div style="font-family:'SF Mono',monospace;font-size:0.54rem;color:#334155;padding-left:98px;margin-bottom:4px;">predicted 3–7yr · actual 5yr · confirmed</div>
+          <div class="dr-row">
+            <div class="dr-label">penalty_clause</div>
+            <div class="dr-bar-wrap">
+              <div class="dr-bar" style="width:28%;background:linear-gradient(90deg,#dc2626,#ef4444);"></div>
+            </div>
+            <div class="dr-delta" style="color:#ef4444;">⚡ 4×</div>
+          </div>
+          <div style="font-family:'SF Mono',monospace;font-size:0.54rem;color:#ef4444;padding-left:98px;margin-bottom:4px;">predicted 1–1.5× · actual 4× rent · ANOMALOUS — review</div>
+          <div class="dr-row">
+            <div class="dr-label">governing_law</div>
+            <div class="dr-bar-wrap">
+              <div class="dr-bar" style="width:76%;background:linear-gradient(90deg,#1d4ed8,#3b82f6);"></div>
+            </div>
+            <div class="dr-delta" style="color:#34d399;">✓ NY</div>
+          </div>
+          <div style="font-family:'SF Mono',monospace;font-size:0.54rem;color:#334155;padding-left:98px;margin-bottom:4px;">predicted NY/DE · actual NY · confirmed</div>
+          <div class="dr-row">
+            <div class="dr-label">arbitration_tier</div>
+            <div class="dr-bar-wrap">
+              <div class="dr-bar" style="width:8%;background:linear-gradient(90deg,#7c3aed,#a78bfa);"></div>
+            </div>
+            <div class="dr-delta" style="color:#a78bfa;">★ NEW</div>
+          </div>
+          <div style="font-family:'SF Mono',monospace;font-size:0.54rem;color:#a78bfa;padding-left:98px;margin-bottom:4px;">field never seen in 147 prior leases · NOVEL clause</div>
+        </div>
+      </div>
+
+      <h3>Why this changes the conversation</h3>
+      <ul>
+        <li><strong>Attention routing.</strong> Junior analysts spend 80% of review time re-reading standard clauses. Dead Reckoning sends them straight to the 2 anomalous fields. 10× faster review.</li>
+        <li><strong>Corpus as institutional memory.</strong> Each new document sharpens the prior. After 500 leases, the system knows what "normal" looks like for your portfolio with <em>statistical precision</em>.</li>
+        <li><strong>Novel field detection is gold.</strong> A clause type never seen before is either a deal risk or a new precedent — both are worth a human's attention immediately.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> <code>ArtifactType.CANONICAL</code> statistical aggregate, <code>CitedField.value_type</code> + corpus distribution, <code>AnticipateStage</code> pre-extraction prediction, <code>LearningArtifact</code> replay as prior reinforcement</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         IDEA 4 — ARTIFACT IMMUNE SYSTEM
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card immune">
+      <p class="v3-kicker">Idea 4 / 5 &nbsp;·&nbsp; Live System</p>
+      <h2>Artifact Immune System <span class="tag crazy">Speculative</span></h2>
+      <p class="v3-pull immune">When a source document changes, don't just invalidate artifacts silently in the background. Make the graph <em>visibly sick</em>, then watch it <strong>heal itself</strong> in real time. Nodes turn red, antibodies propagate, green spreads back. The knowledge base fights the infection.</p>
+
+      <h3>The idea</h3>
+      <p>Version upload triggers an animated <strong>immune cascade</strong> through the dependency DAG. Infected nodes (invalidated artifacts) pulse red. Re-extraction jobs emit "antibody" particles traveling the dependency edges. As each artifact recomputes successfully, it transitions from red → amber → green. A node that can't be healed (e.g., source span deleted, confidence too low) stays <strong>necrotic</strong> — flagged for human intervention. The whole thing plays out in ~10 seconds of live animation.</p>
+
+      <div class="viz-frame">
+        <svg viewBox="0 0 380 160" xmlns="http://www.w3.org/2000/svg" style="width:100%;max-width:380px;">
+          <defs>
+            <marker id="arrow-grn" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#34d399"/>
+            </marker>
+            <marker id="arrow-red" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#ef4444"/>
+            </marker>
+            <marker id="arrow-amb" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#f59e0b"/>
+            </marker>
+          </defs>
+
+          <!-- source doc — changed -->
+          <rect x="10" y="60" width="70" height="40" rx="6" fill="#2d0707" stroke="#ef4444" stroke-width="1.5"/>
+          <text x="45" y="76" text-anchor="middle" font-family="monospace" font-size="8" fill="#ef4444">SOURCE</text>
+          <text x="45" y="88" text-anchor="middle" font-family="monospace" font-size="7" fill="#ef4444">v3 uploaded</text>
+          <text x="45" y="97" text-anchor="middle" font-family="monospace" font-size="8" fill="#fca5a5">⚡ changed</text>
+
+          <!-- edge to extraction -->
+          <line x1="82" y1="80" x2="112" y2="60" stroke="#ef4444" stroke-width="1" marker-end="url(#arrow-red)" stroke-dasharray="4 2"/>
+          <line x1="82" y1="80" x2="112" y2="100" stroke="#ef4444" stroke-width="1" marker-end="url(#arrow-red)" stroke-dasharray="4 2"/>
+
+          <!-- extraction A — infected → healing -->
+          <rect x="114" y="44" width="70" height="34" rx="6" fill="#2d1500" stroke="#f59e0b" stroke-width="1.5"/>
+          <text x="149" y="59" text-anchor="middle" font-family="monospace" font-size="7.5" fill="#f59e0b">EXTRACTION</text>
+          <text x="149" y="70" text-anchor="middle" font-family="monospace" font-size="7" fill="#f59e0b">recomputing…</text>
+
+          <!-- extraction B — healed -->
+          <rect x="114" y="84" width="70" height="34" rx="6" fill="#072d15" stroke="#34d399" stroke-width="1.5"/>
+          <text x="149" y="99" text-anchor="middle" font-family="monospace" font-size="7.5" fill="#34d399">EXTRACTION</text>
+          <text x="149" y="110" text-anchor="middle" font-family="monospace" font-size="7" fill="#34d399">✓ healed</text>
+
+          <!-- edges to reasoning -->
+          <line x1="186" y1="61" x2="216" y2="50" stroke="#f59e0b" stroke-width="1" marker-end="url(#arrow-amb)" stroke-dasharray="4 2"/>
+          <line x1="186" y1="101" x2="216" y2="90" stroke="#34d399" stroke-width="1" marker-end="url(#arrow-grn)"/>
+
+          <!-- reasoning — partial heal -->
+          <rect x="218" y="36" width="70" height="34" rx="6" fill="#1e1e07" stroke="#f59e0b" stroke-width="1.5"/>
+          <text x="253" y="51" text-anchor="middle" font-family="monospace" font-size="7.5" fill="#f59e0b">REASONING</text>
+          <text x="253" y="62" text-anchor="middle" font-family="monospace" font-size="7" fill="#f59e0b">⏳ waiting…</text>
+
+          <rect x="218" y="76" width="70" height="34" rx="6" fill="#072d15" stroke="#34d399" stroke-width="1.5"/>
+          <text x="253" y="91" text-anchor="middle" font-family="monospace" font-size="7.5" fill="#34d399">REASONING</text>
+          <text x="253" y="102" text-anchor="middle" font-family="monospace" font-size="7" fill="#34d399">✓ confirmed</text>
+
+          <!-- answer — necrotic -->
+          <line x1="290" y1="53" x2="316" y2="53" stroke="#ef4444" stroke-width="1" marker-end="url(#arrow-red)" stroke-dasharray="3 3"/>
+          <rect x="318" y="36" width="58" height="34" rx="6" fill="#2d0707" stroke="#ef4444" stroke-width="1.5"/>
+          <text x="347" y="51" text-anchor="middle" font-family="monospace" font-size="7.5" fill="#ef4444">ANSWER</text>
+          <text x="347" y="62" text-anchor="middle" font-family="monospace" font-size="7" fill="#fca5a5">⚠ necrotic</text>
+
+          <!-- human flag label -->
+          <line x1="347" y1="72" x2="347" y2="90" stroke="#ef4444" stroke-width="0.5" stroke-dasharray="2 2"/>
+          <text x="347" y="100" text-anchor="middle" font-family="monospace" font-size="7" fill="#ef4444">→ human review</text>
+
+          <!-- status legend -->
+          <rect x="10" y="120" width="8" height="8" rx="1" fill="#2d0707" stroke="#ef4444"/>
+          <text x="22" y="128" font-family="monospace" font-size="7.5" fill="#ef4444">infected</text>
+          <rect x="75" y="120" width="8" height="8" rx="1" fill="#2d1500" stroke="#f59e0b"/>
+          <text x="87" y="128" font-family="monospace" font-size="7.5" fill="#f59e0b">recomputing</text>
+          <rect x="155" y="120" width="8" height="8" rx="1" fill="#072d15" stroke="#34d399"/>
+          <text x="167" y="128" font-family="monospace" font-size="7.5" fill="#34d399">healed</text>
+          <rect x="210" y="120" width="8" height="8" rx="1" fill="#2d0707" stroke="#ef4444" stroke-dasharray="2 2"/>
+          <text x="222" y="128" font-family="monospace" font-size="7.5" fill="#fca5a5">necrotic → human</text>
+        </svg>
+      </div>
+
+      <h3>Why the metaphor is load-bearing</h3>
+      <ul>
+        <li><strong>Immune system = self-healing system.</strong> Users immediately understand that most changes heal automatically. Necrotic nodes are the rare exceptions requiring a human. This is the right mental model for a production document pipeline.</li>
+        <li><strong>Real-time feedback loop.</strong> Upload → animated cascade → done. No "processing…" spinner. You <em>see</em> the knowledge base respond to the change. This is demo-killer territory.</li>
+        <li><strong>Compliance story.</strong> "Here's exactly which artifacts were invalidated by the amended lease, and here's proof each one was recomputed or escalated." One screenshot = audit trail.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> <code>depended_on_by</code> traversal, <code>source_doc_hash</code> change detection, invalidation queue, pipeline stage <code>SYSTEM</code> artifacts, <code>ReflectTool</code> failure = necrotic, streaming pipeline (Frontier)</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         IDEA 5 — CLAUSE DNA SEQUENCER
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card dna">
+      <p class="v3-kicker">Idea 5 / 5 &nbsp;·&nbsp; Visualization</p>
+      <h2>Clause DNA Sequencer <span class="tag crazy">Speculative</span></h2>
+      <p class="v3-pull dna">Every document has a genetic code. The clauses are base pairs. Cross-document comparison reveals <strong>genetic distance</strong>. Mutations glow. Version history is speciation. Your portfolio of 500 leases becomes an <em>evolutionary tree of legal DNA</em>.</p>
+
+      <h3>The idea</h3>
+      <p>Represent each document as a horizontal DNA strand — left-to-right by clause position, colored by clause type (payment=blue, termination=red, renewal=green, penalty=orange). Cross-document comparison renders two strands aligned like a BLAST sequence alignment — matching regions snap together, insertions bulge out, deletions show gaps. "Mutations" (clauses that deviate &gt;2σ from corpus mean) glow with a pulsing border. Document versions form a phylogenetic tree: the original lease is the root, amendments are branches, rider addenda are lateral gene transfers.</p>
+
+      <div class="viz-frame" style="flex-direction:column;gap:10px;">
+        <div style="width:100%;max-width:440px;">
+          <div style="font-family:'SF Mono',monospace;font-size:0.62rem;color:#4a6fa5;margin-bottom:8px;">SEQUENCE ALIGNMENT &nbsp;·&nbsp; lease_A.pdf vs lease_B.pdf</div>
+          <svg viewBox="0 0 420 130" xmlns="http://www.w3.org/2000/svg" style="width:100%;">
+            <!-- strand A label -->
+            <text x="2" y="28" font-family="monospace" font-size="8" fill="#a78bfa">lease_A</text>
+            <!-- strand A -->
+            <rect x="55"  y="18" width="28" height="18" rx="3" fill="#1d4ed8"/><!-- parties -->
+            <rect x="85"  y="18" width="22" height="18" rx="3" fill="#1d4ed8"/>
+            <rect x="109" y="18" width="32" height="18" rx="3" fill="#15803d"/><!-- payment -->
+            <rect x="143" y="18" width="28" height="18" rx="3" fill="#15803d"/>
+            <rect x="173" y="18" width="18" height="18" rx="3" fill="#b45309"/><!-- penalty — mutation -->
+            <rect x="171" y="16" width="22" height="22" rx="3" fill="none" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.9"/>
+            <rect x="193" y="18" width="30" height="18" rx="3" fill="#b91c1c"/><!-- termination -->
+            <rect x="225" y="18" width="26" height="18" rx="3" fill="#15803d"/><!-- renewal -->
+            <rect x="253" y="18" width="20" height="18" rx="3" fill="#0e7490"/><!-- misc -->
+            <rect x="275" y="18" width="24" height="18" rx="3" fill="#1d4ed8"/>
+            <rect x="301" y="18" width="18" height="18" rx="3" fill="#1d4ed8"/>
+            <rect x="321" y="18" width="30" height="18" rx="3" fill="#7c3aed"/><!-- novel — never in B -->
+            <rect x="319" y="16" width="34" height="22" rx="3" fill="none" stroke="#f472b6" stroke-width="1.5" stroke-dasharray="2 2" opacity="0.9"/>
+
+            <!-- alignment connectors -->
+            <line x1="69"  y1="36" x2="69"  y2="48" stroke="#1d4ed8" stroke-width="0.5" opacity="0.5"/>
+            <line x1="96"  y1="36" x2="96"  y2="48" stroke="#1d4ed8" stroke-width="0.5" opacity="0.5"/>
+            <line x1="125" y1="36" x2="125" y2="48" stroke="#15803d" stroke-width="0.5" opacity="0.5"/>
+            <line x1="157" y1="36" x2="157" y2="48" stroke="#15803d" stroke-width="0.5" opacity="0.5"/>
+            <!-- gap in B (insertion in A) -->
+            <line x1="184" y1="36" x2="159" y2="48" stroke="#f59e0b" stroke-width="0.5" stroke-dasharray="2 2" opacity="0.7"/>
+            <line x1="209" y1="36" x2="188" y2="48" stroke="#b91c1c" stroke-width="0.5" opacity="0.5"/>
+            <line x1="238" y1="36" x2="222" y2="48" stroke="#15803d" stroke-width="0.5" opacity="0.5"/>
+
+            <!-- strand B label -->
+            <text x="2" y="70" font-family="monospace" font-size="8" fill="#a78bfa">lease_B</text>
+            <!-- strand B — slightly different -->
+            <rect x="55"  y="60" width="28" height="18" rx="3" fill="#1d4ed8"/>
+            <rect x="85"  y="60" width="22" height="18" rx="3" fill="#1d4ed8"/>
+            <rect x="109" y="60" width="32" height="18" rx="3" fill="#15803d"/>
+            <rect x="143" y="60" width="28" height="18" rx="3" fill="#15803d"/>
+            <!-- GAP — lease_B missing penalty clause -->
+            <rect x="173" y="63" width="14" height="12" rx="2" fill="none" stroke="#334155" stroke-width="0.5" stroke-dasharray="2 2"/>
+            <text x="180" y="72" text-anchor="middle" font-family="monospace" font-size="7" fill="#334155">gap</text>
+            <rect x="189" y="60" width="30" height="18" rx="3" fill="#b91c1c"/>
+            <rect x="221" y="60" width="26" height="18" rx="3" fill="#15803d"/>
+            <rect x="249" y="60" width="20" height="18" rx="3" fill="#0e7490"/>
+            <rect x="271" y="60" width="24" height="18" rx="3" fill="#1d4ed8"/>
+            <rect x="297" y="60" width="18" height="18" rx="3" fill="#1d4ed8"/>
+            <!-- novel missing in B -->
+            <rect x="317" y="63" width="34" height="12" rx="2" fill="none" stroke="#f472b6" stroke-width="0.5" stroke-dasharray="2 2"/>
+            <text x="334" y="72" text-anchor="middle" font-family="monospace" font-size="7" fill="#f472b6">absent</text>
+
+            <!-- legend row -->
+            <rect x="55"  y="96" width="12" height="10" rx="2" fill="#1d4ed8"/>
+            <text x="70" y="104" font-family="monospace" font-size="7" fill="#93c5fd">parties/misc</text>
+            <rect x="130" y="96" width="12" height="10" rx="2" fill="#15803d"/>
+            <text x="145" y="104" font-family="monospace" font-size="7" fill="#86efac">payment/renewal</text>
+            <rect x="220" y="96" width="12" height="10" rx="2" fill="#b91c1c"/>
+            <text x="235" y="104" font-family="monospace" font-size="7" fill="#fca5a5">termination</text>
+            <rect x="290" y="96" width="12" height="10" rx="2" fill="#b45309"/>
+            <text x="305" y="104" font-family="monospace" font-size="7" fill="#fcd34d">⚡ mutation</text>
+            <rect x="350" y="96" width="12" height="10" rx="2" fill="#7c3aed"/>
+            <text x="365" y="104" font-family="monospace" font-size="7" fill="#f472b6">★ novel</text>
+          </svg>
+        </div>
+      </div>
+
+      <h3>The evolutionary tree extension</h3>
+      <ul>
+        <li><strong>Phylogenetic corpus view:</strong> cluster 500 leases by clause DNA distance — you instantly see which leases are legally "close relatives" vs outliers. Outliers are your highest-risk documents.</li>
+        <li><strong>Mutation hotspots across versions:</strong> which clauses get amended most often across your portfolio? Those are the clauses to negotiate hardest on the <em>next</em> deal.</li>
+        <li><strong>Lateral gene transfer = addenda:</strong> when a rider adds clauses from a completely different document class (insurance rider onto a lease), it visually sticks out as a cross-species insertion. Instant anomaly detection.</li>
+        <li><strong>Demo weapon:</strong> load 10 leases → render 10 DNA strands → show genetic clustering. Nobody has ever seen their legal portfolio like this. Closes rooms.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> <code>ArtifactType.REASONING</code> keyed by clause/section, <code>ArtifactType.CANONICAL</code> entity normalization, <code>Transformation</code> artifact for version diffs, <code>cross_references</code> for clause genealogy, corpus aggregate statistics from <code>ArtifactStore</code></div>
+    </div>
+
+    <div style="background:#030a14;border:1px solid #0f2040;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem;font-size:0.78rem;color:#4a6fa5;line-height:1.6;">
+      <strong style="color:#64748b;">v3 North star:</strong>
+      Temporal Belief Cinema = <em>time.</em>
+      Epistemic Pressure Map = <em>space.</em>
+      Dead Reckoning = <em>prediction.</em>
+      Immune System = <em>self-repair.</em>
+      Clause DNA = <em>evolution.</em>
+      Together they don't describe what the system does — they describe what it <em>is</em>: a living, self-healing knowledge organism that remembers, predicts, compares, and heals. Not a product. An intelligence layer.
+    </div>
+
+    <p class="v4-banner">CRAZIER v4 — five more · world-scale · most of this does not exist yet</p>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         v4 IDEA 6 — REGULATORY PARALLEL UNIVERSES
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card fork">
+      <p class="v3-kicker">Idea 6 / 10 &nbsp;·&nbsp; Simulation</p>
+      <h2>Regulatory Parallel Universes <span class="tag crazy">Moonshot</span></h2>
+      <p class="v3-pull fork">When a bill, regulation, or court rule <em>drops</em>, you don't “read the memo.” You <strong>fork civilization</strong>: clone the entire artifact graph into branch timelines and watch which obligations go green, red, or necrotic under each legal world-line.</p>
+      <h3>Change the game</h3>
+      <p>Policy becomes a <strong>multi-world sandbox</strong>. Branch A = current law. Branch B = proposed rulemaking. Branch C = aggressive judicial interpretation. Diff isn't text — it's <em>which witness edges survive</em>. Compliance, M&amp;A, and insurers stop guessing; they run parallel futures on the same corpus. The product isn't doc AI — it's a <strong>legislative / judicial physics engine</strong> grounded in citations.</p>
+      <ul>
+        <li><strong>Why it's not “another upload”:</strong> The hero object is the <em>forked dependency universe</em>, not the chat transcript.</li>
+        <li><strong>Wild endpoint:</strong> regulators and firms exchange <em>compatible simulation schemas</em> (not raw docs) so the same counterfactual law can be replayed on both sides.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> immutable version trees, <code>Transformation</code> + <code>Provenance</code> on each branch, <code>depended_on_by</code> invalidation under rule-swap operators, <code>ArtifactType.REASONING</code> scoped to “jurisdiction profile,” export of subgraph hashes for external replay</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         v4 IDEA 7 — AUTONOMOUS TREATY PROTOCOLS
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card treaty">
+      <p class="v3-kicker">Idea 7 / 10 &nbsp;·&nbsp; Multi-party</p>
+      <h2>Autonomous Treaty Protocols <span class="tag crazy">Moonshot</span></h2>
+      <p class="v3-pull treaty">Two orgs don't email PDFs back and forth forever. Their agents exchange <strong>signed artifact deltas</strong> over MCP until witness compatibility <em>converges</em> — diplomacy for paperwork, with every offer backed by locators or explicit “no witness yet” holes.</p>
+      <h3>Change the game</h3>
+      <p>Negotiation becomes a <strong>protocol</strong>: propose node, challenge citation, fork clause interpretation, merge canonical entities. Redlines are not Word comments — they're <em>graph operations</em> with audit trails. When convergence hits, you don't have “agreement in chat”; you have a <strong>mutually consistent witness DAG</strong> both parties' systems can execute against.</p>
+      <ul>
+        <li><strong>Unique angle:</strong> Chat UIs hide structure; this <em>surfaces</em> incompatibility as graph conflicts you can see.</li>
+        <li><strong>Wild endpoint:</strong> industry-standard “treaty packets” — portable subgraph interchange format (still citation-grounded).</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> org-scoped <code>ArtifactStore</code>, Task 7 MCP tools for safe exchange, <code>LearningArtifact</code> + merge policies, cryptographic signatures on bundle exports, <code>cross_references</code> for aligned entity IDs across tenants</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         v4 IDEA 8 — TRUTH ESCROW & CLOSING ORACLES
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card escrow">
+      <p class="v3-kicker">Idea 8 / 10 &nbsp;·&nbsp; Finance × provenance</p>
+      <h2>Truth Escrow &amp; Closing Oracles <span class="tag crazy">Moonshot</span></h2>
+      <p class="v3-pull escrow">Capital and liability don't move on vibes. A neutral third party (or smart contract, or bank API) holds <strong>Merkle-committed artifact bundles</strong>. Money, insurance, or deal closure <em>releases</em> only when oracle events match the witness graph: filing recorded, covenant test passed, date crossed, counterparty artifact set stable for N days.</p>
+      <h3>Change the game</h3>
+      <p>You turn “document understanding” into <strong>programmable trust infrastructure</strong>. The DAG isn't a report — it's the <em>state machine</em> for real-world money movement. Disputes downgrade to “show the subgraph that was committed at T” instead of infinite narrative conflict.</p>
+      <ul>
+        <li><strong>Why it hits different:</strong> Links doc AI to <em>settlement</em>, not summarization.</li>
+        <li><strong>Wild endpoint:</strong> parametric insurance and trade finance priced off <code>confidence</code> + witness depth, not PDF box-checking.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> Artifact notary / hash chain (CRAZIER!!), <code>ArtifactType.SYSTEM</code> for oracle receipts, <code>Citation</code> + <code>source_doc_hash</code> for tamper evidence, webhook / <code>Workflow</code> triggers, API for third-party verification</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         v4 IDEA 9 — ORGANIZATIONAL EXOCORTEX
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card exocortex">
+      <p class="v3-kicker">Idea 9 / 10 &nbsp;·&nbsp; Institutional memory</p>
+      <h2>Organizational Exocortex <span class="tag crazy">Moonshot</span></h2>
+      <p class="v3-pull exocortex">Companies die of amnesia. Cyrex becomes the <strong>institutional hippocampus</strong>: every material decision is a persisted artifact lineage — not Slack scrollback, not “someone's inbox.” New people onboard into a <em>navigable memory palace</em> of why numbers, clauses, and risks are what they are.</p>
+      <h3>Change the game</h3>
+      <p>HR becomes “graph onboarding.” Legal becomes “inherited witness.” The competitive moat isn't model size — it's <strong>compounding structured memory</strong> with legal-grade provenance. Ten years in, leaving the platform means losing a chunk of the org's mind — same stickiness as a code repo, but for obligations and truth.</p>
+      <ul>
+        <li><strong>Unique:</strong> Memory is <em>disputable</em> — every claim still has a locator trail; mythology dies.</li>
+        <li><strong>Wild endpoint:</strong> long-horizon archival (cold + hashed) with periodic re-verification jobs against source systems.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> persistent <code>ArtifactBundle</code> history, <code>LearningArtifact</code> as cultural DNA, role-based graph lenses (CRAZIER!! MMO), search + MCP for “explain this decision,” streaming updates (Frontier)</div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────────────
+         v4 IDEA 10 — DREAM BRANCH MINING
+         ───────────────────────────────────────────────────────────── -->
+    <div class="crazier-card v3-card dreammine">
+      <p class="v3-kicker">Idea 10 / 10 &nbsp;·&nbsp; Counterfactuals</p>
+      <h2>Dream Branch Mining <span class="tag crazy">Moonshot</span></h2>
+      <p class="v3-pull dreammine">Nightly, agents walk the <strong>low-confidence frontier</strong> of the graph and materialize <em>exploratory artifacts</em> — counterfactual extractions, alternate witness paths, “what if this clause read differently?” — all explicitly labeled <strong>non-canonical / dream state</strong>. Humans wake up to a <em>triaged possibility field</em>, not a blank search box.</p>
+      <h3>Change the game</h3>
+      <p>Instead of reactive Q&amp;A, the system <strong>produces optional worlds</strong> you can merge or kill. Creativity and risk discovery become first-class pipeline outputs — but bounded by schema so dreams can't masquerade as truth. This is how you scale <em>imagination</em> without scaling <em>hallucination</em>.</p>
+      <ul>
+        <li><strong>Psychological hack:</strong> Users feel the machine is “thinking overnight” — because it is — but the UI never blurs dream vs reality.</li>
+        <li><strong>Wild endpoint:</strong> auction or rank dream branches by expected $ exposure using graph distance to obligations.</li>
+      </ul>
+      <div class="maps-to"><strong>Maps to:</strong> branch namespaces on artifacts, <code>confidence</code> thresholds, <code>ReflectTool</code> gates, separate <code>ArtifactType</code> or flagged metadata for dream/non-canonical, <code>Anticipate</code> stage, sandboxed MCP for speculative tool calls</div>
+    </div>
+
+    <div style="background:#12051a;border:1px solid #5b21b6;border-radius:10px;padding:1rem 1.25rem;margin-bottom:1rem;font-size:0.78rem;color:#c4b5fd;line-height:1.65;">
+      <strong style="color:#e9d5ff;">v4 North star:</strong>
+      Fork the law = <em>parallel futures.</em>
+      Treaty protocols = <em>multi-agent peace.</em>
+      Truth escrow = <em>money follows witness.</em>
+      Exocortex = <em>institutions that remember.</em>
+      Dream mining = <em>machines explore, humans canonize.</em>
+      If v3 asks what Cyrex <em>is</em>, v4 asks what the <em>world</em> looks like when paperwork, law, and capital run on the same provenance substrate — not on dead files.
+    </div>
+
+    </div><!-- /tab-experience -->
+
+    <!-- TAB: PIPELINE TASKS -->
+    <div class="tab-panel" id="tab-tasks">
+
+    <!-- TASK 1: SCHEMAS -->
+    <div class="card">
+      <h2>Task 1: Artifact Schemas <span class="tag core">Core</span></h2>
+      <p>Define all 9 artifact types as Pydantic models with full provenance tracking.</p>
+      
+      <h4>File: <span class="path">app/pipeline/schemas/artifact.py</span></h4>
+      <pre>"""Artifact schemas — generalized, domain-agnostic, with verifiable citations."""
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Literal
+from datetime import datetime
+from enum import Enum
+import uuid
+
+# ── Artifact types ──────────────────────────────────────────────────────────
+class ArtifactType(str, Enum):
+    CANONICAL    = "canonical"     # normalized entity representation
+    EXTRACTION   = "extraction"    # raw field extraction result
+    REASONING    = "reasoning"     # structured reasoning / clause analysis
+    RETRIEVAL    = "retrieval"     # retrieval result set (for Q&A)
+    ANSWER       = "answer"        # cited answer returned to a user
+    TRANSFORMATION = "transformation"  # diff between two versions
+    WORKFLOW     = "workflow"      # triggered action set
+    LEARNING     = "learning"      # user correction / feedback
+    SYSTEM       = "system"        # pipeline run metadata
+
+class ExtractionMethod(str, Enum):
+    REGEX        = "regex"
+    LLM          = "llm"
+    CROSS_REF    = "cross_reference"
+    PATTERN      = "pattern"
+    VISION       = "vision"        # from CV/OCR pass
+
+# ── Citations — FIRST-CLASS SCHEMA OBJECTS ───────────────────────────────────
+class CitationLocator(BaseModel):
+    """Stable pointer into the source document."""
+    locator_type: Literal["char_range", "page_range", "element_id"]
+    # char_range
+    char_start:   Optional[int] = None
+    char_end:     Optional[int] = None
+    # page_range
+    page_start:   Optional[int] = None
+    page_end:     Optional[int] = None
+    # element reference (table cell, form field, heading)
+    element_id:   Optional[str] = None
+
+class Citation(BaseModel):
+    """Verifiable link from a claim back to its source location."""
+    citation_id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
+    document_id:     str                  # which doc this came from
+    source_doc_hash: str                  # hash at time of extraction
+    locator:         CitationLocator      # WHERE in the doc
+    quote:           str                  # verbatim excerpt (≤ 500 chars)
+    confidence:      float = Field(ge=0.0, le=1.0)
+    extraction_pass: int = 1              # which pass produced this citation
+
+class CitedField(BaseModel):
+    """A single extracted field with its citation chain."""
+    field_name:  str
+    value:       Any
+    value_type:  Literal["string","date","currency","number","boolean","list","object"]
+    citations:   List[Citation] = Field(default_factory=list)
+    confidence:  float = Field(ge=0.0, le=1.0)
+    # bidirectional: other artifact IDs that reference or are referenced by this field
+    referenced_by: List[str] = Field(default_factory=list)  # artifact_ids
+    references:    List[str] = Field(default_factory=list)   # artifact_ids
+
+# ── Provenance ───────────────────────────────────────────────────────────────
+class ProvenancePass(BaseModel):
+    pass_number:        int
+    method:             ExtractionMethod
+    fields_extracted:   List[str]
+    prompt_version:     Optional[str] = None
+    extraction_time_ms: int
+    fields_found:       int = 0
+
+class Provenance(BaseModel):
+    """Full extraction lineage — every artifact carries this."""
+    source_doc_hash:   str
+    document_id:       str
+    version:           int
+    extraction_method: ExtractionMethod
+    prompt_version:    str = "v1.0"
+    model_id:          Optional[str] = None     # which LLM produced this
+    passes:            List[ProvenancePass] = []
+    # bidirectional reference graph
+    depends_on:        List[str] = Field(default_factory=list)  # artifact_ids this was built from
+    depended_on_by:    List[str] = Field(default_factory=list)  # artifact_ids that use this
+    cross_references:  List[str] = Field(default_factory=list)  # cross-doc entity links
+    recomputable:      bool = True
+    synthesized_from:  List[str] = Field(default_factory=list)
+
+# ── Artifact bundle ───────────────────────────────────────────────────────────
+class ArtifactMetadata(BaseModel):
+    processing_time_ms: int
+    service_version:    str = "1.0.0"
+    parent_artifact_id: Optional[str] = None
+    processor_id:       Optional[str] = None   # which DocumentProcessor ran
+
+class ArtifactBundle(BaseModel):
+    """Main container. Works for any document type."""
+    artifact_id:     str = Field(default_factory=lambda: str(uuid.uuid4()))
+    document_id:     str
+    version:         int
+    created_at:      datetime = Field(default_factory=datetime.utcnow)
+    artifact_type:   ArtifactType
+    source_doc_hash: str
+    confidence:      float = Field(ge=0.0, le=1.0)
+    provenance:      Provenance
+    # top-level citation index — all citations across all fields in this artifact
+    citations:       List[Citation] = Field(default_factory=list)
+    payload:         Dict[str, Any]
+    metadata:        ArtifactMetadata</pre>
+
+      <div class="connection-box">
+        <h4>Connections to diri-cyrex</h4>
+        <ul>
+          <li>Reuses: <code>app/services/document_parser_service.py</code> for raw parsing (unchanged)</li>
+          <li>Existing domain processors (<code>lease_processor.py</code>, <code>contract_processor.py</code>) are adapted as <code>AbstractDocumentProcessor</code> implementations — not special-cased in the pipeline</li>
+          <li>Reuses: <code>app/services/clause_evolution_tracker.py</code> for versioned clause reasoning (wrapped in <code>TransformationArtifact</code>)</li>
+          <li>New: <code>app/pipeline/processors/registry.py</code> — processor lookup by document category</li>
+        </ul>
+      </div>
+
+      <h4>Testing: <span class="tag test">Test</span></h4>
+      <div class="test-steps">
+        <ol>
+          <li>Create <span class="path">tests/unit/test_artifact_schemas.py</span></li>
+          <li>Test serialization: artifact → JSON → artifact roundtrip</li>
+          <li>Test all 9 artifact types serialize correctly</li>
+          <li>Test provenance pass chaining</li>
+          <li>Test cross-reference linking</li>
+          <li>Run: <code>pytest tests/unit/test_artifact_schemas.py -v</code></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- TASK 2: MULTI-PASS EXTRACTION -->
+    <div class="card">
+      <h2>Task 2: Multi-Pass Synthesis Extraction <span class="tag new">New</span></h2>
+      <p>Run 3+ extraction passes with different strategies, synthesize results, flag discrepancies.</p>
+      
+      <h4>File: <span class="path">app/pipeline/stages/extract.py</span></h4>
+      <pre>"""Multi-pass synthesis extraction — domain-agnostic, citation-tracked."""
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass, field
+from datetime import datetime
+import re, hashlib
+
+from app.logging_config import get_logger
+from app.pipeline.schemas.artifact import (
+    Provenance, ProvenancePass, ExtractionMethod,
+    Citation, CitationLocator, CitedField,
+)
+from app.pipeline.processors.registry import get_processor  # pluggable registry
+
+logger = get_logger("cyrex.pipeline.extract")
+
+@dataclass
+class PassResult:
+    pass_number:        int
+    method:             str
+    cited_fields:       List[CitedField]        # fields WITH their citations
+    confidence:         float
+    extraction_time_ms: int
+    discrepancies:      List[Dict] = field(default_factory=list)
+
+@dataclass
+class SynthesisResult:
+    final_fields:  List[CitedField]             # merged, deduplicated
+    all_citations: List[Citation]               # flat index of all citations
+    confidence:    float
+    passes:        List[PassResult]
+    provenance:    Provenance
+    discrepancies: List[Dict]
+
+class ExtractStage:
+    """
+    Pluggable multi-pass extractor.
+    New document domains: register a DocumentProcessor — don't touch this class.
+    """
+
+    async def run(
+        self,
+        parsed_doc,
+        document_category: str,
+        source_doc_hash:   str,
+        document_id:       str,
+        memory_context:    Optional[Dict] = None,
+    ) -> SynthesisResult:
+        passes = []
+
+        # PASS 1 — fast structural extraction (regex + key-value pairs from parser)
+        p1 = await self._pass_structural(
+            parsed_doc.raw_text, parsed_doc.key_value_pairs,
+            source_doc_hash, document_id,
+        )
+        passes.append(p1)
+
+        # PASS 2 — LLM extraction via pluggable domain processor
+        processor = get_processor(document_category)   # returns AbstractDocumentProcessor
+        p2 = await self._pass_llm(
+            parsed_doc.raw_text, processor,
+            source_doc_hash, document_id,
+        )
+        passes.append(p2)
+
+        # PASS 3 — cross-reference: validate citations exist in source text,
+        #           canonicalize entities against memory context
+        p3 = await self._pass_cross_ref(
+            p2.cited_fields, parsed_doc.raw_text,
+            source_doc_hash, document_id, memory_context,
+        )
+        passes.append(p3)
+
+        # SYNTHESIZE — merge passes; prefer LLM result on conflict
+        final, discrepancies = self._synthesize(passes)
+        all_citations = [c for f in final for c in f.citations]
+
+        provenance = Provenance(
+            source_doc_hash   = source_doc_hash,
+            document_id       = document_id,
+            version           = 1,
+            extraction_method = ExtractionMethod.LLM,
+            passes = [
+                ProvenancePass(
+                    pass_number        = p.pass_number,
+                    method             = ExtractionMethod(p.method),
+                    fields_extracted   = [f.field_name for f in p.cited_fields],
+                    extraction_time_ms = p.extraction_time_ms,
+                    fields_found       = len(p.cited_fields),
+                )
+                for p in passes
+            ],
+            synthesized_from=[f"pass_{i}" for i in range(1, 4)],
+        )
+
+        return SynthesisResult(
+            final_fields  = final,
+            all_citations = all_citations,
+            confidence    = sum(p.confidence for p in passes) / len(passes),
+            passes        = passes,
+            provenance    = provenance,
+            discrepancies = discrepancies,
+        )
+
+    async def _pass_structural(
+        self, text: str, kvp: Dict,
+        doc_hash: str, doc_id: str,
+    ) -> PassResult:
+        """Pass 1: regex + parser key-value pairs, each with a citation."""
+        start = datetime.utcnow()
+        cited_fields: List[CitedField] = []
+
+        # Generic pattern extraction
+        PATTERNS: List[tuple] = [
+            ("dates",    r'\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b',          "date"),
+            ("amounts",  r'\$[\d,]+\.?\d*',                                 "currency"),
+            ("emails",   r'[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+', "string"),
+            ("urls",     r'https?://[^\s]+',                                 "string"),
+        ]
+        for field_name, pattern, vtype in PATTERNS:
+            matches = re.findall(pattern, text)
+            if matches:
+                citations = [
+                    Citation(
+                        document_id     = doc_id,
+                        source_doc_hash = doc_hash,
+                        locator         = CitationLocator(
+                            locator_type = "char_range",
+                            char_start   = text.find(m),
+                            char_end     = text.find(m) + len(m),
+                        ),
+                        quote           = m[:500],
+                        confidence      = 0.85,
+                        extraction_pass = 1,
+                    )
+                    for m in matches[:10]
+                ]
+                cited_fields.append(CitedField(
+                    field_name = field_name,
+                    value      = matches,
+                    value_type = vtype,
+                    citations  = citations,
+                    confidence = 0.85,
+                ))
+
+        # Merge parser key-value pairs
+        for k, v in kvp.items():
+            idx = text.find(str(v)) if isinstance(v, str) else -1
+            cited_fields.append(CitedField(
+                field_name = k,
+                value      = v,
+                value_type = "string",
+                citations  = [Citation(
+                    document_id     = doc_id,
+                    source_doc_hash = doc_hash,
+                    locator         = CitationLocator(
+                        locator_type = "char_range",
+                        char_start   = idx if idx >= 0 else None,
+                        char_end     = (idx + len(str(v))) if idx >= 0 else None,
+                    ),
+                    quote      = str(v)[:500],
+                    confidence = 0.80,
+                    extraction_pass = 1,
+                )] if idx >= 0 else [],
+                confidence = 0.80,
+            ))
+
+        return PassResult(
+            pass_number        = 1,
+            method             = "regex",
+            cited_fields       = cited_fields,
+            confidence         = 0.85 if cited_fields else 0.0,
+            extraction_time_ms = self._delta_ms(start),
+        )
+
+    async def _pass_llm(
+        self, text: str, processor,
+        doc_hash: str, doc_id: str,
+    ) -> PassResult:
+        """Pass 2: domain processor extracts fields; we attach citations."""
+        start = datetime.utcnow()
+
+        # processor.extract() returns List[dict] with keys:
+        # field_name, value, value_type, confidence, quote, char_start, char_end
+        raw_fields = await processor.extract(text)
+
+        cited_fields = [
+            CitedField(
+                field_name = f["field_name"],
+                value      = f["value"],
+                value_type = f.get("value_type", "string"),
+                confidence = f.get("confidence", 0.7),
+                citations  = [Citation(
+                    document_id     = doc_id,
+                    source_doc_hash = doc_hash,
+                    locator         = CitationLocator(
+                        locator_type = "char_range",
+                        char_start   = f.get("char_start"),
+                        char_end     = f.get("char_end"),
+                    ),
+                    quote           = f.get("quote", "")[:500],
+                    confidence      = f.get("confidence", 0.7),
+                    extraction_pass = 2,
+                )] if f.get("quote") else [],
+            )
+            for f in raw_fields
+        ]
+
+        avg_conf = sum(f.confidence for f in cited_fields) / max(len(cited_fields), 1)
+        return PassResult(
+            pass_number        = 2,
+            method             = "llm",
+            cited_fields       = cited_fields,
+            confidence         = avg_conf,
+            extraction_time_ms = self._delta_ms(start),
+        )
+
+    async def _pass_cross_ref(
+        self,
+        fields: List[CitedField],
+        raw_text: str,
+        doc_hash: str,
+        doc_id: str,
+        context: Optional[Dict],
+    ) -> PassResult:
+        """Pass 3: verify citations exist in source text; canonicalize entities."""
+        start = datetime.utcnow()
+        discrepancies = []
+        verified_fields: List[CitedField] = []
+
+        for cf in fields:
+            # Verify each citation's quote actually appears in the source
+            verified_citations = []
+            for citation in cf.citations:
+                if citation.quote and citation.quote in raw_text:
+                    verified_citations.append(citation)
+                else:
+                    discrepancies.append({
+                        "field": cf.field_name,
+                        "issue": "citation_quote_not_found",
+                        "quote": citation.quote[:100],
+                    })
+
+            # Entity canonicalization against memory context
+            canonical_id = None
+            if context and cf.field_name in context.get("canonical_entities", {}):
+                canonical_id = context["canonical_entities"][cf.field_name]
+
+            verified_fields.append(CitedField(
+                field_name   = cf.field_name,
+                value        = cf.value,
+                value_type   = cf.value_type,
+                citations    = verified_citations,
+                confidence   = cf.confidence * (1.0 if verified_citations else 0.6),
+                references   = [canonical_id] if canonical_id else [],
+            ))
+
+        conf = 0.9 if not discrepancies else 0.7
+        return PassResult(
+            pass_number        = 3,
+            method             = "cross_reference",
+            cited_fields       = verified_fields,
+            confidence         = conf,
+            extraction_time_ms = self._delta_ms(start),
+            discrepancies      = discrepancies,
+        )
+
+    def _synthesize(
+        self, passes: List[PassResult]
+    ) -> tuple[List[CitedField], List[Dict]]:
+        """Merge pass results. LLM pass wins on conflict. Merge citation lists."""
+        seen: Dict[str, CitedField] = {}
+        discrepancies: List[Dict] = []
+
+        for p in passes:
+            for cf in p.cited_fields:
+                if cf.field_name not in seen:
+                    seen[cf.field_name] = cf
+                else:
+                    existing = seen[cf.field_name]
+                    if existing.value != cf.value:
+                        discrepancies.append({
+                            "field":  cf.field_name,
+                            "pass_a": {"pass": passes.index(p), "value": str(existing.value)},
+                            "pass_b": {"pass": p.pass_number,   "value": str(cf.value)},
+                        })
+                        if p.pass_number == 2:  # prefer LLM result
+                            seen[cf.field_name] = cf
+                    # merge citations from both passes
+                    existing.citations += [
+                        c for c in cf.citations
+                        if c.citation_id not in {x.citation_id for x in existing.citations}
+                    ]
+
+        return list(seen.values()), discrepancies
+
+    def _delta_ms(self, start: datetime) -> int:
+        return int((datetime.utcnow() - start).total_seconds() * 1000)</pre>
+
+      <div class="connection-box">
+        <h4>Pluggable Processor Interface</h4>
+        <ul>
+          <li>New domain → implement <code>AbstractDocumentProcessor.extract(text) → List[dict]</code> and register in <code>app/pipeline/processors/registry.py</code></li>
+          <li>Each returned dict must include: <code>field_name</code>, <code>value</code>, <code>value_type</code>, <code>confidence</code>, <code>quote</code>, <code>char_start</code>, <code>char_end</code></li>
+          <li><code>get_processor(category)</code> returns the right processor by document category string — no pipeline changes needed to add domains</li>
+          <li>Existing processors (lease, contract) are adapters over this interface, not special-cased in the pipeline</li>
+        </ul>
+      </div>
+
+      <h4>Testing: <span class="tag test">Test</span></h4>
+      <div class="test-steps">
+        <ol>
+          <li>Create <span class="path">tests/unit/test_extract_stage.py</span></li>
+          <li>Test with real lease PDF from <span class="path">tests/fixtures/</span></li>
+          <li>Assert all 3 passes execute</li>
+          <li>Check discrepancies detected between passes</li>
+          <li>Verify confidence synthesis calculation</li>
+          <li>Run: <code>pytest tests/unit/test_extract_stage.py -v</code></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- TASK 3: ORCHESTRATOR -->
+    <div class="card">
+      <h2>Task 3: Pipeline Orchestrator <span class="tag core">Core</span></h2>
+      <p>Coordinates all stages, handles errors, manages working memory.</p>
+      
+      <h4>File: <span class="path">app/pipeline/orchestrator.py</span></h4>
+      <pre>"""Pipeline orchestrator - coordinates all stages."""
+from typing import Optional, Dict, Any, List
+from dataclasses import dataclass
+from datetime import datetime
+import hashlib
+
+from app.logging_config import get_logger
+from app.pipeline.stages.parse import ParseStage
+from app.pipeline.stages.extract import ExtractStage
+from app.pipeline.stages.reason import ReasonStage
+from app.pipeline.stages.transform import TransformStage
+from app.pipeline.stages.anticipate import AnticipateStage
+from app.pipeline.stages.workflow import WorkflowStage
+from app.pipeline.registry.sqlite_store import ArtifactStore
+from app.pipeline.tools.think import ThinkTool
+from app.pipeline.tools.reflect import ReflectTool
+from app.pipeline.tools.memory import WorkingMemory
+from app.pipeline.schemas.artifact import ArtifactBundle, ArtifactType
+
+logger = get_logger("cyrex.pipeline.orchestrator")
+
+@dataclass
+class PipelineResult:
+    document_id: str
+    version: int
+    bundles: List[ArtifactBundle]
+    errors: List[str] = None
+
+class ArtifactPipeline:
+    def __init__(self):
+        self.stages = {
+            "parse": ParseStage(),
+            "extract": ExtractStage(),
+            "reason": ReasonStage(),
+            "transform": TransformStage(),
+            "anticipate": AnticipateStage(),
+            "workflow": WorkflowStage(),
+        }
+        self.store = ArtifactStore()
+        self.think = ThinkTool()
+        self.reflect = ReflectTool()
+    
+    async def process_document(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        org_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> PipelineResult:
+        """Main entry point - runs full pipeline."""
+        memory = WorkingMemory()
+        errors = []
+        
+        try:
+            # Compute doc hash
+            doc_hash = hashlib.sha256(file_bytes).hexdigest()
+            
+            # 1. PARSE
+            logger.info("Stage: parse", filename=filename)
+            parsed = await self.stages["parse"].run(file_bytes, filename)
+            memory.store("parsed", parsed)
+            memory.store("doc_hash", doc_hash)
+            
+            # 2. THINK - Plan extraction
+            plan = await self.think.plan_extraction(
+                category=parsed.document_category,
+                document_text=parsed.raw_text,
+                goal="extract_all_fields",
+            )
+            memory.store("extraction_plan", plan)
+            
+            # 3. EXTRACT - Multi-pass synthesis
+            logger.info("Stage: extract")
+            extraction = await self.stages["extract"].run(
+                parsed,
+                parsed.document_category,
+                doc_hash,
+                memory.to_context(),
+            )
+            memory.store("extraction", extraction)
+            
+            # 4. REFLECT - Self-verify (citation check + contradiction detection)
+            reflection = await self.reflect.reflect(
+                extraction.final_fields,   # List[CitedField]
+                parsed.raw_text,
+            )
+            memory.store("reflection", reflection)
+            
+            # If reflection has issues, refine
+            if not reflection.valid:
+                logger.info("Refining extraction after reflection")
+                extraction = await self._refine_extraction(extraction, reflection, parsed)
+            
+            # 5. REASON - Build reasoning artifact
+            reasoning = await self.stages["reason"].run(extraction.final_fields, parsed.raw_text)
+            
+            # 6. TRANSFORM - If version > 1
+            version = await self.store.resolve_version(document_id, doc_hash)
+            if version > 1:
+                transform = await self.stages["transform"].run(document_id, version)
+            else:
+                transform = None
+            
+            # 7. ANTICIPATE - Proactive insights
+            anticipation = await self.stages["anticipate"].run(extraction.final_fields, reasoning)
+            
+            # 8. WORKFLOW - Generate actions
+            workflow = await self.stages["workflow"].run(extraction.final_fields, anticipation)
+            
+            # BUILD BUNDLES
+            bundles = self._build_bundles(
+                document_id=document_id or parsed.metadata.get("document_id", ""),
+                version=version,
+                parsed=parsed,
+                extraction=extraction,
+                reasoning=reasoning,
+                transform=transform,
+                anticipation=anticipation,
+                workflow=workflow,
+            )
+            
+            # STORE
+            for bundle in bundles:
+                await self.store.create(bundle)
+            
+            return PipelineResult(
+                document_id=document_id or parsed.metadata.get("document_id", ""),
+                version=version,
+                bundles=bundles,
+            )
+            
+        except Exception as e:
+            logger.error(f"Pipeline error: {e}", exc_info=True)
+            errors.append(str(e))
+            return PipelineResult(
+                document_id=document_id or "",
+                version=1,
+                bundles=[],
+                errors=errors,
+            )</pre>
+
+      <h4>Testing: <span class="tag test">Test</span></h4>
+      <div class="test-steps">
+        <ol>
+          <li>Create <span class="path">tests/integration/test_pipeline.py</span></li>
+          <li>Test with real lease PDF from <span class="path">tests/fixtures/</span></li>
+          <li>Assert all stages execute in order</li>
+          <li>Test error handling - partial failures write SystemArtifact</li>
+          <li>Test memory context passed between stages</li>
+          <li>Run: <code>pytest tests/integration/test_pipeline.py -v</code></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- TASK 4: REGISTRY -->
+    <div class="card">
+      <h2>Task 4: Artifact Registry <span class="tag core">Core</span></h2>
+      <p>SQLite-backed store with atomic version tracking.</p>
+      
+      <h4>File: <span class="path">app/pipeline/registry/sqlite_store.py</span></h4>
+      <pre>"""SQLite artifact store with versioning."""
+import sqlite3
+from typing import Optional, List
+from threading import Lock
+from datetime import datetime
+
+from app.pipeline.schemas.artifact import ArtifactBundle, ArtifactType
+
+class ArtifactStore:
+    def __init__(self, db_path: str = "artifacts.db"):
+        self.db_path = db_path
+        self._lock = Lock()
+        self._init_db()
+    
+    def _init_db(self):
+        with self._get_conn() as conn:
+            # Core artifact table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS artifacts (
+                    artifact_id      TEXT PRIMARY KEY,
+                    document_id      TEXT NOT NULL,
+                    version          INTEGER NOT NULL,
+                    artifact_type    TEXT NOT NULL,
+                    created_at       TEXT NOT NULL,
+                    source_doc_hash  TEXT NOT NULL,
+                    confidence       REAL NOT NULL,
+                    payload_json     TEXT NOT NULL,
+                    provenance_json  TEXT NOT NULL,
+                    metadata_json    TEXT NOT NULL,
+                    is_deleted       INTEGER DEFAULT 0
+                )
+            """)
+            # BIDIRECTIONAL REFERENCE GRAPH
+            # artifact_refs: typed edges between artifacts
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS artifact_refs (
+                    ref_id        TEXT PRIMARY KEY,
+                    from_artifact TEXT NOT NULL,   -- the artifact that depends on another
+                    to_artifact   TEXT NOT NULL,   -- the artifact being depended on
+                    ref_type      TEXT NOT NULL,   -- 'depends_on' | 'cites' | 'canonical_of' | 'version_of'
+                    created_at    TEXT NOT NULL,
+                    FOREIGN KEY (from_artifact) REFERENCES artifacts(artifact_id),
+                    FOREIGN KEY (to_artifact)   REFERENCES artifacts(artifact_id)
+                )
+            """)
+            # CITATION INDEX — flat table for fast "what cites doc X at location Y?" queries
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS citations (
+                    citation_id      TEXT PRIMARY KEY,
+                    artifact_id      TEXT NOT NULL,
+                    document_id      TEXT NOT NULL,
+                    source_doc_hash  TEXT NOT NULL,
+                    locator_type     TEXT NOT NULL,
+                    char_start       INTEGER,
+                    char_end         INTEGER,
+                    page_start       INTEGER,
+                    page_end         INTEGER,
+                    element_id       TEXT,
+                    quote            TEXT NOT NULL,
+                    confidence       REAL NOT NULL,
+                    extraction_pass  INTEGER DEFAULT 1,
+                    FOREIGN KEY (artifact_id) REFERENCES artifacts(artifact_id)
+                )
+            """)
+            # Indexes
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_version ON artifacts(document_id, version)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_type ON artifacts(document_id, artifact_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_refs_from ON artifact_refs(from_artifact)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_refs_to ON artifact_refs(to_artifact)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_citations_doc ON citations(document_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_citations_artifact ON citations(artifact_id)")
+    
+    async def create(self, bundle: ArtifactBundle):
+        with self._lock:
+            with self._get_conn() as conn:
+                conn.execute("""
+                    INSERT INTO artifacts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    bundle.artifact_id,
+                    bundle.document_id,
+                    bundle.version,
+                    bundle.artifact_type.value,
+                    bundle.created_at.isoformat(),
+                    bundle.source_doc_hash,
+                    bundle.confidence,
+                    bundle.payload.model_dump_json(),
+                    bundle.provenance.model_dump_json(),
+                    bundle.metadata.model_dump_json(),
+                ))
+    
+    async def get(self, artifact_id: str) -> Optional[ArtifactBundle]:
+        row = self._query("SELECT * FROM artifacts WHERE artifact_id = ?", (artifact_id,))
+        return self._row_to_bundle(row) if row else None
+    
+    async def get_latest(
+        self, 
+        document_id: str, 
+        artifact_type: Optional[ArtifactType] = None,
+    ) -> Optional[ArtifactBundle]:
+        if artifact_type:
+            row = self._query("""
+                SELECT * FROM artifacts 
+                WHERE document_id = ? AND artifact_type = ?
+                ORDER BY version DESC LIMIT 1
+            """, (document_id, artifact_type.value))
+        else:
+            row = self._query("""
+                SELECT * FROM artifacts 
+                WHERE document_id = ?
+                ORDER BY version DESC LIMIT 1
+            """, (document_id,))
+        return self._row_to_bundle(row) if row else None
+    
+    async def resolve_version(
+        self, 
+        document_id: Optional[str],
+        source_doc_hash: str,
+    ) -> int:
+        """Atomic version resolution."""
+        with self._lock:
+            if document_id:
+                row = self._query("""
+                    SELECT MAX(version) FROM artifacts WHERE document_id = ?
+                """, (document_id,))
+                return (row[0] or 0) + 1
+            
+            row = self._query("""
+                SELECT MAX(version) FROM artifacts WHERE source_doc_hash = ?
+            """, (source_doc_hash,))
+            return (row[0] or 0) + 1</pre>
+
+      <div class="note">
+        <strong>Note:</strong> This replaces the old <code>artifact_registry.py</code> design with a modular approach in <code>app/pipeline/registry/</code>
+      </div>
+
+      <h4>Testing: <span class="tag test">Test</span></h4>
+      <div class="test-steps">
+        <ol>
+          <li>Create <span class="path">tests/unit/test_store.py</span></li>
+          <li>Test CRUD operations</li>
+          <li>Test concurrent version increment (threading)</li>
+          <li>Test version resolution</li>
+          <li>Run: <code>pytest tests/unit/test_store.py -v</code></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- TASK 5: COGNITIVE TOOLS -->
+    <div class="card">
+      <h2>Task 5: Cognitive Tools &amp; MCP <em>client</em> module <span class="tag new">New</span></h2>
+      <p>ThinkTool and ReflectTool for agent cognition — plan before acting, verify after. Planning can optionally invoke <strong>third-party</strong> MCP tools/servers (e.g., retrieval, policy checks, external verifiers) via the <strong><span class="path">app/pipeline/tools/mcp/</span></strong> package (not a single file). This is the <strong>consumer</strong> side of MCP. The <strong>publisher</strong> side — a Cyrex-hosted MCP server for external clients — is <strong>Task 7</strong>.</p>
+
+      <h4>MCP module layout</h4>
+      <pre>app/pipeline/tools/mcp/
+├── __init__.py    # from .router import MCPToolRouter  (stable import for orchestrator)
+├── router.py      # MCPToolRouter — list_tools, call_tool
+├── client.py      # MCP transport / session
+├── config.py      # MCP server registry, env, timeouts
+└── errors.py      # Typed exceptions</pre>
+
+      <h4>Plan (MCP module)</h4>
+      <div class="test-steps">
+        <ol>
+          <li><strong>config.py</strong> + <strong>client.py</strong> — wire transport, timeouts, optional server list</li>
+          <li><strong>router.py</strong> — thin facade used by ThinkTool / ReflectTool / orchestrator</li>
+          <li><strong>__init__.py</strong> — re-export public API only</li>
+          <li><strong>errors.py</strong> — map transport failures to pipeline-friendly errors</li>
+          <li>Tests: <span class="path">tests/unit/test_mcp_router.py</span> (mock client)</li>
+        </ol>
+      </div>
+      
+      <h4>ThinkTool: <span class="path">app/pipeline/tools/think.py</span></h4>
+      <pre>"""Planning tool - agent thinks before acting. Domain-agnostic."""
+from typing import Dict, Any, List
+from dataclasses import dataclass
+
+@dataclass
+class ExtractionPlan:
+    strategy:           str          # "full" | "focused" | "quick"
+    priority_fields:    List[str]    # from processor.priority_fields
+    skip_fields:        List[str]
+    flags:              List[str]    # detected content signals
+    confidence_targets: Dict[str, float]
+    citation_required:  bool = True  # enforce citations on all fields
+
+class ThinkTool:
+    async def plan_extraction(
+        self,
+        category:      str,
+        document_text: str,
+        goal:          str = "extract_all",
+    ) -> ExtractionPlan:
+        """Plan extraction strategy. Priority fields come from the processor."""
+        from app.pipeline.processors.registry import get_processor
+
+        text_length = len(document_text)
+        processor   = get_processor(category)
+
+        if goal == "quick":
+            strategy        = "quick"
+            priority_fields = ["dates", "amounts", "parties"]
+        elif text_length > 50_000:
+            strategy        = "focused"
+            priority_fields = getattr(processor, "priority_fields", ["dates","amounts","parties"])
+        else:
+            strategy        = "full"
+            priority_fields = getattr(processor, "priority_fields", [])
+
+        # Generic content signals — not domain-specific
+        flags = []
+        for signal_word, flag in [
+            ("amendment",    "amendment_detected"),
+            ("termination",  "termination_detected"),
+            ("renewal",      "renewal_detected"),
+            ("confidential", "confidentiality_clause_detected"),
+            ("indemnif",     "indemnification_clause_detected"),
+        ]:
+            if signal_word in document_text.lower():
+                flags.append(flag)
+
+        return ExtractionPlan(
+            strategy           = strategy,
+            priority_fields    = priority_fields,
+            skip_fields        = [],
+            flags              = flags,
+            confidence_targets = getattr(processor, "confidence_targets", {}),
+            citation_required  = True,
+        )</pre>
+
+      <h4>MCP router (facade): <span class="path">app/pipeline/tools/mcp/router.py</span></h4>
+      <pre>"""MCP router - tool calls during planning / reflection."""
+from typing import Any, Dict, Optional
+
+from app.pipeline.tools.mcp.client import MCPClient
+
+class MCPToolRouter:
+    def __init__(self, client: Optional[MCPClient] = None):
+        self.client = client
+
+    async def call(self, tool_name: str, args: Dict[str, Any], timeout_s: int = 30) -> Optional[Dict[str, Any]]:
+        if not self.client:
+            return None
+        return await self.client.call_tool(tool_name=tool_name, args=args, timeout_s=timeout_s)</pre>
+
+      <h4>ReflectTool: <span class="path">app/pipeline/tools/reflect.py</span></h4>
+      <pre>"""Self-verification — domain-agnostic citation and consistency checker."""
+from typing import List
+from dataclasses import dataclass, field
+
+from app.pipeline.schemas.artifact import CitedField, Citation
+
+@dataclass
+class ReflectionResult:
+    valid:                    bool
+    unverified_citations:     List[dict]   # citations whose quote ∉ raw_text
+    uncited_fields:           List[str]    # fields with no citations at all
+    low_confidence_fields:    List[str]    # fields below threshold
+    type_inconsistencies:     List[dict]   # value doesn't match declared value_type
+    contradictions:           List[dict]   # two fields with logically contradictory values
+
+class ReflectTool:
+    CONFIDENCE_THRESHOLD = 0.60
+
+    async def reflect(
+        self,
+        cited_fields: List[CitedField],
+        raw_text:     str,
+    ) -> ReflectionResult:
+        """
+        Generic self-verification pass.
+        Works on any document type — checks citations, not domain semantics.
+        Domain-specific rule checks live in the pluggable processor, not here.
+        """
+        unverified_citations:  list = []
+        uncited_fields:        list = []
+        low_confidence_fields: list = []
+        type_inconsistencies:  list = []
+
+        for cf in cited_fields:
+            # 1. Every field must have at least one citation
+            if not cf.citations:
+                uncited_fields.append(cf.field_name)
+
+            # 2. Each citation's quote must appear verbatim in the source text
+            for citation in cf.citations:
+                if citation.quote and citation.quote not in raw_text:
+                    unverified_citations.append({
+                        "field":       cf.field_name,
+                        "citation_id": citation.citation_id,
+                        "quote":       citation.quote[:120],
+                        "issue":       "quote_not_found_in_source",
+                    })
+
+            # 3. Low confidence — flag for re-extraction or human review
+            if cf.confidence < self.CONFIDENCE_THRESHOLD:
+                low_confidence_fields.append(cf.field_name)
+
+            # 4. Basic type consistency check (value matches declared value_type)
+            issue = self._check_type(cf)
+            if issue:
+                type_inconsistencies.append(issue)
+
+        # 5. Contradiction detection (generic: date order, amount sign checks)
+        contradictions = self._check_contradictions(cited_fields)
+
+        valid = (
+            not unverified_citations
+            and not uncited_fields
+            and not type_inconsistencies
+            and not contradictions
+        )
+
+        return ReflectionResult(
+            valid                 = valid,
+            unverified_citations  = unverified_citations,
+            uncited_fields        = uncited_fields,
+            low_confidence_fields = low_confidence_fields,
+            type_inconsistencies  = type_inconsistencies,
+            contradictions        = contradictions,
+        )
+
+    def _check_type(self, cf: CitedField) -> dict | None:
+        """Check value matches declared value_type."""
+        from datetime import datetime
+        v = cf.value
+        try:
+            if cf.value_type == "date" and isinstance(v, str):
+                datetime.fromisoformat(v.replace("/", "-"))
+            elif cf.value_type == "currency":
+                float(str(v).replace("$", "").replace(",", ""))
+            elif cf.value_type == "number":
+                float(str(v))
+            elif cf.value_type == "boolean":
+                assert isinstance(v, bool) or str(v).lower() in ("true","false","yes","no")
+        except Exception:
+            return {
+                "field": cf.field_name,
+                "declared_type": cf.value_type,
+                "actual_value": str(v)[:100],
+                "issue": "type_mismatch",
+            }
+        return None
+
+    def _check_contradictions(self, fields: List[CitedField]) -> list:
+        """Generic contradiction checks that apply across all document types."""
+        contradictions = []
+        by_name = {f.field_name: f for f in fields}
+
+        # Date ordering — any two date fields named *_start / *_end or *_from / *_to
+        for name, cf in by_name.items():
+            if cf.value_type == "date":
+                for suffix_pair in [("_start","_end"), ("_from","_to"), ("_begin","_finish")]:
+                    if name.endswith(suffix_pair[0]):
+                        partner = name.replace(suffix_pair[0], suffix_pair[1])
+                        if partner in by_name and by_name[partner].value_type == "date":
+                            try:
+                                from datetime import datetime
+                                d1 = datetime.fromisoformat(str(cf.value).replace("/","-"))
+                                d2 = datetime.fromisoformat(str(by_name[partner].value).replace("/","-"))
+                                if d1 > d2:
+                                    contradictions.append({
+                                        "field_a": name,
+                                        "field_b": partner,
+                                        "issue": "start_date_after_end_date",
+                                    })
+                            except Exception:
+                                pass
+
+        return contradictions</pre>
+
+      <h4>Testing: <span class="tag test">Test</span></h4>
+      <div class="test-steps">
+        <ol>
+          <li>Create <span class="path">tests/unit/test_think.py</span>, <span class="path">tests/unit/test_reflect.py</span>, and <span class="path">tests/unit/test_mcp_router.py</span></li>
+          <li>Test ThinkTool plan generation for different doc types</li>
+          <li>Test ReflectTool inconsistency detection</li>
+          <li>Test MCP router with a mock <code>MCPClient</code></li>
+          <li>Test flag generation</li>
+          <li>Run: <code>pytest tests/unit/test_think.py tests/unit/test_reflect.py tests/unit/test_mcp_router.py -v</code></li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- TASK 6: API -->
+    <div class="card">
+      <h2>Task 6: API Endpoints <span class="tag core">Core</span></h2>
+      <p>REST API for artifact management, connected to existing diri-cyrex routes pattern.</p>
+      
+      <h4>File: <span class="path">app/routes/artifacts.py</span></h4>
+      <pre>"""Artifact API endpoints - follows existing diri-cyrex patterns."""
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File
+from pydantic import BaseModel, Field
+from typing import Optional
+
+router = APIRouter(prefix="/api/v1/artifacts", tags=["Artifacts"])
+
+class UploadResponse(BaseModel):
+    document_id: str
+    version: int
+    artifact_bundle_id: str
+    status: str
+
+@router.post("/documents", response_model=UploadResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    document_id: Optional[str] = None,
+    org_id: Optional[str] = None,
+    request: Request = None,
+):
+    """Upload document - triggers full multi-pass pipeline."""
+    request_id = getattr(request.state, 'request_id', 'unknown')
+    
+    try:
+        from app.pipeline.orchestrator import ArtifactPipeline
+        
+        file_bytes = await file.read()
+        pipeline = ArtifactPipeline()
+        result = await pipeline.process_document(
+            file_bytes=file_bytes,
+            filename=file.filename,
+            document_id=document_id,
+        )
+        
+        return UploadResponse(
+            document_id=result.document_id,
+            version=result.version,
+            artifact_bundle_id=result.bundles[0].artifact_id if result.bundles else "",
+            status="ready" if result.bundles else "partial",
+        )
+    except Exception as e:
+        logger.error(f"Upload failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{artifact_id}")
+async def get_artifact(artifact_id: str, request: Request = None):
+    """Get single artifact bundle."""
+    from app.pipeline.registry import get_artifact_store
+    
+    store = get_artifact_store()
+    bundle = await store.get(artifact_id)
+    if not bundle:
+        raise HTTPException(404, "Artifact not found")
+    return bundle
+
+@router.get("/documents/{document_id}/versions")
+async def list_versions(document_id: str):
+    """List all versions of a document."""
+    store = get_artifact_store()
+    return await store.list_versions(document_id)</pre>
+
+      <div class="connection-box">
+        <h4>Connections to diri-cyrex</h4>
+        <ul>
+          <li>Uses existing route pattern from <code>app/routes/document_indexing_api.py</code></li>
+          <li>Uses <code>request.state.request_id</code> for logging</li>
+          <li>Uses same error handling pattern with HTTPException</li>
+          <li>Uses same logger pattern with <code>app.logging_config</code></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- TASK 7: CYREX MCP SERVER -->
+    <div class="card">
+      <h2>Task 7: Cyrex MCP server (first-party) <span class="tag new">New</span></h2>
+      <p>Standalone MCP server process that exposes the artifact registry, citations, and graph operations to any MCP-capable host. Reuses store + auth patterns from Task 4 / Task 6; does not replace REST — it is an additional surface for agents and IDEs.</p>
+
+      <h4>Layout</h4>
+      <pre>servers/cyrex_mcp/
+├── pyproject.toml           # optional: own package boundary
+├── README.md                # Cursor / Claude Desktop config snippets
+├── server.py                # entrypoint: stdio and/or streamable HTTP
+├── tools/
+│   ├── registry.py          # register Tool definitions + handlers
+│   ├── artifacts.py         # list/get/search bundles
+│   ├── citations.py         # locators + quote resolution
+│   ├── graph.py             # neighborhood, depends_on / depended_on_by
+│   └── corrections.py       # submit LearningArtifact / human feedback
+├── auth.py                  # org API key or OAuth-derived token
+├── config.py                # CYREX_API_BASE, store connection, feature flags
+└── tests/
+    └── test_mcp_contract.py # inspector / golden JSON for tool I/O</pre>
+
+      <h4>Delivery checklist</h4>
+      <div class="test-steps">
+        <ol>
+          <li><strong>Transport</strong> — stdio (local dev) + optional HTTP for remote teams; align with MCP spec version locked in <code>pyproject</code>.</li>
+          <li><strong>Tools</strong> — start with read-only: <code>list_artifacts</code>, <code>get_bundle</code>, <code>get_citations_for_field</code>, <code>graph_neighborhood</code>; then <code>submit_correction</code> behind strict ACL.</li>
+          <li><strong>Resources</strong> (optional) — read-only snapshots, e.g. <code>cyrex://artifact/{id}</code>, for clients that prefer resource URIs over tool JSON.</li>
+          <li><strong>Security</strong> — org-scoped credentials; rate limits; no cross-tenant IDs; same threat model as Frontier “Sandboxed MCP execution” (server is a new entry point).</li>
+          <li><strong>Tests</strong> — mock store + contract tests; run in CI without a live IDE.</li>
+        </ol>
+      </div>
+
+      <h4>Testing: <span class="tag test">Test</span></h4>
+      <div class="test-steps">
+        <ol>
+          <li>Create <span class="path">servers/cyrex_mcp/tests/test_mcp_contract.py</span></li>
+          <li>Assert each tool returns JSON schema compatible with documented examples</li>
+          <li>Integration smoke: launch server against dev SQLite store with fixture data</li>
+          <li>Document install snippet for Cursor MCP settings in <span class="path">servers/cyrex_mcp/README.md</span></li>
+        </ol>
+      </div>
+    </div>
+
+    </div><!-- /tab-tasks -->
+
+    <!-- TAB: DOCUMENTS & Q&A -->
+    <div class="tab-panel" id="tab-documents">
+
+    <!-- DOCUMENT CONNECTIONS + CITED ANSWERS -->
+    <div class="card">
+      <h2>Documents → Cited Answers (stored as artifacts) <span class="tag new">New</span></h2>
+      <p><strong>Product promise:</strong> “Upload or connect to your documents. We store them. Ask anything. Get cited answers by Cyrex agents.”</p>
+      <p>This section defines how <strong>document sources</strong>, <strong>citations</strong>, and <strong>real-time answer metrics</strong> are represented inside the Artifact Engine so answers are <strong>auditable</strong>, <strong>replayable</strong>, and <strong>versioned</strong>.</p>
+
+      <h3>1) Document sources (upload + connectors)</h3>
+      <p>A “document” may be a direct upload or a pointer to an external system. We store the normalized text + embeddings for retrieval, and we store the connector reference for refresh/reingest.</p>
+
+      <h4>DocumentSource (stored alongside document metadata)</h4>
+      <pre>{
+  "sourceType": "upload | google_drive | dropbox | sharepoint | s3 | web",
+  "external": {
+    "provider": "google_drive",
+    "externalId": "drive_file_id_or_url",
+    "workspaceId": "optional",
+    "path": "optional/path/in/provider",
+    "etag": "provider_etag_for_change_detection",
+    "lastSyncedAt": "2026-04-16T00:00:00Z"
+  },
+  "ingest": {
+    "ingestId": "uuid",
+    "status": "queued | parsing | embedded | ready | error",
+    "error": null
+  }
+}</pre>
+
+      <div class="note">
+        <strong>Constraint:</strong> External connector references are stored as metadata; the Artifact Engine’s canonical truth remains the <code>document_id</code> + <code>source_doc_hash</code> + versioned artifacts.
+      </div>
+
+      <h3>2) “Cited answer” as an artifact</h3>
+      <p>Cited answers are stored as <strong>ArtifactBundles</strong> so they can be retrieved, diffed, and recomputed when sources change. This uses existing <code>ArtifactType.REASONING</code> (answer) and optionally <code>ArtifactType.RETRIEVAL</code> (the retrieval set) so provenance is explicit.</p>
+
+      <h4>AnswerArtifact payload contract (stored in <code>ArtifactBundle.payload</code>)</h4>
+      <pre>{
+  "kind": "cited_answer",
+  "question": {
+    "text": "What is the renewal term?",
+    "askedAt": "2026-04-16T00:00:00Z"
+  },
+  "answer": {
+    "format": "markdown",
+    "text": "The renewal term is ...",
+    "summaryBullets": ["...", "..."]
+  },
+  "citations": [
+    {
+      "citationId": "c1",
+      "documentId": "doc_123",
+      "sourceDocHash": "sha256:...",
+      "locator": { "type": "page_range", "startPage": 4, "endPage": 4 },
+      "quote": "Exact supporting snippet...",
+      "charRange": { "start": 10234, "end": 10410 },
+      "confidence": 0.86
+    }
+  ],
+  "retrieval": {
+    "topK": 12,
+    "query": "renewal term",
+    "filters": { "documentIds": ["doc_123"] }
+  }
+}</pre>
+
+      <h3>3) Real-time metrics embedded into the artifact</h3>
+      <p>Each cited answer artifact includes a <strong>metrics</strong> block so the UI can render “real time metrics for each” directly from the stored artifact (no secondary join required). Metrics are captured at run time and written into <code>ArtifactBundle.metadata</code> and/or <code>payload.metrics</code>.</p>
+
+      <h4>AnswerMetrics block (recommended)</h4>
+      <pre>{
+  "metrics": {
+    "requestId": "req_...",
+    "agent": { "id": "cyrex-agent", "version": "2026.04.16" },
+    "latencyMs": { "total": 4120, "retrieval": 320, "generation": 3470, "postprocess": 330 },
+    "tokens": { "input": 18200, "output": 920, "cachedInput": 6000 },
+    "retrievalQuality": { "numCitations": 4, "minCitationConfidence": 0.74 },
+    "cost": { "usdEstimate": 0.042 },
+    "timestamp": "2026-04-16T00:00:00Z"
+  }
+}</pre>
+
+      <h3>4) Provenance requirements for cited answers</h3>
+      <ul>
+        <li><strong>Reproducibility:</strong> store prompt version + model config under <code>provenance</code> (or within <code>payload.metrics.agent</code>)</li>
+        <li><strong>Auditability:</strong> every citation must include a stable locator (page/char offsets) + the quoted snippet</li>
+        <li><strong>Recompute-on-change:</strong> if any cited <code>sourceDocHash</code> changes, invalidate the answer artifact and recompute</li>
+      </ul>
+    </div>
+
+    </div><!-- /tab-documents -->
+
+    <!-- TAB: 2026 STACK -->
+    <div class="tab-panel" id="tab-stack">
+
+    <!-- 2026 ARCHITECTURE MAP -->
+    <div class="card">
+      <h2>2026 Architecture Map <span class="tag frontier">Frontier</span></h2>
+      <p>The field moved. The old stack was <em>prompt → model → response</em>. The 2026 stack is a layered system where <strong>context engineering, tools, agents, and models</strong> are separate concerns. Cyrex must be designed against this map, not the 2023 one.</p>
+
+      <div class="arch-map">
+        <div class="layer"><span class="num">1</span><span class="lname">INPUT / DATA LAYER</span><span class="ldetail">ingest · parse · embed · connectors · streaming</span></div>
+        <div class="layer"><span class="num">2</span><span class="lname">CONTEXT ENGINEERING LAYER</span><span class="ldetail">prompt · RAG · memory · tools — unified</span></div>
+        <div class="layer"><span class="num">3</span><span class="lname">RETRIEVAL LAYER</span><span class="ldetail">hybrid search · rerank · graph RAG · agentic RAG</span></div>
+        <div class="layer"><span class="num">4</span><span class="lname">AGENT / REASONING LAYER</span><span class="ldetail">planners · executors · tool-use loops · multi-agent</span></div>
+        <div class="layer"><span class="num">5</span><span class="lname">MODEL LAYER</span><span class="ldetail">multi-model routing · MoE · local + API</span></div>
+        <div class="layer"><span class="num">6</span><span class="lname">ADAPTATION LAYER</span><span class="ldetail">PEFT (DoRA / AdaLoRA / IA³) · DPO variants · alignment</span></div>
+        <div class="layer"><span class="num">7</span><span class="lname">TOOLS / EXECUTION LAYER</span><span class="ldetail">function calling · SQL · APIs · MCP</span></div>
+        <div class="layer"><span class="num">8</span><span class="lname">MEMORY LAYER</span><span class="ldetail">episodic · semantic · working · long-term</span></div>
+        <div class="layer"><span class="num">9</span><span class="lname">GUARDRAILS / SAFETY LAYER</span><span class="ldetail">validation · sandboxing · prompt injection defense</span></div>
+        <div class="layer"><span class="num">10</span><span class="lname">EVALUATION / OBSERVABILITY</span><span class="ldetail">tracing · hallucination rate · reasoning quality · feedback</span></div>
+        <div class="layer"><span class="num">11</span><span class="lname">INFRASTRUCTURE</span><span class="ldetail">GPU/TPU · serving · caching · batching · vector DBs</span></div>
+      </div>
+
+      <div class="insight">
+        <strong>The real shift:</strong> Fine-tuning is no longer the default answer. Context + RAG + tools beats training for most real-world tasks. The system you build around the model matters more than the model itself.
+      </div>
+    </div>
+
+    <!-- CONTEXT ENGINEERING LAYER -->
+    <div class="card">
+      <h2>Context Engineering Layer <span class="tag shift">Paradigm Shift</span></h2>
+      <p><strong>"Context engineering" is the 2026 replacement for "prompt engineering."</strong> It merges prompting, RAG, memory, and tools into a single unified layer that builds the context window the model sees. This is now the highest-leverage abstraction in any LLM system.</p>
+
+      <div class="insight">
+        <strong>Old model:</strong> prompt → model → response<br>
+        <strong>New model:</strong> (system prompt + retrieved chunks + memory + tool results + conversation history) → model → response + tool calls → …
+      </div>
+
+      <h3>What goes into the context window</h3>
+      <div class="tier-grid">
+        <div class="tier gen2">
+          <h5>System Prompt</h5>
+          <ul>
+            <li>Agent persona + role</li>
+            <li>Behavioral rules</li>
+            <li>Output format constraints</li>
+            <li>Constitutional principles</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>Retrieved Knowledge</h5>
+          <ul>
+            <li>Top-k document chunks</li>
+            <li>Reranked by cross-encoder</li>
+            <li>Graph neighbors</li>
+            <li>Real-time connector data</li>
+          </ul>
+        </div>
+        <div class="tier bleed">
+          <h5>Memory</h5>
+          <ul>
+            <li>Working memory (this session)</li>
+            <li>Episodic (past interactions)</li>
+            <li>Semantic (learned facts)</li>
+            <li>Entity state</li>
+          </ul>
+        </div>
+      </div>
+      <div class="tier-grid two">
+        <div class="tier agent">
+          <h5>Tool Results</h5>
+          <ul>
+            <li>Function call outputs</li>
+            <li>SQL query results</li>
+            <li>MCP server responses</li>
+            <li>API call payloads</li>
+          </ul>
+        </div>
+        <div class="tier model">
+          <h5>Conversation + Provenance</h5>
+          <ul>
+            <li>Prior turns (truncated/summarized)</li>
+            <li>Artifact IDs in scope</li>
+            <li>User + org context</li>
+            <li>Current extraction plan</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Context Engineering in Cyrex pipeline</h3>
+      <p>The existing <code>WorkingMemory</code> + <code>ThinkTool</code> + <code>MCPToolRouter</code> already form the skeleton of the context engineering layer. The upgrade is to make context assembly <strong>explicit and composable</strong> rather than implicit in orchestrator code.</p>
+      <pre>class ContextBuilder:
+    """Assembles the full context window before each LLM call."""
+
+    def __init__(self, memory: WorkingMemory, retriever: Retriever, mcp: MCPToolRouter):
+        self.memory = memory
+        self.retriever = retriever
+        self.mcp = mcp
+
+    async def build(self, query: str, doc_ids: list[str]) -> ContextBundle:
+        retrieved  = await self.retriever.query(query, doc_ids=doc_ids)
+        tool_state = await self.mcp.get_active_results()
+        mem_ctx    = self.memory.to_context()
+
+        return ContextBundle(
+            system_prompt  = self._build_system_prompt(),
+            retrieved      = retrieved,       # ranked chunks + citations
+            memory         = mem_ctx,         # episodic + semantic
+            tool_results   = tool_state,      # MCP / function outputs
+            token_budget   = 32_000,
+        )</pre>
+
+      <div class="verdict">
+        <strong>Cyrex implication:</strong> Store the full <code>ContextBundle</code> as part of every <code>ArtifactBundle.provenance</code>. This makes answers replayable and auditable end-to-end.
+      </div>
+    </div>
+
+    <!-- MODERN RAG: ALL GENERATIONS -->
+    <div class="card">
+      <h2>Modern RAG: All Generations <span class="tag new">New</span></h2>
+      <p>Classic RAG (embed → retrieve → stuff) is Generation 1. Cyrex operates on documents that require multi-hop reasoning, cross-document synthesis, and long-context windows. The retrieval layer must support all four generations.</p>
+
+      <div class="tier-grid">
+        <div class="tier gen1">
+          <h5>Gen 1 — Classic RAG</h5>
+          <ul>
+            <li>Dense embedding search</li>
+            <li>Fixed top-k chunks</li>
+            <li>Stuff into prompt</li>
+            <li>Single-shot retrieval</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#888;">Status: baseline, not enough alone</em>
+        </div>
+        <div class="tier gen2">
+          <h5>Gen 2 — Current Standard</h5>
+          <ul>
+            <li>Hybrid search (dense + BM25)</li>
+            <li>Cross-encoder reranking</li>
+            <li>Semantic chunking</li>
+            <li>Metadata filtering</li>
+            <li>Query rewriting / expansion</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#555;">Status: ship this now</em>
+        </div>
+        <div class="tier gen3">
+          <h5>Gen 3 — Agentic RAG</h5>
+          <ul>
+            <li>Agent decides when/what to retrieve</li>
+            <li>Multi-hop (retrieve → reason → retrieve)</li>
+            <li>Self-RAG (critique own answer)</li>
+            <li>Corrective RAG (fix bad docs)</li>
+            <li>Iterative refinement loops</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#2d6b4a;">Status: implement in pipeline</em>
+        </div>
+        <div class="tier bleed">
+          <h5>Gen 4 — Bleeding Edge</h5>
+          <ul>
+            <li>Graph RAG (knowledge graphs)</li>
+            <li>Long-context RAG (1M token windows)</li>
+            <li>Streaming RAG (retrieve while gen)</li>
+            <li>Memory-augmented RAG</li>
+            <li>Multi-modal RAG (image + text)</li>
+            <li>Tool-augmented (SQL + vector + API)</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#6b1060;">Status: roadmap items</em>
+        </div>
+      </div>
+
+      <h3>Gen 2 upgrade for Cyrex — concrete changes</h3>
+      <pre>class Retriever:
+    """Gen 2 retriever: hybrid search + rerank + metadata filter."""
+
+    async def query(
+        self,
+        query: str,
+        doc_ids: list[str] | None = None,
+        top_k: int = 20,
+        rerank_top_k: int = 6,
+    ) -> list[RetrievedChunk]:
+        # 1. Expand query (LLM rewrites for better recall)
+        expanded = await self._expand_query(query)
+
+        # 2. Hybrid search: dense vectors + BM25 keyword scores
+        dense_hits   = await self.vector_db.search(expanded, top_k=top_k, filter={"doc_ids": doc_ids})
+        keyword_hits = await self.bm25.search(expanded, top_k=top_k, filter={"doc_ids": doc_ids})
+        merged       = self._rrf_merge(dense_hits, keyword_hits)   # reciprocal rank fusion
+
+        # 3. Cross-encoder rerank
+        reranked = await self.reranker.rerank(expanded, merged, top_k=rerank_top_k)
+
+        return reranked</pre>
+
+      <h3>Graph RAG — why it matters for Cyrex</h3>
+      <p>Contracts and leases are dense with <strong>named entities and relationships</strong> (parties, properties, clauses, dates, obligations). A knowledge graph over these entities makes retrieval relationship-aware — "find all clauses referencing Tenant X's renewal option" becomes a graph traversal, not a chunk similarity search.</p>
+
+      <div class="two-col">
+        <div class="col-block">
+          <h5>Chunk-based retrieval</h5>
+          <ul>
+            <li>Retrieves text windows</li>
+            <li>Loses cross-document links</li>
+            <li>No entity normalization</li>
+            <li>Good for: surface-level Q&amp;A</li>
+          </ul>
+        </div>
+        <div class="col-block">
+          <h5>Graph RAG</h5>
+          <ul>
+            <li>Retrieves entity + relationships</li>
+            <li>Cross-document entity merging</li>
+            <li>Matches Cyrex Entity Canonicalization</li>
+            <li>Good for: multi-doc reasoning</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="connection-box">
+        <h4>Connection to existing Cyrex spec</h4>
+        <ul>
+          <li>Entity Canonicalization (Core Differentiators) is the foundation for Graph RAG nodes</li>
+          <li>Provenance cross-references become graph edges</li>
+          <li><code>pass3 (cross_reference)</code> in ExtractStage is the seed for the entity graph</li>
+        </ul>
+      </div>
+    </div>
+
+    </div><!-- /tab-stack -->
+
+    <!-- TAB: FRONTIER -->
+    <div class="tab-panel" id="tab-frontier">
+
+    <!-- MODEL TAXONOMY + ADAPTATION LAYER -->
+    <div class="card">
+      <h2>Model Taxonomy &amp; Adaptation Layer <span class="tag frontier">Frontier</span></h2>
+      <p>Full model type map + complete 2026 PEFT and alignment methods, so Cyrex's model strategy is grounded in the real landscape.</p>
+
+      <h3>A. Model Taxonomy (full spectrum)</h3>
+      <div class="tier-grid">
+        <div class="tier gen1">
+          <h5>Classical ML</h5>
+          <ul>
+            <li>Linear / Logistic Regression</li>
+            <li>Tree-Based: XGBoost, LightGBM, CatBoost</li>
+            <li>SVM / Kernel Methods</li>
+            <li>HMMs, Naive Bayes, Clustering</li>
+          </ul>
+        </div>
+        <div class="tier gen2">
+          <h5>Deep Learning</h5>
+          <ul>
+            <li>CNNs (ResNet, EfficientNet, ConvNeXt)</li>
+            <li>RNN / LSTM / GRU (sequence, edge)</li>
+            <li>Transformer: Encoder, Decoder, Enc-Dec</li>
+            <li>Diffusion Models (image/video gen)</li>
+            <li>GANs, VAEs</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>LLM Types</h5>
+          <ul>
+            <li>Autoregressive (GPT-style)</li>
+            <li>Masked (BERT-style)</li>
+            <li>Seq2Seq (T5, BART)</li>
+            <li>Mixture of Experts (MoE)</li>
+            <li>Multi-modal (text + image + audio)</li>
+            <li>Tool-using (function calling)</li>
+          </ul>
+        </div>
+        <div class="tier bleed">
+          <h5>Hybrid / Frontier</h5>
+          <ul>
+            <li>Graph Neural Networks (GNNs)</li>
+            <li>Neuro-symbolic systems</li>
+            <li>Memory-augmented models</li>
+            <li>World models</li>
+            <li>Embodied / robotics models</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>B. PEFT Methods — Full 2026 Spectrum</h3>
+
+      <h4>Classic PEFT (2022–2023 baseline)</h4>
+      <div class="chip-list">
+        <span class="chip">Full Fine-Tuning</span>
+        <span class="chip">SFT (Instruction Tuning)</span>
+        <span class="chip">LoRA</span>
+        <span class="chip">QLoRA</span>
+        <span class="chip">Adapters</span>
+        <span class="chip">Prompt Tuning</span>
+        <span class="chip">Prefix Tuning</span>
+        <span class="chip">RLHF (PPO)</span>
+        <span class="chip">DPO</span>
+      </div>
+
+      <h4>Advanced PEFT (2024–2026)</h4>
+      <div class="tier-grid">
+        <div class="tier gen2">
+          <h5>DoRA</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Weight-Decomposed LoRA. Splits weights into <em>magnitude</em> + <em>direction</em>. Mathematically cleaner than LoRA, better for long runs. Drop-in LoRA replacement.</p>
+        </div>
+        <div class="tier gen2">
+          <h5>AdaLoRA</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Dynamically reallocates rank budget during training — high rank where needed, low rank elsewhere. More efficient than static LoRA for complex tasks.</p>
+        </div>
+        <div class="tier gen2">
+          <h5>IA³</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Infused Adapter by Inhibiting/Amplifying. Scales attention key/value/FF channels. Even lighter than LoRA — used in constrained edge environments.</p>
+        </div>
+        <div class="tier gen3">
+          <h5>BitFit</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Only trains bias terms. Shockingly effective for classification. Lowest possible parameter footprint.</p>
+        </div>
+        <div class="tier gen3">
+          <h5>Sparse Fine-Tuning</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Gradient masking selects a subset of weights to update. Used at scale to cut compute costs while preserving performance.</p>
+        </div>
+        <div class="tier gen3">
+          <h5>Delta Tuning</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Stores only weight <em>deltas</em> from base model. General form of LoRA. Composable with adapter merging.</p>
+        </div>
+      </div>
+
+      <h3>C. Alignment / Preference Methods (DPO era)</h3>
+      <p>The field is <strong>replacing PPO-based RLHF</strong> with cheaper, stabler offline preference methods. Know all of them.</p>
+
+      <div class="tier-grid">
+        <div class="tier bleed">
+          <h5>DPO Family</h5>
+          <ul>
+            <li><strong>DPO</strong> — Direct Preference Optimization (baseline)</li>
+            <li><strong>IPO</strong> — Implicit Preference Optimization</li>
+            <li><strong>KTO</strong> — Kahneman-Tversky Optimization</li>
+            <li><strong>ORPO</strong> — Odds Ratio Preference Optimization</li>
+            <li><strong>SimPO</strong> — Simple Preference Optimization</li>
+            <li><strong>RRHF</strong> — Ranked Responses from Human Feedback</li>
+          </ul>
+        </div>
+        <div class="tier bleed">
+          <h5>Scalable Alignment</h5>
+          <ul>
+            <li><strong>RLAIF</strong> — AI-generated preference labels (replaces human labelers at scale)</li>
+            <li><strong>Constitutional AI</strong> — model critiques itself against rule-set</li>
+            <li><strong>Self-Play Fine-Tuning</strong> — model competes against itself</li>
+          </ul>
+        </div>
+        <div class="tier agent">
+          <h5>Continuous Training Signal</h5>
+          <ul>
+            <li>Every user correction → few-shot example instantly</li>
+            <li>No batch retraining required</li>
+            <li>Already a Cyrex Core Differentiator</li>
+            <li>Maps to: KTO / DPO online variants</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>D. Model Merging (no training required)</h3>
+      <div class="chip-list">
+        <span class="chip blue">Weight Interpolation (WiSE-FT)</span>
+        <span class="chip blue">Task Arithmetic (add/subtract task vectors)</span>
+        <span class="chip blue">TIES-Merging (resolve conflicts)</span>
+        <span class="chip blue">DARE (sparse delta compression)</span>
+        <span class="chip blue">MoE routing over merged models</span>
+      </div>
+      <div class="note">
+        <strong>Cyrex opportunity:</strong> merge a base legal-domain model with lease-specialist and contract-specialist fine-tunes using task arithmetic. No GPU infra needed at merge time.
+      </div>
+    </div>
+
+    <!-- MULTI-MODEL ROUTING -->
+    <div class="card">
+      <h2>Multi-Model Routing <span class="tag shift">2026 Standard</span></h2>
+      <p>Not everything goes to the same model. A production system routes tasks to the right model based on cost, latency, capability, and modality. This is a <strong>first-class architectural concern</strong> in 2026, not an afterthought.</p>
+
+      <h3>Routing matrix for Cyrex</h3>
+      <div class="tier-grid">
+        <div class="tier gen1">
+          <h5>Fast / Cheap Model</h5>
+          <ul>
+            <li>Classification (doc type)</li>
+            <li>Field presence checks</li>
+            <li>Simple extraction (dates, amounts)</li>
+            <li>Regex fallback wrapper</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#888;">e.g. Haiku, GPT-4o-mini, local quantized</em>
+        </div>
+        <div class="tier gen2">
+          <h5>Standard Reasoning Model</h5>
+          <ul>
+            <li>LLM extraction pass (Pass 2)</li>
+            <li>Cross-reference validation</li>
+            <li>Answer generation</li>
+            <li>Reflect / self-verify</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#555;">e.g. Sonnet, GPT-4o</em>
+        </div>
+        <div class="tier gen3">
+          <h5>Strong Reasoning Model</h5>
+          <ul>
+            <li>Multi-hop synthesis</li>
+            <li>Discrepancy resolution</li>
+            <li>Complex clause analysis</li>
+            <li>Constitutional critique</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#2d6b4a;">e.g. Opus, o3, Gemini 1.5 Pro</em>
+        </div>
+        <div class="tier bleed">
+          <h5>Specialist Models</h5>
+          <ul>
+            <li>Vision model → scanned PDF tables</li>
+            <li>Local fine-tune → lease terms (low latency)</li>
+            <li>Embedding model → retrieval index</li>
+            <li>Reranker model → cross-encoder</li>
+          </ul>
+          <em style="font-size:0.72rem;color:#6b1060;">task-specific</em>
+        </div>
+      </div>
+
+      <h4>Router implementation sketch</h4>
+      <pre>class ModelRouter:
+    """Route each pipeline call to the right model tier."""
+
+    FAST    = "claude-haiku-3-5"
+    MEDIUM  = "claude-sonnet-4-5"
+    STRONG  = "claude-opus-4"
+
+    def select(self, task: str, context_len: int, budget: str = "balanced") -> str:
+        if task in ("classify", "regex_wrap", "field_presence"):
+            return self.FAST
+        if task in ("multi_hop", "discrepancy_resolve", "constitutional_critique"):
+            return self.STRONG
+        if context_len > 80_000:
+            return self.STRONG    # long-context needs big model
+        return self.MEDIUM</pre>
+    </div>
+
+    <!-- AGENTIC PIPELINE ARCHITECTURE -->
+    <div class="card">
+      <h2>Agentic Pipeline Architecture <span class="tag frontier">Frontier</span></h2>
+      <p><strong>2026 shift:</strong> "Prompt → response" is dead as an architecture. The new baseline is <em>agent → plan → tools → memory → loop → response</em>. Cyrex's orchestrator is already agentic in spirit — this formalizes the design.</p>
+
+      <h3>Agent component roles</h3>
+      <div class="tier-grid">
+        <div class="tier agent">
+          <h5>Planner</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Decomposes the task. Decides strategy, field priorities, number of passes. Maps to <code>ThinkTool.plan_extraction()</code>.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Executor</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Runs extraction passes, calls tools, manages stage order. Maps to <code>ArtifactPipeline.process_document()</code>.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Tool User</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Calls MCP servers, external APIs, SQL databases. Maps to <code>MCPToolRouter.call()</code>.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Memory Manager</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Reads/writes working memory, episodic log, semantic store. Maps to <code>WorkingMemory</code> + artifact registry.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Verifier</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Self-critiques, detects contradictions, requests re-extraction. Maps to <code>ReflectTool.reflect()</code>.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Anticipator</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Generates proactive insights and workflow actions before user asks. Maps to <code>AnticipateStage</code> + <code>WorkflowStage</code>.</p>
+        </div>
+      </div>
+
+      <h3>Multi-agent patterns</h3>
+      <div class="two-col">
+        <div class="col-block">
+          <h5>Parallelism</h5>
+          <ul>
+            <li>Run multiple extraction agents on different document sections simultaneously</li>
+            <li>Fan-out to specialist agents (lease agent, contract agent) then merge results</li>
+            <li>Parallel retrieval + generation</li>
+          </ul>
+        </div>
+        <div class="col-block">
+          <h5>Handoff</h5>
+          <ul>
+            <li>Classification agent hands to domain-specific extraction agent</li>
+            <li>Extraction agent hands to reasoning agent</li>
+            <li>Reasoning agent hands to workflow agent</li>
+            <li>All handoffs logged in artifact provenance</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Framework landscape (what teams actually use in 2026)</h3>
+      <div class="tier-grid four">
+        <div class="tier gen2">
+          <h5>Orchestration</h5>
+          <ul>
+            <li>LangChain (heavy)</li>
+            <li>Semantic Kernel</li>
+            <li>Haystack</li>
+          </ul>
+        </div>
+        <div class="tier gen2">
+          <h5>RAG-first</h5>
+          <ul>
+            <li>LlamaIndex</li>
+            <li>RAGFlow</li>
+            <li>Haystack</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>Agent-first</h5>
+          <ul>
+            <li>LangGraph</li>
+            <li>AutoGen</li>
+            <li>OpenAI Agents SDK</li>
+            <li>CrewAI</li>
+            <li>Smolagents</li>
+          </ul>
+        </div>
+        <div class="tier bleed">
+          <h5>Optimization</h5>
+          <ul>
+            <li>DSPy (auto-optimize prompts)</li>
+            <li>Guidance / Outlines (structured gen)</li>
+            <li>LMQL</li>
+            <li>PydanticAI</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="insight">
+        <strong>DSPy is the sleeper monster.</strong> Instead of writing <code>prompt = "..."</code> you write <code>optimize(pipeline, metric)</code>. The system auto-improves prompts against a metric. Cyrex's multi-pass extraction is a natural fit — each pass can be a DSPy module with a confidence target as the metric.
+      </div>
+    </div>
+
+    <!-- COMPUTER VISION + MULTIMODAL -->
+    <div class="card">
+      <h2>Computer Vision &amp; Multi-Modal <span class="tag new">New</span></h2>
+      <p>Cyrex processes PDFs, including <strong>scanned documents, tables, charts, and floor plans</strong>. Computer vision is not optional for document AI — it's the parse layer for anything that isn't clean text.</p>
+
+      <h3>CV pipeline for document processing</h3>
+      <div class="tier-grid">
+        <div class="tier gen2">
+          <h5>Document OCR / Layout</h5>
+          <ul>
+            <li>Layout detection (columns, headers, tables)</li>
+            <li>Table extraction (detr-based table detection)</li>
+            <li>Form field localization</li>
+            <li>Signature / stamp detection</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>Vision-Language Models</h5>
+          <ul>
+            <li>CLIP-style image-text alignment</li>
+            <li>VLMs for reading scanned pages end-to-end</li>
+            <li>Multi-modal extraction (image → structured JSON)</li>
+            <li>Floor plan understanding</li>
+          </ul>
+        </div>
+        <div class="tier bleed">
+          <h5>Multi-modal RAG</h5>
+          <ul>
+            <li>Embed images + text in shared space</li>
+            <li>Retrieve by image similarity</li>
+            <li>Video retrieval (inspection recordings)</li>
+            <li>Audio (lease signing call transcripts)</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Object detection relevance</h3>
+      <p>YOLO-family models (YOLOv8+) are used in document pipelines for <strong>region detection</strong>: identify where tables, signatures, stamps, and handwritten annotations appear on a scanned page before OCR. This feeds directly into <code>ParseStage</code>.</p>
+      <div class="chip-list">
+        <span class="chip">YOLOv8+ (region detection)</span>
+        <span class="chip blue">ViT / Swin (layout understanding)</span>
+        <span class="chip green">SAM (segment anything)</span>
+        <span class="chip purple">GPT-4V / Claude Vision (end-to-end VLM)</span>
+        <span class="chip orange">PaddleOCR / Tesseract (text extraction)</span>
+      </div>
+    </div>
+
+    <!-- DATA PIPELINES -->
+    <div class="card">
+      <h2>Data Pipeline Architecture <span class="tag core">Core</span></h2>
+      <p>Artifact quality is bounded by data pipeline quality. The modern data stack for an AI system is <strong>not</strong> a batch ETL — it's a hybrid streaming + batch pipeline with real-time embedding updates.</p>
+
+      <h3>Pipeline stages (full stack)</h3>
+      <div class="tier-grid">
+        <div class="tier gen1">
+          <h5>1. Ingestion</h5>
+          <ul>
+            <li>Upload (multipart form)</li>
+            <li>Connector pull (Drive, S3, SharePoint)</li>
+            <li>Webhook push (from external systems)</li>
+            <li>Streaming ingestion (Kafka-style events)</li>
+          </ul>
+        </div>
+        <div class="tier gen2">
+          <h5>2. Cleaning</h5>
+          <ul>
+            <li>Deduplication (by <code>source_doc_hash</code>)</li>
+            <li>Normalization (encoding, whitespace)</li>
+            <li>Language detection</li>
+            <li>PII detection / redaction</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>3. Labeling</h5>
+          <ul>
+            <li>Manual annotation (human-in-loop)</li>
+            <li>Synthetic data generation</li>
+            <li>Weak supervision (regex labels)</li>
+            <li>Correction feedback loop (→ PEFT training signal)</li>
+          </ul>
+        </div>
+        <div class="tier bleed">
+          <h5>4. Transform + Store</h5>
+          <ul>
+            <li>Chunking (semantic / sliding window)</li>
+            <li>Embedding generation</li>
+            <li>Vector DB upsert</li>
+            <li>Artifact registry write</li>
+            <li>BM25 index update</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Modern data stack (2026 reality)</h3>
+      <div class="two-col">
+        <div class="col-block">
+          <h5>Storage layer</h5>
+          <ul>
+            <li><strong>Vector DB:</strong> Qdrant / Weaviate / Pinecone</li>
+            <li><strong>Artifact store:</strong> SQLite → Postgres (scale)</li>
+            <li><strong>Object store:</strong> S3 / GCS (raw files)</li>
+            <li><strong>Cache:</strong> Redis (hot artifacts)</li>
+          </ul>
+        </div>
+        <div class="col-block">
+          <h5>Processing layer</h5>
+          <ul>
+            <li><strong>Embeddings:</strong> OpenAI / open-source (BGE, E5)</li>
+            <li><strong>Reranker:</strong> cross-encoder (BGE-reranker)</li>
+            <li><strong>Orchestration:</strong> Celery / Ray for async jobs</li>
+            <li><strong>Streaming:</strong> Kafka / Pub-Sub for change events</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- EVALUATION + OBSERVABILITY -->
+    <div class="card">
+      <h2>Evaluation &amp; Observability <span class="tag core">Core</span></h2>
+      <p>You cannot ship an AI system without a measurement layer. In 2026, "observability" for LLM systems means <strong>traces, not just logs</strong> — every LLM call, retrieval, tool use, and agent decision is a span you can inspect and diff over time.</p>
+
+      <h3>Metrics taxonomy for Cyrex</h3>
+      <div class="tier-grid">
+        <div class="tier gen2">
+          <h5>Extraction Quality</h5>
+          <ul>
+            <li>Field coverage % (fields found / expected)</li>
+            <li>Confidence distribution</li>
+            <li>Discrepancy rate (pass1 vs pass2)</li>
+            <li>Reflection rejection rate</li>
+          </ul>
+        </div>
+        <div class="tier gen2">
+          <h5>Retrieval Quality</h5>
+          <ul>
+            <li>Citation confidence (min/mean/p95)</li>
+            <li>Retrieval latency (ms)</li>
+            <li>Reranker gain (before vs after)</li>
+            <li>Top-k hit rate vs ground truth</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>LLM Quality</h5>
+          <ul>
+            <li>Hallucination rate (citation not in doc)</li>
+            <li>Faithfulness score (answer grounded in chunks)</li>
+            <li>Reasoning quality (CoT coherence)</li>
+            <li>Tool success rate (MCP calls)</li>
+          </ul>
+        </div>
+        <div class="tier gen3">
+          <h5>System Metrics</h5>
+          <ul>
+            <li>End-to-end latency (ms)</li>
+            <li>Token cost per document</li>
+            <li>Throughput (docs/min)</li>
+            <li>Error / retry rates by stage</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>Observability stack</h3>
+      <div class="chip-list">
+        <span class="chip blue">Langfuse (LLM-native tracing)</span>
+        <span class="chip blue">Helicone (token + cost tracking)</span>
+        <span class="chip green">OpenTelemetry spans (pipeline stages)</span>
+        <span class="chip green">Structured logs (existing app/logging_config)</span>
+        <span class="chip purple">Feedback loops (correction → few-shot example)</span>
+        <span class="chip orange">A/B eval framework (prompt version comparison)</span>
+      </div>
+
+      <h4>Evaluation metrics embedded in every AnswerArtifact</h4>
+      <p>The <code>payload.metrics</code> block defined in the "Documents → Cited Answers" section is the per-artifact evaluation record. At the system level, aggregate these into dashboards. Key LLM-specific evals:</p>
+      <div class="two-col">
+        <div class="col-block">
+          <h5>Classic NLP metrics</h5>
+          <ul>
+            <li>Precision / Recall (field extraction)</li>
+            <li>F1 (combined)</li>
+            <li>ROUGE / BLEU (summary quality)</li>
+            <li>Exact Match (structured fields)</li>
+          </ul>
+        </div>
+        <div class="col-block">
+          <h5>LLM-specific</h5>
+          <ul>
+            <li>Hallucination rate (citation check)</li>
+            <li>Faithfulness (RAGAS-style)</li>
+            <li>Answer Relevance</li>
+            <li>Context Recall (were the right chunks used?)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECURITY + GUARDRAILS -->
+    <div class="card">
+      <h2>Security &amp; Guardrails <span class="tag new">New</span></h2>
+      <p>Document AI systems handle sensitive legal and financial data. Security is not a "nice-to-have" layer — it is a correctness requirement.</p>
+
+      <h3>Threat model</h3>
+      <div class="tier-grid">
+        <div class="tier safety">
+          <h5>Prompt Injection</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Malicious content embedded in uploaded documents attempts to hijack agent behavior. Defense: sanitize document text before injecting into prompts; never trust doc content as instructions.</p>
+        </div>
+        <div class="tier safety">
+          <h5>Data Leakage</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Cross-tenant artifact access, embedding inversion attacks, LLM memorization of training data. Defense: org-scoped document IDs, access control at store layer, no cross-org retrieval.</p>
+        </div>
+        <div class="tier safety">
+          <h5>Hallucination as Risk</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">In legal/financial contexts, a hallucinated rent amount or date is a compliance risk. Defense: citation requirement (every claim must map to a locator), ReflectTool cross-validation, confidence thresholds before surfacing.</p>
+        </div>
+      </div>
+
+      <h3>Defense layers</h3>
+      <div class="chip-list">
+        <span class="chip red">Input sanitization (strip instruction-like patterns)</span>
+        <span class="chip red">Org-scoped access control on all store queries</span>
+        <span class="chip red">Confidence thresholds (suppress low-confidence fields)</span>
+        <span class="chip red">Citation requirement (every answer must cite a locator)</span>
+        <span class="chip red">PII detection + redaction before embedding</span>
+        <span class="chip red">Sandboxed MCP execution (tool calls isolated)</span>
+        <span class="chip red">Rate limiting + cost caps per org</span>
+        <span class="chip red">Audit log (all artifact reads/writes immutable)</span>
+      </div>
+
+      <div class="warn">
+        <strong>Constitutional AI for document agents:</strong> add a rule-set the agent checks against before returning answers. Rules like "never assert a dollar amount without a citation" and "never confirm a date that isn't in the retrieved text" act as a lightweight safety layer without retraining.
+      </div>
+    </div>
+
+    <!-- FRONTIER ROADMAP -->
+    <div class="card">
+      <h2>Frontier Roadmap — Where This Goes <span class="tag bleed">Bleeding Edge</span></h2>
+      <p>The capabilities below are not current-sprint work — they are the <strong>logical endpoint</strong> of the architecture decisions made today. Build the foundation to support them.</p>
+
+      <div class="tier-grid">
+        <div class="tier bleed">
+          <h5>Self-Improving Artifacts</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Every user correction feeds back as a KTO/DPO example. System improves extraction accuracy continuously without batch retraining. The correction IS the training signal.</p>
+        </div>
+        <div class="tier bleed">
+          <h5>Persistent Agent OS</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Long-running Cyrex agents with persistent episodic memory across sessions. Agent remembers that "Tenant X always disputes renewal clauses." Context accumulates over time.</p>
+        </div>
+        <div class="tier bleed">
+          <h5>Dependency Graph Engine</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Source document changes trigger automatic recomputation of dependent artifacts (already in Core Differentiators). This is a <em>build system for knowledge</em> — like Make, but for AI-extracted facts.</p>
+        </div>
+        <div class="tier bleed">
+          <h5>Small-Model Local Inference</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Fine-tuned 7B–13B model for lease-specific extraction runs locally per customer. No cloud cost per-extraction. Only calls large model for complex reasoning. DoRA + QLoRA makes this tractable.</p>
+        </div>
+        <div class="tier bleed">
+          <h5>Graph RAG + Entity OS</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Entity Canonicalization builds a knowledge graph. Every entity (party, property, clause) is a node. Every relationship (obligation, renewal, cross-reference) is an edge. Query the graph, not just the chunks.</p>
+        </div>
+        <div class="tier bleed">
+          <h5>Streaming Document Pipeline</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Ingest triggers stream events. Artifact updates propagate in real time to connected UI. New version of a lease → diff artifact appears in seconds. Live metrics visible as pipeline runs.</p>
+        </div>
+        <div class="tier agent">
+          <h5>Cyrex MCP ecosystem</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">First-party server (Task 7) + client router (Task 5): external agents and internal pipeline share the same artifact contracts. Partner tools, IDE extensions, and diligence bots attach without custom REST glue.</p>
+        </div>
+        <div class="tier gen3">
+          <h5>Witness Graph product layer</h5>
+          <p style="font-size:0.8rem;margin:0.4rem 0;">Spatial provenance UI (see MCP &amp; Experience tab): graph + PDF deep-link + pass strip becomes the demo that proves “computed artifacts,” not generic chat.</p>
+        </div>
+      </div>
+
+      <div class="insight">
+        <strong>The meta-structure of everything:</strong> Every AI system = INPUT (data pipelines) → BRAIN (models) → MEMORY (RAG + storage) → TOOLS (APIs + execution) → CONTROL (agents / orchestration) → OUTPUT (actions / responses). Cyrex already maps cleanly to this. The 2026 upgrade is making each layer explicit, composable, observable, and independently improvable — with MCP as both <em>inbound</em> and <em>outbound</em> tool fabric.
+      </div>
+    </div>
+
+    </div><!-- /tab-frontier -->
+  </div>
+
+  <script>
+    function switchTab(el, id) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      el.classList.add('active');
+      document.getElementById('tab-' + id).classList.add('active');
+    }
+  </script>
+</body>
+</html>
