@@ -1,0 +1,352 @@
+{
+  "$defs": {
+    "ArtifactType": {
+      "description": "Types of artifacts produced by the pipeline.",
+      "enum": [
+        "canonical",
+        "extraction",
+        "reasoning",
+        "retrieval",
+        "answer",
+        "transformation",
+        "workflow",
+        "learning",
+        "system"
+      ],
+      "title": "ArtifactType",
+      "type": "string"
+    },
+    "Citation": {
+      "additionalProperties": false,
+      "description": "A verbatim quote from a source document with provenance.",
+      "properties": {
+        "citation_id": {
+          "title": "Citation Id",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "extraction_pass": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraction Pass"
+        },
+        "locator": {
+          "$ref": "#/$defs/CitationLocator"
+        },
+        "quote": {
+          "description": "Verbatim quote, max 500 chars",
+          "maxLength": 500,
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_doc_hash": {
+          "title": "Source Doc Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "source_doc_hash",
+        "locator",
+        "quote",
+        "confidence"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "CitationLocator": {
+      "additionalProperties": false,
+      "description": "Location within a source document where a quote was found.",
+      "properties": {
+        "char_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char End"
+        },
+        "char_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char Start"
+        },
+        "element_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Element Id"
+        },
+        "locator_type": {
+          "enum": [
+            "char_range",
+            "page_range",
+            "element_id"
+          ],
+          "title": "Locator Type",
+          "type": "string"
+        },
+        "page_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page End"
+        },
+        "page_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Start"
+        }
+      },
+      "required": [
+        "locator_type"
+      ],
+      "title": "CitationLocator",
+      "type": "object"
+    },
+    "ExtractionMethod": {
+      "description": "Methods by which a field was extracted.",
+      "enum": [
+        "regex",
+        "llm",
+        "cross_ref",
+        "pattern",
+        "vision"
+      ],
+      "title": "ExtractionMethod",
+      "type": "string"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "description": "Provenance metadata for an artifact bundle.",
+      "properties": {
+        "cross_references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cross References",
+          "type": "array"
+        },
+        "depended_on_by": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depended On By",
+          "type": "array"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "passes": {
+          "items": {
+            "$ref": "#/$defs/ProvenancePass"
+          },
+          "title": "Passes",
+          "type": "array"
+        },
+        "source_doc_hash": {
+          "title": "Source Doc Hash",
+          "type": "string"
+        },
+        "synthesized_from": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Synthesized From",
+          "type": "array"
+        },
+        "version": {
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "source_doc_hash",
+        "document_id"
+      ],
+      "title": "Provenance",
+      "type": "object"
+    },
+    "ProvenancePass": {
+      "additionalProperties": false,
+      "description": "A single extraction pass with metadata.",
+      "properties": {
+        "extraction_time_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraction Time Ms"
+        },
+        "fields_extracted": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fields Extracted",
+          "type": "array"
+        },
+        "method": {
+          "$ref": "#/$defs/ExtractionMethod"
+        },
+        "pass_number": {
+          "title": "Pass Number",
+          "type": "integer"
+        },
+        "prompt_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Version"
+        }
+      },
+      "required": [
+        "pass_number",
+        "method"
+      ],
+      "title": "ProvenancePass",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Main container for an artifact with full provenance.",
+  "properties": {
+    "artifact_id": {
+      "title": "Artifact Id",
+      "type": "string"
+    },
+    "artifact_type": {
+      "$ref": "#/$defs/ArtifactType"
+    },
+    "citations": {
+      "items": {
+        "$ref": "#/$defs/Citation"
+      },
+      "title": "Citations",
+      "type": "array"
+    },
+    "confidence": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Confidence",
+      "type": "number"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "document_id": {
+      "title": "Document Id",
+      "type": "string"
+    },
+    "is_deleted": {
+      "default": false,
+      "title": "Is Deleted",
+      "type": "boolean"
+    },
+    "payload": {
+      "additionalProperties": true,
+      "title": "Payload",
+      "type": "object"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance"
+    },
+    "source_doc_hash": {
+      "title": "Source Doc Hash",
+      "type": "string"
+    },
+    "version": {
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "document_id",
+    "artifact_type",
+    "source_doc_hash",
+    "confidence",
+    "provenance"
+  ],
+  "title": "ArtifactBundle",
+  "type": "object"
+}

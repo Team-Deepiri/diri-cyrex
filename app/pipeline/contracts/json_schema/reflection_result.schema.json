@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "ReflectionIssue": {
+      "additionalProperties": false,
+      "description": "A single issue found during reflection/validation.",
+      "properties": {
+        "citation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Citation Id"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "field_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field Name"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "title": "ReflectionIssue",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Result from ReflectTool validation pass.",
+  "properties": {
+    "confidence_floor": {
+      "default": 0.6,
+      "title": "Confidence Floor",
+      "type": "number"
+    },
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ReflectionIssue"
+      },
+      "title": "Issues",
+      "type": "array"
+    },
+    "low_confidence_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Low Confidence Fields",
+      "type": "array"
+    },
+    "missing_citation_fields": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Missing Citation Fields",
+      "type": "array"
+    },
+    "passed": {
+      "title": "Passed",
+      "type": "boolean"
+    },
+    "unverifiable_citations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Unverifiable Citations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "passed"
+  ],
+  "title": "ReflectionResult",
+  "type": "object"
+}
