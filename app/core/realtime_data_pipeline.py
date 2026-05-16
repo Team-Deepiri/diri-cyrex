@@ -27,7 +27,7 @@ Architecture:
 All data is processed asynchronously with back-pressure support.
 """
 
-from typing import Dict, List, Optional, Any, Literal, Callable
+from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
@@ -36,7 +36,6 @@ import json
 import uuid
 import re
 import hashlib
-import traceback
 
 from ..logging_config import get_logger
 
@@ -47,8 +46,10 @@ logger = get_logger("cyrex.realtime_pipeline")
 # Data models
 # ---------------------------------------------------------------------------
 
+
 class DataCategory(str, Enum):
     """Categories of pipeline data"""
+
     AGENT_INTERACTION = "agent_interaction"
     TOOL_EXECUTION = "tool_execution"
     USER_FEEDBACK = "user_feedback"
@@ -64,6 +65,7 @@ class DataCategory(str, Enum):
 
 class RouteTarget(str, Enum):
     """Pipeline route targets"""
+
     HELOX = "helox"
     CYREX = "cyrex"
     BOTH = "both"
@@ -71,12 +73,14 @@ class RouteTarget(str, Enum):
 
 class DataFormat(str, Enum):
     """Whether data is raw (unprocessed) or structured (parsed/typed)"""
+
     RAW = "raw"
     STRUCTURED = "structured"
 
 
 class RecordStatus(str, Enum):
     """Processing status of a pipeline record"""
+
     PENDING = "pending"
     VALIDATED = "validated"
     TRANSFORMED = "transformed"
@@ -89,9 +93,11 @@ class RecordStatus(str, Enum):
 # Pipeline record
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class PipelineRecord:
     """A single record flowing through the pipeline"""
+
     record_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     category: DataCategory = DataCategory.AGENT_INTERACTION
     route: RouteTarget = RouteTarget.BOTH
@@ -113,7 +119,7 @@ class PipelineRecord:
     user_id: Optional[str] = None
     tool_name: Optional[str] = None
     model_name: Optional[str] = None
-    quality_score: Optional[float] = None        # 0.0–1.0
+    quality_score: Optional[float] = None  # 0.0–1.0
     execution_time_ms: Optional[float] = None
     tags: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -220,7 +226,9 @@ class PipelineRecord:
         if self.context:
             parts.append(f"[Context] {self.context}")
         if self.structured_payload:
-            parts.append(f"[Structured Data] {json.dumps(self.structured_payload, default=str)}")
+            parts.append(
+                f"[Structured Data] {json.dumps(self.structured_payload, default=str)}"
+            )
         return "\n".join(parts) if parts else self.input_text or self.output_text
 
     def _build_raw_text(self) -> str:
@@ -238,6 +246,7 @@ class PipelineRecord:
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
+
 
 class RecordValidator:
     """Validates pipeline records before processing"""
@@ -258,17 +267,25 @@ class RecordValidator:
 
         # Must have some content
         has_text = bool(record.input_text or record.output_text or record.instruction)
-        has_structured = record.data_format == DataFormat.STRUCTURED and record.structured_payload
+        has_structured = (
+            record.data_format == DataFormat.STRUCTURED and record.structured_payload
+        )
         if not has_text and not has_structured:
             errors.append("Record has no content (no text and no structured payload)")
 
         # Content length check
-        total_len = len(record.input_text) + len(record.output_text) + len(record.instruction)
+        total_len = (
+            len(record.input_text) + len(record.output_text) + len(record.instruction)
+        )
         if has_text and total_len < cls.MIN_CONTENT_LENGTH:
-            errors.append(f"Content too short ({total_len} chars, min {cls.MIN_CONTENT_LENGTH})")
+            errors.append(
+                f"Content too short ({total_len} chars, min {cls.MIN_CONTENT_LENGTH})"
+            )
 
         if total_len > cls.MAX_RECORD_SIZE:
-            errors.append(f"Content too large ({total_len} chars, max {cls.MAX_RECORD_SIZE})")
+            errors.append(
+                f"Content too large ({total_len} chars, max {cls.MAX_RECORD_SIZE})"
+            )
 
         # Quality score range
         if record.quality_score is not None:
@@ -276,7 +293,10 @@ class RecordValidator:
                 errors.append(f"quality_score out of range: {record.quality_score}")
 
         # Structured data must have a payload
-        if record.data_format == DataFormat.STRUCTURED and not record.structured_payload:
+        if (
+            record.data_format == DataFormat.STRUCTURED
+            and not record.structured_payload
+        ):
             errors.append("data_format is STRUCTURED but structured_payload is empty")
 
         return errors
@@ -286,14 +306,18 @@ class RecordValidator:
 # Data transformations
 # ---------------------------------------------------------------------------
 
+
 class DataTransformer:
     """Applies cleaning and enrichment transformations to records"""
 
     # Patterns to strip from training data
     _PII_PATTERNS = [
-        (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), '[SSN_REDACTED]'),        # SSN
-        (re.compile(r'\b\d{16}\b'), '[CARD_REDACTED]'),                    # credit cards
-        (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL_REDACTED]'),
+        (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[SSN_REDACTED]"),  # SSN
+        (re.compile(r"\b\d{16}\b"), "[CARD_REDACTED]"),  # credit cards
+        (
+            re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+            "[EMAIL_REDACTED]",
+        ),
     ]
 
     @classmethod
@@ -312,11 +336,11 @@ class DataTransformer:
             text = getattr(record, attr, "")
             if text:
                 # Collapse excessive whitespace
-                text = re.sub(r'[ \t]+', ' ', text)
+                text = re.sub(r"[ \t]+", " ", text)
                 # Remove null bytes
-                text = text.replace('\x00', '')
+                text = text.replace("\x00", "")
                 # Strip leading/trailing whitespace per line
-                text = '\n'.join(line.strip() for line in text.splitlines())
+                text = "\n".join(line.strip() for line in text.splitlines())
                 setattr(record, attr, text.strip())
         return record
 
@@ -334,8 +358,8 @@ class DataTransformer:
     @classmethod
     def _enrich_metadata(cls, record: PipelineRecord) -> PipelineRecord:
         """Add derived metadata fields"""
-        record.metadata["content_length"] = (
-            len(record.input_text) + len(record.output_text)
+        record.metadata["content_length"] = len(record.input_text) + len(
+            record.output_text
         )
         record.metadata["content_hash"] = record.content_hash()
         record.metadata["has_structured_data"] = (
@@ -344,9 +368,9 @@ class DataTransformer:
         )
         if record.execution_time_ms is not None:
             record.metadata["execution_time_bucket"] = (
-                "fast" if record.execution_time_ms < 500
-                else "medium" if record.execution_time_ms < 5000
-                else "slow"
+                "fast"
+                if record.execution_time_ms < 500
+                else "medium" if record.execution_time_ms < 5000 else "slow"
             )
         return record
 
@@ -354,6 +378,7 @@ class DataTransformer:
 # ---------------------------------------------------------------------------
 # Pipeline processor
 # ---------------------------------------------------------------------------
+
 
 class RealtimeDataPipeline:
     """
@@ -437,6 +462,7 @@ class RealtimeDataPipeline:
         # Redis Streams (for Helox route)
         try:
             from .redis_streams_broker import RedisStreamsBroker
+
             self._redis_broker = RedisStreamsBroker()
             connected = await self._redis_broker.connect()
             if connected:
@@ -452,6 +478,7 @@ class RealtimeDataPipeline:
         # Memory manager (for Cyrex route)
         try:
             from .memory_manager import get_memory_manager
+
             self._memory_manager = await get_memory_manager()
             self.logger.info("Pipeline connected to MemoryManager")
         except Exception as e:
@@ -460,6 +487,7 @@ class RealtimeDataPipeline:
         # Synapse broker (for Cyrex live pub/sub)
         try:
             from ..integrations.synapse_broker import get_synapse_broker
+
             self._synapse = await get_synapse_broker()
             self.logger.info("Pipeline connected to Synapse broker")
         except Exception as e:
@@ -468,6 +496,7 @@ class RealtimeDataPipeline:
         # Training data store (local CSV/JSONL fallback)
         try:
             from .training_data_store import get_training_data_store
+
             self._training_store = get_training_data_store()
             self.logger.info("Pipeline connected to TrainingDataStore")
         except Exception as e:
@@ -517,7 +546,11 @@ class RealtimeDataPipeline:
         # Run pre-ingestion hooks
         for hook in self._pre_hooks:
             try:
-                record = await hook(record) if asyncio.iscoroutinefunction(hook) else hook(record)
+                record = (
+                    await hook(record)
+                    if asyncio.iscoroutinefunction(hook)
+                    else hook(record)
+                )
             except Exception as e:
                 self.logger.warning(f"Pre-hook error: {e}")
 
@@ -554,7 +587,11 @@ class RealtimeDataPipeline:
         Convenience method – accepts raw fields without requiring a PipelineRecord.
         Used by agent tool calls and auto-capture.
         """
-        fmt = DataFormat(data_format) if data_format in DataFormat.__members__.values() else DataFormat.RAW
+        fmt = (
+            DataFormat(data_format)
+            if data_format in DataFormat.__members__.values()
+            else DataFormat.RAW
+        )
         if structured_payload and fmt == DataFormat.RAW:
             fmt = DataFormat.STRUCTURED
 
@@ -711,13 +748,19 @@ class RealtimeDataPipeline:
                 await asyncio.sleep(30)  # every 30 seconds
                 if self._redis:
                     metrics = {
-                        k: json.dumps(v) if not isinstance(v, (str, int, float)) else str(v)
+                        k: (
+                            json.dumps(v)
+                            if not isinstance(v, (str, int, float))
+                            else str(v)
+                        )
                         for k, v in self._stats.items()
                     }
                     metrics["timestamp"] = datetime.utcnow().isoformat()
                     await self._redis.xadd(
-                        self.METRICS_STREAM, metrics,
-                        maxlen=5_000, approximate=True,
+                        self.METRICS_STREAM,
+                        metrics,
+                        maxlen=5_000,
+                        approximate=True,
                     )
             except asyncio.CancelledError:
                 raise
@@ -808,7 +851,10 @@ class RealtimeDataPipeline:
         Fallback: local TrainingDataStore (CSV/JSONL)
         """
         # Quality gate
-        if record.quality_score is not None and record.quality_score < self.MIN_HELOX_QUALITY:
+        if (
+            record.quality_score is not None
+            and record.quality_score < self.MIN_HELOX_QUALITY
+        ):
             self._stats["quality_filtered"] += 1
             self.logger.debug(
                 f"Helox quality filter: {record.record_id} "
@@ -833,11 +879,14 @@ class RealtimeDataPipeline:
             try:
                 redis_payload = {
                     k: json.dumps(v) if not isinstance(v, str) else v
-                    for k, v in payload.items() if v is not None
+                    for k, v in payload.items()
+                    if v is not None
                 }
                 await self._redis.xadd(
-                    stream, redis_payload,
-                    maxlen=50_000, approximate=True,
+                    stream,
+                    redis_payload,
+                    maxlen=50_000,
+                    approximate=True,
                 )
                 sent = True
                 self.logger.debug(
@@ -884,7 +933,10 @@ class RealtimeDataPipeline:
         if self._memory_manager:
             try:
                 from .types import MemoryType
-                importance = record.quality_score if record.quality_score is not None else 0.6
+
+                importance = (
+                    record.quality_score if record.quality_score is not None else 0.6
+                )
                 await self._memory_manager.store_memory(
                     content=payload["content"],
                     memory_type=MemoryType.SEMANTIC,
@@ -956,8 +1008,10 @@ class RealtimeDataPipeline:
                         "input_text": record.input_text[:500],  # truncate
                     }
                     await self._redis.xadd(
-                        self.DLQ_STREAM, dlq_payload,
-                        maxlen=10_000, approximate=True,
+                        self.DLQ_STREAM,
+                        dlq_payload,
+                        maxlen=10_000,
+                        approximate=True,
                     )
                 except Exception:
                     pass
@@ -984,8 +1038,8 @@ class RealtimeDataPipeline:
 
     def _mark_seen(self, content_hash: str):
         """Mark content as seen within the dedup window"""
-        self._recent_hashes[content_hash] = (
-            datetime.utcnow() + timedelta(seconds=self._dedup_window_seconds)
+        self._recent_hashes[content_hash] = datetime.utcnow() + timedelta(
+            seconds=self._dedup_window_seconds
         )
 
     def _prune_dedup_window(self):

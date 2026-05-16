@@ -1,0 +1,44 @@
+[
+  {
+    "event_type": "pass_discrepancy",
+    "document_id": "lease_001",
+    "section_id": "financial_terms",
+    "page": 1,
+    "artifact_id": "art_001",
+    "field_name": "base_rent",
+    "pass_a_value": 4500,
+    "pass_b_value": 4600,
+    "confidence_delta": 0.05
+  },
+  {
+    "event_type": "reflect_failure",
+    "document_id": "lease_001",
+    "section_id": "termination_clause",
+    "page": 3,
+    "artifact_id": "art_002",
+    "field_name": "termination_notice",
+    "issue_code": "quote_not_found",
+    "message": "Citation quote not found in source text"
+  },
+  {
+    "event_type": "low_confidence_field",
+    "document_id": "lease_001",
+    "section_id": "obligations",
+    "page": 2,
+    "artifact_id": "art_003",
+    "field_name": "maintenance_obligation",
+    "confidence": 0.52
+  },
+  {
+    "event_type": "duel_disagreement",
+    "document_id": "lease_001",
+    "section_id": "financial_terms",
+    "page": 1,
+    "artifact_id": "art_duel_001",
+    "field_name": "notice_period",
+    "agent_a_value": 90,
+    "agent_b_value": 60,
+    "agent_a_confidence": 0.88,
+    "agent_b_confidence": 0.80
+  }
+]

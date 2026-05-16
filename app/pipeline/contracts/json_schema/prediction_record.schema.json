@@ -1,0 +1,99 @@
+{
+  "$defs": {
+    "PredictionStatus": {
+      "description": "Status of a prediction relative to an actual value.",
+      "enum": [
+        "no_prior",
+        "confirmed",
+        "anomalous",
+        "novel"
+      ],
+      "title": "PredictionStatus",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "A prior prediction for a field, updated with actuals post-extraction.",
+  "properties": {
+    "actual_value": {
+      "anyOf": [
+        {},
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Actual Value"
+    },
+    "corpus_doc_count": {
+      "default": 0,
+      "title": "Corpus Doc Count",
+      "type": "integer"
+    },
+    "field_name": {
+      "title": "Field Name",
+      "type": "string"
+    },
+    "last_prior_update": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Last Prior Update"
+    },
+    "predicted_mean": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Predicted Mean"
+    },
+    "predicted_range": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Predicted Range"
+    },
+    "sigma_delta": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sigma Delta"
+    },
+    "status": {
+      "$ref": "#/$defs/PredictionStatus",
+      "default": "no_prior"
+    }
+  },
+  "required": [
+    "field_name"
+  ],
+  "title": "PredictionRecord",
+  "type": "object"
+}
