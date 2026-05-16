@@ -1,0 +1,1 @@
+"""Golden Cyrex contracts fixtures."""

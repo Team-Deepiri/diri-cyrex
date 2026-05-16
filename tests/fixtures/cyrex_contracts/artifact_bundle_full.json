@@ -1,0 +1,52 @@
+{
+  "artifact_id": "art_abc123def456",
+  "document_id": "lease_001",
+  "version": 1,
+  "artifact_type": "extraction",
+  "source_doc_hash": "sha256:a1b2c3d4e5f6",
+  "confidence": 0.92,
+  "payload": {
+    "fields": [
+      {"field_name": "base_rent", "value": 4500, "value_type": "currency"},
+      {"field_name": "lease_start", "value": "2024-01-01", "value_type": "date"}
+    ]
+  },
+  "provenance": {
+    "source_doc_hash": "sha256:a1b2c3d4e5f6",
+    "document_id": "lease_001",
+    "version": 1,
+    "model_id": "gpt-4o",
+    "passes": [
+      {
+        "pass_number": 1,
+        "method": "llm",
+        "fields_extracted": ["base_rent", "lease_start", "security_deposit"],
+        "prompt_version": "lease-v2.1",
+        "extraction_time_ms": 1200
+      }
+    ],
+    "depends_on": [],
+    "depended_on_by": ["art_001_answer"],
+    "cross_references": [],
+    "synthesized_from": []
+  },
+  "citations": [
+    {
+      "citation_id": "cit_001",
+      "document_id": "lease_001",
+      "source_doc_hash": "sha256:a1b2c3d4e5f6",
+      "locator": {
+        "locator_type": "char_range",
+        "char_start": 120,
+        "char_end": 127,
+        "page_start": 1,
+        "page_end": 1
+      },
+      "quote": "4500.00",
+      "confidence": 0.95,
+      "extraction_pass": 1
+    }
+  ],
+  "created_at": "2024-06-15T10:30:00Z",
+  "is_deleted": false
+}
