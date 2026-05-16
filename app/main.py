@@ -227,6 +227,7 @@ async def health():
     }
 
     # Redis health
+    r = None
     try:
         import redis.asyncio as redis
         redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
@@ -234,11 +235,12 @@ async def health():
             redis_url = f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
         r = redis.from_url(redis_url, db=settings.REDIS_DB, decode_responses=True, socket_connect_timeout=5.0)
         await r.ping()
-        await r.close()
         health_status["services"]["redis"] = "healthy"
     except Exception as e:
         health_status["services"]["redis"] = f"unhealthy: {e}"
-
+    finally:
+        if r:
+            await r.close()
     return health_status
 
 # Metrics
