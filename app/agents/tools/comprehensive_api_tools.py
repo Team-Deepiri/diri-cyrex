@@ -4,12 +4,12 @@ Full suite of API integrations for agent tasks
 """
 from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
-import asyncio
-import json
-import httpx
-import uuid
+
+from diri_agent_toolbox import AsyncHttpToolbox, ToolRunner
+from diri_agent_toolbox.models import ToolResult as ToolboxToolResult
+
 from ...integrations.api_bridge import get_api_bridge
 from ...database.postgres import get_postgres_manager
 from ...logging_config import get_logger
@@ -72,6 +72,17 @@ class ToolResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+def _from_toolbox_result(tb: ToolboxToolResult) -> ToolResult:
+    """Map diri-agent-toolbox ToolResult to Cyrex ToolResult dataclass."""
+    return ToolResult(
+        success=tb.success,
+        result=tb.result,
+        error=tb.error,
+        execution_time_ms=tb.execution_time_ms,
+        metadata=dict(tb.metadata) if tb.metadata else {},
+    )
+
+
 class ComprehensiveAPITools:
     """
     Comprehensive suite of API tools for agent use
@@ -80,7 +91,9 @@ class ComprehensiveAPITools:
     
     def __init__(self, session_id: Optional[str] = None):
         self.session_id = session_id
-        self._http_client: Optional[httpx.AsyncClient] = None
+        # Portable HTTP/data/math via diri-agent-toolbox (matches Division Doc extraction).
+        self._http_toolbox = AsyncHttpToolbox(timeout=30.0, block_private_hosts=False)
+        self._tool_runner = ToolRunner(http=self._http_toolbox)
         self._tool_registry: Dict[str, ToolDefinition] = {}
         self._tool_implementations: Dict[str, Callable] = {}
         self.logger = logger
@@ -88,16 +101,9 @@ class ComprehensiveAPITools:
         # Register all tools
         self._register_all_tools()
     
-    async def _get_http_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client"""
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(timeout=30.0)
-        return self._http_client
-    
     async def close(self):
         """Close resources"""
-        if self._http_client:
-            await self._http_client.aclose()
+        await self._http_toolbox.aclose()
     
     def _register_all_tools(self):
         """Register all available tools"""
@@ -403,25 +409,11 @@ class ComprehensiveAPITools:
         headers: Optional[Dict[str, str]] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> ToolResult:
-        """HTTP GET request"""
-        start = datetime.utcnow()
-        try:
-            client = await self._get_http_client()
-            response = await client.get(url, headers=headers, params=params)
-            
-            try:
-                result = response.json()
-            except:
-                result = response.text
-            
-            return ToolResult(
-                success=response.is_success,
-                result=result,
-                execution_time_ms=(datetime.utcnow() - start).total_seconds() * 1000,
-                metadata={"status_code": response.status_code},
-            )
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """HTTP GET request (diri-agent-toolbox AsyncHttpToolbox)."""
+        r = await self._tool_runner.execute(
+            "http_get", url=url, headers=headers, params=params
+        )
+        return _from_toolbox_result(r)
     
     async def _http_post(
         self,
@@ -429,25 +421,11 @@ class ComprehensiveAPITools:
         data: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> ToolResult:
-        """HTTP POST request"""
-        start = datetime.utcnow()
-        try:
-            client = await self._get_http_client()
-            response = await client.post(url, json=data, headers=headers)
-            
-            try:
-                result = response.json()
-            except:
-                result = response.text
-            
-            return ToolResult(
-                success=response.is_success,
-                result=result,
-                execution_time_ms=(datetime.utcnow() - start).total_seconds() * 1000,
-                metadata={"status_code": response.status_code},
-            )
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """HTTP POST request (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "http_post", url=url, data=data, headers=headers
+        )
+        return _from_toolbox_result(r)
     
     async def _http_request(
         self,
@@ -456,31 +434,11 @@ class ComprehensiveAPITools:
         data: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
     ) -> ToolResult:
-        """Generic HTTP request"""
-        start = datetime.utcnow()
-        try:
-            client = await self._get_http_client()
-            response = await client.request(
-                method.upper(),
-                url,
-                json=data if method.upper() in ["POST", "PUT", "PATCH"] else None,
-                params=data if method.upper() == "GET" else None,
-                headers=headers,
-            )
-            
-            try:
-                result = response.json()
-            except:
-                result = response.text
-            
-            return ToolResult(
-                success=response.is_success,
-                result=result,
-                execution_time_ms=(datetime.utcnow() - start).total_seconds() * 1000,
-                metadata={"status_code": response.status_code},
-            )
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Generic HTTP request (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "http_request", method=method, url=url, data=data, headers=headers
+        )
+        return _from_toolbox_result(r)
     
     async def _db_query(
         self,
@@ -577,153 +535,69 @@ class ComprehensiveAPITools:
         )
     
     async def _calculate(self, expression: str) -> ToolResult:
-        """Evaluate math expression"""
-        try:
-            import math
-            
-            # Safe evaluation with limited scope
-            allowed_names = {
-                "abs": abs, "round": round, "min": min, "max": max,
-                "pow": pow, "sum": sum, "len": len,
-                "sqrt": math.sqrt, "log": math.log, "log10": math.log10,
-                "sin": math.sin, "cos": math.cos, "tan": math.tan,
-                "pi": math.pi, "e": math.e,
-            }
-            
-            # Simple sanitization
-            for char in expression:
-                if char not in "0123456789+-*/().^, abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_":
-                    return ToolResult(success=False, error=f"Invalid character: {char}")
-            
-            result = eval(expression, {"__builtins__": {}}, allowed_names)
-            return ToolResult(success=True, result=result)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Evaluate math expression (diri-agent-toolbox safe AST; not Cyrex eval)."""
+        r = await self._tool_runner.execute("calculate", expression=expression)
+        return _from_toolbox_result(r)
     
     async def _statistics(
         self,
         numbers: List[Union[int, float]],
         operations: Optional[List[str]] = None,
     ) -> ToolResult:
-        """Calculate statistics"""
-        try:
-            import statistics
-            
-            ops = operations or ["mean", "median", "std", "min", "max", "sum"]
-            result = {}
-            
-            for op in ops:
-                if op == "mean":
-                    result["mean"] = statistics.mean(numbers)
-                elif op == "median":
-                    result["median"] = statistics.median(numbers)
-                elif op == "std":
-                    result["std"] = statistics.stdev(numbers) if len(numbers) > 1 else 0
-                elif op == "min":
-                    result["min"] = min(numbers)
-                elif op == "max":
-                    result["max"] = max(numbers)
-                elif op == "sum":
-                    result["sum"] = sum(numbers)
-            
-            result["count"] = len(numbers)
-            return ToolResult(success=True, result=result)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Calculate statistics (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "statistics", numbers=numbers, operations=operations
+        )
+        return _from_toolbox_result(r)
     
     async def _text_summarize(
         self,
         text: str,
         max_length: int = 200,
     ) -> ToolResult:
-        """Summarize text (basic implementation)"""
-        try:
-            # Basic extractive summarization
-            sentences = text.replace('\n', ' ').split('. ')
-            if len(sentences) <= 2:
-                return ToolResult(success=True, result=text[:max_length])
-            
-            # Take first and last sentences as simple summary
-            summary = f"{sentences[0]}. {sentences[-1]}"
-            if len(summary) > max_length:
-                summary = summary[:max_length] + "..."
-            
-            return ToolResult(success=True, result=summary)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Summarize text (diri-agent-toolbox extractive helper)."""
+        r = await self._tool_runner.execute(
+            "text_summarize", text=text, max_length=max_length
+        )
+        return _from_toolbox_result(r)
     
     async def _text_extract(
         self,
         text: str,
         fields: List[str],
     ) -> ToolResult:
-        """Extract fields from text (basic implementation)"""
-        try:
-            import re
-            
-            result = {}
-            text_lower = text.lower()
-            
-            for field in fields:
-                # Simple pattern matching
-                pattern = rf'{field.lower()}[:\s]+([^\n,;]+)'
-                match = re.search(pattern, text_lower)
-                if match:
-                    result[field] = match.group(1).strip()
-                else:
-                    result[field] = None
-            
-            return ToolResult(success=True, result=result)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Extract fields from text (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "text_extract", text=text, fields=fields
+        )
+        return _from_toolbox_result(r)
     
     async def _json_parse(self, json_string: str) -> ToolResult:
-        """Parse JSON string"""
-        try:
-            result = json.loads(json_string)
-            return ToolResult(success=True, result=result)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Parse JSON string (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute("json_parse", json_string=json_string)
+        return _from_toolbox_result(r)
     
     async def _json_format(
         self,
         data: Any,
         indent: int = 2,
     ) -> ToolResult:
-        """Format as JSON"""
-        try:
-            result = json.dumps(data, indent=indent, default=str)
-            return ToolResult(success=True, result=result)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Format as JSON (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "json_format", data=data, indent=indent
+        )
+        return _from_toolbox_result(r)
     
     async def _data_transform(
         self,
         data: Dict[str, Any],
         mapping: Dict[str, str],
     ) -> ToolResult:
-        """Transform data using mapping"""
-        try:
-            result = {}
-            for new_key, old_key in mapping.items():
-                if old_key in data:
-                    result[new_key] = data[old_key]
-                elif '.' in old_key:
-                    # Handle nested keys
-                    value = data
-                    for key in old_key.split('.'):
-                        if isinstance(value, dict):
-                            value = value.get(key)
-                        else:
-                            value = None
-                            break
-                    result[new_key] = value
-                else:
-                    result[new_key] = None
-            
-            return ToolResult(success=True, result=result)
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Transform data using mapping (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "data_transform", data=data, mapping=mapping
+        )
+        return _from_toolbox_result(r)
     
     async def _call_external_api(
         self,
@@ -744,13 +618,11 @@ class ComprehensiveAPITools:
         timezone: str = "UTC",
         format: str = "%Y-%m-%d %H:%M:%S",
     ) -> ToolResult:
-        """Get current time"""
-        try:
-            now = datetime.utcnow()
-            result = now.strftime(format)
-            return ToolResult(success=True, result=result, metadata={"timezone": timezone})
-        except Exception as e:
-            return ToolResult(success=False, error=str(e))
+        """Get current time (diri-agent-toolbox; respects IANA timezones)."""
+        r = await self._tool_runner.execute(
+            "current_time", timezone=timezone, format=format
+        )
+        return _from_toolbox_result(r)
     
     # ========================================================================
     # Public API
