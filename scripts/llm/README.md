@@ -91,11 +91,11 @@ bash scripts/llm/test-ollama-connection.sh
 
 **Option 1: Pre-pull During Docker Build (Recommended)**
 ```bash
-# Default models (mistral:7b, llama3:8b, codellama:7b) are pre-pulled automatically
+# Example baseline models
 docker-compose build ollama
 
 # Customize which models to pre-pull
-docker-compose build --build-arg MODELS="mistral:7b llama3:8b codellama:7b" ollama
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b qwen3.5:9b qwen3.6:35b gpt-oss:20b granite4.1:8b qwen3-coder-next devstral-small-2:24b phi4-mini:3.8b" ollama
 ```
 
 **Option 2: Use Installation Script**
@@ -106,12 +106,37 @@ bash scripts/llm/check-ollama-models.sh
 
 **Option 3: Manual Pull**
 ```bash
-# Pull default model
+# Pull baseline models
 ollama pull mistral:7b
 
-# Pull alternative models
+# Pull compatibility / coding alternatives
 ollama pull llama3:8b
 ollama pull codellama:7b
+ollama pull qwen2.5:7b
+ollama pull qwen2.5-coder:7b
+ollama pull deepseek-coder:6.7b
+ollama pull phi3:mini
+
+# Pull newer open-source / open-weight options
+ollama pull qwen3:8b
+ollama pull qwen3.5:9b
+ollama pull qwen3.6:35b
+ollama pull gpt-oss:20b
+ollama pull deepseek-r1:8b
+ollama pull gemma3:4b
+ollama pull gemma4:e2b
+ollama pull phi4-mini:3.8b
+ollama pull granite4.1:8b
+ollama pull granite3.3:8b
+ollama pull ministral-3:8b
+ollama pull olmo-3:7b
+ollama pull lfm2:24b
+ollama pull laguna-xs.2:q4_K_M
+ollama pull nemotron-3-nano:4b
+ollama pull medgemma1.5:4b
+ollama pull qwen3-coder-next
+ollama pull devstral:24b
+ollama pull devstral-2:123b
 ```
 
 ### List Models
@@ -134,11 +159,11 @@ Once Ollama is running, you can access:
 The project includes a custom Dockerfile that pre-pulls models during build:
 
 ```bash
-# Build with default models (mistral:7b, llama3:8b, codellama:7b)
+# Build with baseline models
 docker-compose build ollama
 
 # Customize models to pre-pull
-docker-compose build --build-arg MODELS="mistral:7b llama3:8b" ollama
+docker-compose build --build-arg MODELS="mistral:7b llama3:8b qwen3.5:9b qwen3.6:35b gpt-oss:20b granite4.1:8b qwen3-coder-next devstral-small-2:24b phi4-mini:3.8b" ollama
 
 # Disable pre-pull (use check-ollama-models.sh script instead)
 docker-compose build --build-arg PRE_PULL_MODELS=false ollama
@@ -152,7 +177,7 @@ ollama:
     dockerfile: Dockerfile
     args:
       PRE_PULL_MODELS: "true"  # Enable/disable pre-pull
-      MODELS: "mistral:7b llama3:8b codellama:7b"  # Space-separated list
+      MODELS: "mistral:7b llama3:8b qwen3.5:9b qwen3.6:35b gpt-oss:20b granite4.1:8b qwen3-coder-next devstral-small-2:24b phi4-mini:3.8b"  # Space-separated list
 ```
 
 ### Manual Docker Run
@@ -167,10 +192,29 @@ docker run -d -p 11434:11434 --name ollama ollama/ollama
 
 ### Model Customization
 
-**Default Models:**
-- `mistral:7b` (4.1GB) - Default model, efficient and high quality
-- `llama3:8b` (4.7GB) - Alternative general-purpose model
-- `codellama:7b` (3.8GB) - Specialized for coding tasks
+**Recommended Baseline Models:**
+- `mistral:7b` (4.1GB) - Primary project default
+- `llama3:8b` (4.7GB) - Compatibility model for existing flows
+- `codellama:7b` (3.8GB) - Coding tasks
+- `qwen2.5:7b` (4.4GB) - Alternative general-purpose model
+- `qwen2.5-coder:7b` (4.4GB) - Alternative coding model
+- `deepseek-coder:6.7b` (4.1GB) - Advanced coding model
+- `phi3:mini` (2.3GB) - Low-resource fallback
+
+**Current Open-Source / Open-Weight Options Added to the Checker:**
+- `qwen3:0.6b`, `qwen3:1.7b`, `qwen3:4b`, `qwen3:8b`, `qwen3:14b`, `qwen3:30b`, `qwen3:32b`, `qwen3:235b`
+- `qwen3.5:0.8b`, `qwen3.5:2b`, `qwen3.5:4b`, `qwen3.5:9b`, `qwen3.5:27b`, `qwen3.5:35b`, `qwen3.5:122b`
+- `qwen3.6:27b`, `qwen3.6:35b`, `qwen3-next:80b`
+- `deepseek-r1:1.5b`, `deepseek-r1:7b`, `deepseek-r1:8b`, `deepseek-r1:14b`, `deepseek-r1:32b`, `deepseek-r1:70b`
+- `gemma3:270m`, `gemma3:1b`, `gemma3:4b`, `gemma3:12b`, `gemma3:27b`
+- `gemma4:e2b`, `gemma4:e4b`, `gemma4:26b`, `gemma4:31b`
+- `gpt-oss:20b`, `gpt-oss:120b`
+- `phi4:14b`, `phi4-mini:3.8b`, `granite3.3:2b`, `granite3.3:8b`, `granite4:350m`, `granite4:1b`, `granite4:3b`, `granite4.1:3b`, `granite4.1:8b`, `granite4.1:30b`, `olmo-3:7b`, `olmo-3:32b`
+- `ministral-3:3b`, `ministral-3:8b`, `ministral-3:14b`, `lfm2:24b`, `laguna-xs.2:latest`, `laguna-xs.2:nvfp4`, `laguna-xs.2:q4_K_M`
+- `nemotron-cascade-2:30b`, `nemotron-3-nano:4b`, `nemotron-3-nano:30b`, `nemotron3:33b`
+- `medgemma1.5:4b`, `medgemma:4b`, `medgemma:27b`
+- `qwen3-coder:30b`, `qwen3-coder:480b`, `qwen3-coder-next:latest`, `devstral:24b`, `devstral-small-2:24b`, `devstral-2:123b`, `deepcoder:1.5b`, `deepcoder:14b`, `yi-coder:9b`
+- `llama4:scout`, `llama4:maverick`
 
 **See `docker/ollama/README.md` for detailed documentation on model customization.**
 

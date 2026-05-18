@@ -1,9 +1,8 @@
-# Portable agent tools (local monorepo: from diri-cyrex use pip install -e ../../diri-agent-toolbox)
-diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git
-
-# Internal submodule packages
--e ./diri-agent-testing-utils
--e ./deepiri-dataset-processor[all]
+# Internal Deepiri packages pinned by git revision for deterministic builds.
+# Floating refs such as @main are possible, but these SHAs should be bumped
+# deliberately so Docker/test builds do not change underneath a PR.
+diri-agent-testing-utils @ git+https://github.com/Team-Deepiri/diri-agent-testing-utils.git@a934468cd142e2cb38bd365e8548b4bdde77bf73
+deepiri-dataset-processor[all] @ git+https://github.com/Team-Deepiri/deepiri-dataset-processor.git@4fc692fc2ba52509c67070e7cbf4b526277e0252
 
 # Core dependencies (torch is already in base PyTorch image)
 fastapi==0.112.2
