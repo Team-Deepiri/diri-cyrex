@@ -16,9 +16,16 @@ from deepiri_modelkit.streaming.sidecar_utils import resolve_grpc_addr
 # Generated stubs import `proto.synapse.v1...`, so add the gen root to sys.path.
 _GEN_ROOT = Path(__file__).resolve().parent / "gen"
 if str(_GEN_ROOT) not in sys.path:
-    sys.path.append(str(_GEN_ROOT))
+    sys.path.insert(0, str(_GEN_ROOT))
 
-from proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc  # type: ignore
+try:
+    from proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc  # type: ignore
+except Exception as exc:  # pragma: no cover - depends on generated protobuf runtime
+    sugar_glider_pb2 = None  # type: ignore[assignment]
+    sugar_glider_pb2_grpc = None  # type: ignore[assignment]
+    _PROTO_IMPORT_ERROR: Optional[Exception] = exc
+else:
+    _PROTO_IMPORT_ERROR = None
 
 
 class SidecarError(RuntimeError):
@@ -42,6 +49,11 @@ class SynapseSidecarClient:
         default_sender: str = "cyrex",
         grpc_addr: Optional[str] = None,
     ):
+        if sugar_glider_pb2 is None or sugar_glider_pb2_grpc is None:
+            raise SidecarError(
+                "Synapse sidecar protobuf stubs are unavailable or incompatible"
+            ) from _PROTO_IMPORT_ERROR
+
         self.base_url = base_url.rstrip("/")
         self.timeout_sec = timeout_sec
         self.default_sender = default_sender

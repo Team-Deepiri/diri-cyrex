@@ -4,7 +4,7 @@ Foundation for all Cyrex agents with invoke methods, prompt, and tool support
 """
 from typing import Dict, List, Optional, Any, Callable
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import time
 from ..core.types import AgentConfig, AgentRole, AgentStatus, MemoryType, MessagePriority, Message
@@ -20,6 +20,12 @@ from ..integrations.api_bridge import get_api_bridge
 from ..logging_config import get_logger
 from .metrics import get_agent_metrics_collector
 import json
+
+try:
+    # Exposed at module level so tests can patch this symbol directly.
+    from ..integrations.synapse_broker import get_synapse_broker
+except Exception:  # pragma: no cover - fallback for environments without broker deps
+    get_synapse_broker = None
 
 logger = get_logger("cyrex.agent.base")
 
@@ -37,7 +43,7 @@ class AgentResponse:
         self.metadata = metadata or {}
         self.tool_calls = tool_calls or []
         self.confidence = confidence
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -147,7 +153,8 @@ class BaseAgent(ABC):
         if self._broker is not None:
             return
         try:
-            from ..integrations.synapse_broker import get_synapse_broker
+            if get_synapse_broker is None:
+                raise RuntimeError("SynapseBroker integration not available")
             self._broker = await get_synapse_broker()
             channel = f"agent:{self.agent_id}"
             await self._broker.subscribe(channel, self._handle_incoming_message)
