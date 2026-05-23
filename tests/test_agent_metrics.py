@@ -11,11 +11,13 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime, timezone
 
-from app.agents.metrics import (
-    AgentMetricsCollector,
-    get_agent_metrics_collector,
-    AgentMetricsSummary,
-    AgentInvokeRecord,
+from app.agents.metrics import get_agent_metrics_collector
+from diri_agent_testing_utils import (
+    AgentTestHarness,
+    FakeLLMProvider,
+    MockMemoryManager,
+    MockRedis,
+    MockVectorStore,
 )
 
 
@@ -35,6 +37,47 @@ def reset_metrics_singleton():
 @pytest.fixture
 def collector():
     return get_agent_metrics_collector()
+
+
+# ---------------------------------------------------------------------------
+# diri-agent-testing-utils migration check
+# ---------------------------------------------------------------------------
+
+def test_shared_agent_testing_utils_fixtures_are_loaded(
+    fake_llm,
+    mock_redis,
+    mock_vector_store,
+    mock_memory_manager,
+    agent_test_harness,
+):
+    """Shared mocks/harness now come from diri-agent-testing-utils."""
+    assert isinstance(fake_llm, FakeLLMProvider)
+    assert isinstance(mock_redis, MockRedis)
+    assert isinstance(mock_vector_store, MockVectorStore)
+    assert isinstance(mock_memory_manager, MockMemoryManager)
+
+    class DummyAgent:
+        async def invoke(self, input_text, context=None, **kwargs):
+            return type(
+                "Response",
+                (),
+                {
+                    "content": "ok",
+                    "metadata": {},
+                    "tool_calls": [],
+                    "confidence": 1.0,
+                },
+            )()
+
+    assert isinstance(agent_test_harness(DummyAgent()), AgentTestHarness)
+
+
+def test_cyrex_mock_llm_provider_is_shared_fake_with_local_shape(mock_llm_provider):
+    """Cyrex keeps only local adapter shape around the shared fake LLM."""
+    assert isinstance(mock_llm_provider, FakeLLMProvider)
+    assert mock_llm_provider.invoke("anything") == "Test response from LLM"
+    assert mock_llm_provider.is_available() is True
+    assert mock_llm_provider.health_check()["model"] == "test-model"
 
 
 # ---------------------------------------------------------------------------
@@ -368,18 +411,13 @@ class TestAgentCommunication:
         mock_broker.publish = AsyncMock(return_value="msg-id-123")
         mock_broker.subscribe = AsyncMock(return_value="sub-id-1")
 
-        with patch(
-            "app.agents.base_agent.get_synapse_broker",
-            new_callable=AsyncMock,
-            return_value=mock_broker,
-        ):
-            # Inject broker directly to skip _initialize_broker
-            mock_agent._broker = mock_broker
-
-            msg_id = await mock_agent.send_message(
-                recipient_agent_id="agent-B",
-                payload={"task": "analyze"},
-            )
+        # Inject broker directly to skip _initialize_broker.
+        # This test validates send_message publish semantics only.
+        mock_agent._broker = mock_broker
+        msg_id = await mock_agent.send_message(
+            recipient_agent_id="agent-B",
+            payload={"task": "analyze"},
+        )
 
         assert msg_id == "msg-id-123"
         mock_broker.publish.assert_called_once()

@@ -1,0 +1,42 @@
+[
+  {
+    "field_name": "base_rent",
+    "predicted_range": {"min": 3800.0, "max": 5200.0},
+    "predicted_mean": 4500.0,
+    "actual_value": 4500.0,
+    "sigma_delta": 0.0,
+    "status": "confirmed",
+    "corpus_doc_count": 147,
+    "last_prior_update": "2024-06-10T08:00:00Z"
+  },
+  {
+    "field_name": "security_deposit",
+    "predicted_range": {"min": 4000.0, "max": 6000.0},
+    "predicted_mean": 5000.0,
+    "actual_value": 5000.0,
+    "sigma_delta": 0.0,
+    "status": "confirmed",
+    "corpus_doc_count": 147,
+    "last_prior_update": "2024-06-10T08:00:00Z"
+  },
+  {
+    "field_name": "notice_period",
+    "predicted_range": {"min": 60.0, "max": 120.0},
+    "predicted_mean": 90.0,
+    "actual_value": 60.0,
+    "sigma_delta": -0.5,
+    "status": "anomalous",
+    "corpus_doc_count": 147,
+    "last_prior_update": "2024-06-10T08:00:00Z"
+  },
+  {
+    "field_name": "custom_addendum",
+    "predicted_range": null,
+    "predicted_mean": null,
+    "actual_value": null,
+    "sigma_delta": null,
+    "status": "no_prior",
+    "corpus_doc_count": 0,
+    "last_prior_update": null
+  }
+]

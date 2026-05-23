@@ -79,8 +79,11 @@ langchain-milvus>=0.1.4
 langchain-huggingface>=0.0.3
 langchain-ollama>=1.0.0  # Updated for langchain-core 1.x compatibility (requires pydantic>=2.9 and ollama>=0.6.0)
 langchain-classic>=1.0.0  # Provides deprecated AgentExecutor and other legacy functionality (REQUIRES langchain-core 1.x)
-langchain-experimental>=0.4.0  # Experimental agent functionality (compatible with langchain-core 1.x stack)
+langchain-experimental>=0.4.0  # Experimental agent functionality
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
+
+# Deepiri Agent Tools (Team-Deepiri/diri-agent-toolbox). Local dev: pip install -e ../../diri-agent-toolbox
+diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git
 
 # LangGraph for tool-calling agents and multi-agent workflows
 # The primary agent execution path uses langgraph.prebuilt.create_react_agent

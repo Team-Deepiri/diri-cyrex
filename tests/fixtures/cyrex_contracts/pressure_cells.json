@@ -1,0 +1,38 @@
+[
+  {
+    "document_id": "lease_001",
+    "section_id": "financial_terms",
+    "page": 1,
+    "discrepancy_count": 3,
+    "reflect_failures": 0,
+    "low_confidence_count": 1,
+    "duel_disagreements": 1,
+    "score": 0.82,
+    "is_fault_zone": true,
+    "drill_down_artifact_ids": ["art_001", "art_duel_001", "art_004"]
+  },
+  {
+    "document_id": "lease_001",
+    "section_id": "termination_clause",
+    "page": 3,
+    "discrepancy_count": 0,
+    "reflect_failures": 2,
+    "low_confidence_count": 1,
+    "duel_disagreements": 0,
+    "score": 0.45,
+    "is_fault_zone": false,
+    "drill_down_artifact_ids": ["art_002", "art_005"]
+  },
+  {
+    "document_id": "lease_001",
+    "section_id": "obligations",
+    "page": 2,
+    "discrepancy_count": 1,
+    "reflect_failures": 0,
+    "low_confidence_count": 2,
+    "duel_disagreements": 0,
+    "score": 0.38,
+    "is_fault_zone": false,
+    "drill_down_artifact_ids": ["art_003"]
+  }
+]

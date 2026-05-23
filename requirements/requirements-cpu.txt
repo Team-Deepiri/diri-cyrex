@@ -90,6 +90,9 @@ langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade 
 langchain-experimental==0.0.65  # Experimental agent functionality (compatible with langchain-core 0.2.x)
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
+# Deepiri Agent Tools (Team-Deepiri/diri-agent-toolbox). Local dev: pip install -e ../../diri-agent-toolbox
+diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git
+
 # LangGraph for tool-calling agents and multi-agent workflows
 # The primary agent execution path uses langgraph.prebuilt.create_react_agent
 # which provides native tool calling via ChatOllama (no ReAct text parsing needed)
