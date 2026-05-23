@@ -149,7 +149,6 @@ def configure_logging(log_level: str = "INFO", log_file: str = None) -> None:
     # adapter so services use the centralized schema + PII masking logic.
     try:
         import os
-        import sys
 
         # Path: <repo-root>/deps/deepiri-logger/python
         pkg_path = Path(__file__).resolve().parents[1] / "deps" / "deepiri-logger" / "python"
