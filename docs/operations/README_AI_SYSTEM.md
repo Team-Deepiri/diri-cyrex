@@ -36,8 +36,8 @@ diri-cyrex/app/
 ### 1. Install Dependencies
 
 ```bash
-cd diri-cyrex
-pip install -r requirements.txt
+cd diri-cyrex  # or: cd deepiri-platform/diri-cyrex
+pip install -r requirements/requirements.txt
 ```
 
 ### 2. Configure Environment
@@ -45,9 +45,9 @@ pip install -r requirements.txt
 ```bash
 # .env file
 OPENAI_API_KEY=sk-...
-INTENT_CLASSIFIER_MODEL_PATH=./models/intent_classifier  # Optional
-PRODUCTIVITY_AGENT_MODEL_PATH=./models/productivity_agent  # Optional
-CHROMA_PERSIST_DIR=./chroma_db
+INTENT_CLASSIFIER_MODEL_PATH=./models/intent_classifier  # Optional (not used in current services)
+PRODUCTIVITY_AGENT_MODEL_PATH=./models/productivity_agent  # Optional (not used in current services)
+CHROMA_PERSIST_DIR=./chroma_db  # Optional (Chroma vector store, fallback to Milvus)
 MILVUS_HOST=localhost
 MILVUS_PORT=19530
 ```
@@ -66,8 +66,8 @@ uvicorn app.main:app --reload --port 8000
 # Health check
 curl http://localhost:8000/health
 
-# Intent classification
-curl -X POST http://localhost:8000/agent/ai/classify-intent \
+# Command routing (replaces old /agent/ai/classify-intent)
+curl -X POST http://localhost:8000/agent/intelligence/route-command \
   -H "x-api-key: change-me" \
   -H "Content-Type: application/json" \
   -d '{"command": "Create a task to refactor auth.ts", "user_role": "software_engineer"}'
@@ -207,7 +207,7 @@ User Feedback -> Reward -> Agent Learning
 2. Train PPO agent offline
 3. Deploy for online learning
 
-See `DEEPIRI_AI_SYSTEM.md` for detailed training instructions.
+See [QUICK_START_TRAINING.md](../getting-started/QUICK_START_TRAINING.md) for training guidance.
 
 ---
 
@@ -217,7 +217,7 @@ Full API documentation available at:
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
-All endpoints are under `/agent/ai/*`
+All endpoints are under `/agent/` (see [HOW_TO_USE_CYREX.md](../getting-started/HOW_TO_USE_CYREX.md) for full endpoint list)
 
 ---
 
@@ -231,5 +231,5 @@ The AI system integrates seamlessly with the gamification system:
 
 ---
 
-For complete documentation, see `DEEPIRI_AI_SYSTEM.md`
+For complete documentation, see the [Deepiri AI System docs](../getting-started/HOW_TO_USE_CYREX.md)
 
