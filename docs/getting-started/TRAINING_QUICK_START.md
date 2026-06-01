@@ -1,5 +1,7 @@
 # Training Quick Start - Run This Now
 
+> **Status: Pending Implementation** — The `app/train/scripts/` directory and scripts referenced in this document are planned but not yet implemented. Scripts will be placed in `train/scripts/` (mapped to `/app/train` inside the Docker container).
+
 ##  Immediate Steps (Copy & Paste)
 
 ### Option 1: All-in-One (Easiest)

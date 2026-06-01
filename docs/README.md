@@ -40,6 +40,7 @@ Detailed documentation for specific features and capabilities.
 
 #### Workflows & Interfaces
 - **[LangGraph Workflow Playground](./features/LANGGRAPH_WORKFLOW_PLAYGROUND.md)** - Testing interface for LangGraph multi-agent workflows
+- **[Additional API Endpoints](./features/UNDOCUMENTED_ENDPOINTS.md)** - Documentation for undocumented API endpoints
 
 ### [Development](./development/)
 Development guides, training documentation, and technical deep-dives.
@@ -92,13 +93,15 @@ Build, deployment, optimization, and operational documentation.
 
 ## Additional Resources
 
-- **Root README**: See the main project README for project overview
-- **API Documentation**: API endpoints are documented in the codebase
+- **Root README**: See the [root README](../README.md) for project overview
+- **Platform Documentation**: See [deepiri-platform/docs/DOCUMENTATION_INDEX.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/docs/DOCUMENTATION_INDEX.md) for the full platform documentation index (this repo is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform))
+- **API Documentation**: Swagger UI at http://localhost:8000/docs (when running)
 - **Code Comments**: Inline documentation in source files
 - **Component READMEs**: 
   - [Agents README](../app/agents/README.md) - Agent system details
   - [Tests README](../tests/README.md) - Test suite documentation
   - [Cyrex Interface README](../cyrex-interface/README.md) - Frontend interface guide
+  - [Cyrex-AGI README](../cyrex-agi/README.md) - Autonomous AGI system (Phase 5, placeholder)
 
 ## Documentation Updates
 
@@ -106,6 +109,15 @@ This documentation is actively maintained. If you find issues or have suggestion
 1. Check if the information exists in another section
 2. Review the codebase for the latest implementation
 3. Update documentation as needed
+
+## Note on Cross-Repo References
+
+This repo (`diri-cyrex`) is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform). Some documentation references external repos that are part of the platform:
+
+- **`deepiri-modelkit`** — Shared contracts for RAG components (see `COMPLETE_RAG_IMPLEMENTATION.md`)
+- **`deepiri-helox`** — ML training pipelines used by Cyrex-AGI
+- **`deepiri-synapse`** — Streaming/messaging platform used by Cyrex
+- **`deepiri-gpu-utils`** — GPU detection utilities for Docker builds
 
 ---
 

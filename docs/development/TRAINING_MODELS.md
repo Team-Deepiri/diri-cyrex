@@ -1,5 +1,7 @@
 # TRAINING 
 
+> **Status: Pending Implementation** — The `app/train/scripts/` directory and scripts referenced in this document are planned but not yet implemented. Scripts will be placed in `train/scripts/` (mapped to `/app/train` inside the Docker container).
+
 ## OPTION 1: ONE COMMAND (RECOMMENDED)
 
 ### Open Terminal/PowerShell and run:
