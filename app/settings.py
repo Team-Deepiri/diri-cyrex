@@ -71,7 +71,7 @@ class Settings(BaseSettings):
     # Agent file sandbox: root directory agents may read/write within via the
     # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are
     # rejected. Resolved at runtime; override with the AGENT_FILE_SANDBOX_ROOT
-    # env var. Defaults to an app-relative dir (matches CHROMA_PERSIST_DIR).
+    # env var. Defaults to an app-relative persistent directory (./agent_sandbox).
     AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
     
     # PostgreSQL Configuration
@@ -233,7 +233,7 @@ class Settings(BaseSettings):
     # Agent file sandbox: root directory agents may read/write within via the
     # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are
     # rejected. Resolved at runtime; override with the AGENT_FILE_SANDBOX_ROOT
-    # env var. Defaults to an app-relative dir (matches CHROMA_PERSIST_DIR).
+    # env var. Defaults to an app-relative persistent directory (./agent_sandbox).
     AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
     
     # PostgreSQL Configuration
