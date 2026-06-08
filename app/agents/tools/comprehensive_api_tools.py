@@ -6,13 +6,16 @@ from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 from diri_agent_toolbox import AsyncHttpToolbox, ToolRunner
+from diri_agent_toolbox.files import SandboxedFileToolbox
 from diri_agent_toolbox.models import ToolResult as ToolboxToolResult
 
 from ...integrations.api_bridge import get_api_bridge
 from ...database.postgres import get_postgres_manager
 from ...logging_config import get_logger
+from ...settings import settings
 
 logger = get_logger("cyrex.agent.tools.api")
 
@@ -93,7 +96,11 @@ class ComprehensiveAPITools:
         self.session_id = session_id
         # Portable HTTP/data/math via diri-agent-toolbox (matches Division Doc extraction).
         self._http_toolbox = AsyncHttpToolbox(timeout=30.0, block_private_hosts=False)
-        self._tool_runner = ToolRunner(http=self._http_toolbox)
+        # Sandboxed file I/O confined to the configured root (paths outside are rejected).
+        sandbox_root = Path(settings.AGENT_FILE_SANDBOX_ROOT)
+        sandbox_root.mkdir(parents=True, exist_ok=True)
+        self._file_toolbox = SandboxedFileToolbox(root_dir=sandbox_root)
+        self._tool_runner = ToolRunner(http=self._http_toolbox, files=self._file_toolbox)
         self._tool_registry: Dict[str, ToolDefinition] = {}
         self._tool_implementations: Dict[str, Callable] = {}
         self.logger = logger
@@ -393,7 +400,70 @@ class ComprehensiveAPITools:
             ),
             self._get_current_time
         )
-    
+
+        # ====================================================================
+        # File Tools (sandboxed; diri-agent-toolbox SandboxedFileToolbox)
+        # ====================================================================
+
+        self._register_tool(
+            ToolDefinition(
+                name="file_read",
+                description="Read a text file under the agent file sandbox root",
+                category=ToolCategory.FILE,
+                parameters={
+                    "path": {"type": "string", "description": "Path relative to the sandbox root"},
+                    "encoding": {"type": "string", "description": "Text encoding (default utf-8)"},
+                },
+                required_params=["path"],
+                returns="File contents",
+            ),
+            self._file_read
+        )
+
+        self._register_tool(
+            ToolDefinition(
+                name="file_write",
+                description="Write text to a path under the agent file sandbox root",
+                category=ToolCategory.FILE,
+                parameters={
+                    "path": {"type": "string", "description": "Path relative to the sandbox root"},
+                    "content": {"type": "string", "description": "Text content to write"},
+                    "encoding": {"type": "string", "description": "Text encoding (default utf-8)"},
+                },
+                required_params=["path", "content"],
+                returns="Write result metadata",
+            ),
+            self._file_write
+        )
+
+        self._register_tool(
+            ToolDefinition(
+                name="file_list_dir",
+                description="List directory entries under the agent file sandbox root",
+                category=ToolCategory.FILE,
+                parameters={
+                    "path": {"type": "string", "description": "Directory relative to the sandbox root (default '.')"},
+                },
+                required_params=[],
+                returns="List of directory entries",
+            ),
+            self._file_list_dir
+        )
+
+        self._register_tool(
+            ToolDefinition(
+                name="file_stat",
+                description="Get file metadata under the agent file sandbox root",
+                category=ToolCategory.FILE,
+                parameters={
+                    "path": {"type": "string", "description": "Path relative to the sandbox root"},
+                },
+                required_params=["path"],
+                returns="File metadata",
+            ),
+            self._file_stat
+        )
+
     def _register_tool(self, definition: ToolDefinition, implementation: Callable):
         """Register a tool with its implementation"""
         self._tool_registry[definition.name] = definition
@@ -623,7 +693,34 @@ class ComprehensiveAPITools:
             "current_time", timezone=timezone, format=format
         )
         return _from_toolbox_result(r)
-    
+
+    async def _file_read(self, path: str, encoding: str = "utf-8") -> ToolResult:
+        """Read a sandboxed text file (diri-agent-toolbox SandboxedFileToolbox)."""
+        r = await self._tool_runner.execute("file_read", path=path, encoding=encoding)
+        return _from_toolbox_result(r)
+
+    async def _file_write(
+        self,
+        path: str,
+        content: str,
+        encoding: str = "utf-8",
+    ) -> ToolResult:
+        """Write a sandboxed text file (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute(
+            "file_write", path=path, content=content, encoding=encoding
+        )
+        return _from_toolbox_result(r)
+
+    async def _file_list_dir(self, path: str = ".") -> ToolResult:
+        """List a sandboxed directory (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute("file_list_dir", path=path)
+        return _from_toolbox_result(r)
+
+    async def _file_stat(self, path: str) -> ToolResult:
+        """Stat a sandboxed path (diri-agent-toolbox)."""
+        r = await self._tool_runner.execute("file_stat", path=path)
+        return _from_toolbox_result(r)
+
     # ========================================================================
     # Public API
     # ========================================================================

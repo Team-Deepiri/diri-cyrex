@@ -135,14 +135,24 @@ class AgentFactory:
     
     @staticmethod
     async def _register_agent_tools(agent: BaseAgent, instance_id: Optional[str] = None):
-        """Register tools with agent"""
-        from .tools.api_tools import register_api_tools
+        """Register tools with agent.
+
+        Portable tools (HTTP, JSON/data/math/text, files) come from the
+        diri-agent-toolbox via ComprehensiveAPITools - the canonical registrar.
+        The dynamic external-bridge tools (api_<tool>) are registered alongside
+        since they provide capabilities the toolbox does not.
+        """
+        from .tools.comprehensive_api_tools import register_api_tools as register_toolbox_tools
+        from .tools.api_tools import register_api_tools as register_bridge_tools
         from .tools.memory_tools import register_memory_tools
         from .tools.utility_tools import register_utility_tools
         from .tools.spreadsheet_tools import register_spreadsheet_tools
-        
+
         await register_memory_tools(agent)
-        await register_api_tools(agent)
+        # Toolbox-backed portable tools; keep the instance so its async HTTP
+        # client can be closed on agent teardown.
+        agent._comprehensive_tools = await register_toolbox_tools(agent, session_id=instance_id)
+        await register_bridge_tools(agent)
         await register_utility_tools(agent)
         await register_spreadsheet_tools(agent, instance_id)
 
