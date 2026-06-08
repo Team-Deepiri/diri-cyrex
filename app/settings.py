@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
 
     # Agent file sandbox: root directory agents may read/write within via the
-    # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are rejected.
-    AGENT_FILE_SANDBOX_ROOT: str = "/tmp/cyrex_agent_sandbox"
+    # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are
+    # rejected. Resolved at runtime; override with the AGENT_FILE_SANDBOX_ROOT
+    # env var. Defaults to an app-relative dir (matches CHROMA_PERSIST_DIR).
+    AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
     
     # PostgreSQL Configuration
     # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
@@ -229,8 +231,10 @@ class Settings(BaseSettings):
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
 
     # Agent file sandbox: root directory agents may read/write within via the
-    # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are rejected.
-    AGENT_FILE_SANDBOX_ROOT: str = "/tmp/cyrex_agent_sandbox"
+    # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are
+    # rejected. Resolved at runtime; override with the AGENT_FILE_SANDBOX_ROOT
+    # env var. Defaults to an app-relative dir (matches CHROMA_PERSIST_DIR).
+    AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
     
     # PostgreSQL Configuration
     # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
