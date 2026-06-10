@@ -18,6 +18,10 @@ System architecture, design patterns, and core system documentation.
 - **[Architecture](./architecture/ARCHITECTURE.md)** - Overall system architecture and design
 - **[Core Systems](./architecture/CORE_SYSTEMS.md)** - Core infrastructure components
 - **[Complete Implementation](./architecture/CYREX_COMPLETE_IMPLEMENTATION.md)** - Full implementation details
+- **[Data Storage Architecture](./architecture/DATA_STORAGE_ARCHITECTURE.md)** - Storage system design
+- **[Final Storage Architecture](./architecture/FINAL_STORAGE_ARCHITECTURE.md)** - Finalized storage design
+- **[Postgres Schema Reorganization](./architecture/POSTGRES_SCHEMA_REORGANIZATION_COMPLETE.md)** - Database schema changes
+- **[Training Data Store](./architecture/TRAINING_DATA_STORE_IMPLEMENTATION.md)** - Training data storage system
 
 ### [Features](./features/)
 Detailed documentation for specific features and capabilities.
@@ -53,12 +57,18 @@ Development guides, training documentation, and technical deep-dives.
 #### Local Development
 - **[Local Model Setup](./development/LOCAL_MODEL_SETUP.md)** - Setting up local models
 - **[Run Without Docker](./development/RUN_WITHOUT_DOCKER.md)** - Local development setup
+- **[CUDA Dev Setup](./development/CUDA_DEV_SETUP.md)** - CUDA development environment
+- **[Apple Silicon MPS Setup](./development/APPLE_SILICON_MPS_SETUP.md)** - Apple GPU development
+- **[Debugging Guide](./development/DEBUGGING_GUIDE.md)** - Debugging tips and techniques
 
 #### Advanced Techniques
 - **[LoRA Integration](./development/LORA_INTEGRATION.md)** - Low-Rank Adaptation integration
 - **[LoRA/QLoRA System](./development/LORA_QLORA_SYSTEM.md)** - LoRA and QLoRA implementation
+- **[Model Customization](./development/MODEL_CUSTOMIZATION.md)** - Custom model configuration
 - **[LangChain 1.x Upgrade](./development/LANGCHAIN_1X_UPGRADE.md)** - Upgrading to LangChain 1.x
 - **[LangGraph Migration Plan](./development/LANGGRAPH_MIGRATION_PLAN.md)** - Migration to LangGraph
+- **[Tensor Loading Optimization](./development/TENSOR_LOADING_OPTIMIZATION_PLAN.md)** - GPU tensor optimization
+- **[Indexing Pipeline Blueprint](./development/INDEXING_PIPELINE_BLUEPRINT.md)** - Data indexing pipeline
 
 ### [Operations](./operations/)
 Build, deployment, optimization, and operational documentation.
@@ -68,6 +78,10 @@ Build, deployment, optimization, and operational documentation.
 - **[Dockerfile Build Options](./operations/Dockerfile.build-options.md)** - Docker build configuration
 - **[Packages Verification](./operations/PACKAGES_VERIFICATION.md)** - Package verification guide
 - **[AI System README](./operations/README_AI_SYSTEM.md)** - AI system overview
+- **[GPU Utils Host](./operations/GPU_UTILS_HOST.md)** - GPU detection utilities
+- **[Industry Latency Optimization](./operations/INDUSTRY_LATENCY_OPTIMIZATION_PLAN.md)** - Latency optimization by industry
+- **[Latency Analysis](./operations/LATENCY_ANALYSIS_AND_OPTIMIZATION.md)** - System latency analysis
+- **[PDGE Latency Optimization](./operations/PDGE_LATENCY_OPTIMIZATION_PLAN.md)** - PDGE system latency optimization
 
 ## Quick Navigation
 
@@ -94,6 +108,8 @@ Build, deployment, optimization, and operational documentation.
 ## Additional Resources
 
 - **Root README**: See the [root README](../README.md) for project overview
+- **Algorithm Integration Analysis**: See [ALGORITHM_INTEGRATION_ANALYSIS.md](../ALGORITHM_INTEGRATION_ANALYSIS.md) - Cross-platform algorithm analysis
+- **RTX 5080 Support**: See [RTX_5080_SUPPORT.md](../RTX_5080_SUPPORT.md) - RTX 5080/5090 GPU compatibility guide
 - **Platform Documentation**: See [deepiri-platform/docs/DOCUMENTATION_INDEX.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/docs/DOCUMENTATION_INDEX.md) for the full platform documentation index (this repo is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform))
 - **API Documentation**: Swagger UI at http://localhost:8000/docs (when running)
 - **Code Comments**: Inline documentation in source files
