@@ -6,7 +6,6 @@ import redis
 import json
 from typing import Optional, Any
 from functools import wraps
-from ..settings import settings
 from ..logging_config import get_logger
 
 logger = get_logger("utils.cache")
@@ -18,13 +17,16 @@ def get_redis_client():
     """Get Redis client singleton."""
     global _redis_client
     if _redis_client is None:
+        # Lazy import to avoid circular import: app.settings -> app.utils -> cache -> app.settings
+        from ..settings import settings
         try:
             _redis_client = redis.Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
                 password=settings.REDIS_PASSWORD,
                 db=settings.REDIS_DB,
-                decode_responses=True
+                decode_responses=True,
+                socket_connect_timeout=5.0
             )
             _redis_client.ping()
             logger.info("Redis connection established")

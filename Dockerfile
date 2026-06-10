@@ -4,10 +4,13 @@
 # Build args to control build type
 ARG BUILD_TYPE=prebuilt
 ARG PYTORCH_VERSION=2.9.1
-ARG CUDA_VERSION=12.1
+ARG CUDA_VERSION=12.8
 ARG PYTHON_VERSION=3.11
-ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
-
+ARG DEVICE_TYPE=auto  # auto, gpu, cpu, mpsos - auto detects from BASE_IMAGE
+## Use CUDA 12.8 base image for RTX 5080/5090 (sm_120) support
+# If official PyTorch image doesn't exist, fallback to CUDA 12.6 and upgrade PyTorch
+ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
+# ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime
 # =============================================================================
 # OPTION 1: PREBUILT (Fast, Reliable, Larger) - DEFAULT
 # =============================================================================
@@ -24,6 +27,17 @@ ENV BUILD_TYPE=prebuilt \
 
 # Upgrade pip first for better package resolution
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Check if PyTorch with CUDA 12.8 is already installed (from CUDA 12.8 base image)
+# If not, upgrade to CUDA 12.8 for RTX 5080/5090 (sm_120) compatibility
+RUN python -c "import torch; cuda_ver = torch.version.cuda; exit(0 if cuda_ver and (cuda_ver.startswith('12.8') or float(cuda_ver.split('.')[0] + '.' + cuda_ver.split('.')[1]) >= 12.8) else 1)" 2>/dev/null || \
+    (echo "Upgrading PyTorch to CUDA 12.8 support (supports sm_50 through sm_120)..." && \
+     pip uninstall -y torch torchvision torchaudio 2>/dev/null || true && \
+     pip install --no-cache-dir --upgrade-strategy=only-if-needed \
+         --pre torch torchvision torchaudio \
+         --index-url https://download.pytorch.org/whl/nightly/cu128 && \
+     echo "✓ PyTorch with CUDA 12.8 installed successfully") || \
+    echo "✓ PyTorch with CUDA 12.8 already installed in base image"
 
 # If PyTorch is not already installed (e.g., using python:3.11-slim for CPU), install it
 # If using pytorch/pytorch:2.9.1-cuda12.6-cudnn9-runtime (GPU build), PyTorch is already installed
@@ -132,7 +146,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=3 \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
     HF_HOME=/app/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
 
@@ -151,15 +164,30 @@ RUN if [ "$BUILD_TYPE" = "from-scratch" ]; then \
             && apt-get clean; \
     fi
 
+# Copy deepiri-modelkit first (needed for installation)
+COPY deepiri-modelkit /app/deepiri-modelkit
+
 # Copy requirements first for better caching
-COPY requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
 
-# Remove torch from requirements.txt (already in base image for both types)
+# Remove torch and deepiri-modelkit editable install from requirements.txt
+# (torch already in base image, modelkit installed separately)
 RUN sed -i '/^torch/d' /app/requirements.txt && \
-    sed -i '/torch/d' /app/requirements.txt || true
+    sed -i '/torch/d' /app/requirements.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements.txt || true
 
-# Verify torch is removed
-RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
+# Verify torch and modelkit are removed
+RUN grep -v 'torch' /app/requirements.txt | grep -v 'modelkit' > /tmp/requirements_clean.txt || true
 
 # =============================================================================
 # STAGE 4: Download Heavy ML Packages (Staged for Resume)
@@ -259,11 +287,42 @@ RUN echo "📦 Download stage complete. Packages in /tmp/ml-packages:" && \
 # =============================================================================
 FROM base-prebuilt AS final-prebuilt
 
+# Re-declare ARG in this stage
+ARG DEVICE_TYPE=auto
+ARG BASE_IMAGE
+
 # Copy downloaded ML packages (if available)
 COPY --from=download-ml-packages /tmp/ml-packages /tmp/ml-packages
 
+# Copy all requirements files for conditional installation
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements/requirements-mpsos.txt /app/requirements-mpsos.txt
+
 # Upgrade pip with resume-friendly settings
 RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --upgrade pip setuptools wheel
+
+# Detect device type and set requirements file
+# Note: This detection runs before torch is installed, so we check BASE_IMAGE
+RUN if [ "$DEVICE_TYPE" = "auto" ]; then \
+        if echo "$BASE_IMAGE" | grep -qi "cpu\|slim"; then \
+            DEVICE_TYPE="cpu"; \
+        elif echo "$BASE_IMAGE" | grep -qi "mps\|macos\|darwin"; then \
+            DEVICE_TYPE="mpsos"; \
+        else \
+            DEVICE_TYPE="gpu"; \
+        fi; \
+    fi && \
+    echo "Detected device type: $DEVICE_TYPE" && \
+    if [ "$DEVICE_TYPE" = "mpsos" ]; then \
+        REQ_FILE="/app/requirements-mpsos.txt"; \
+    elif [ "$DEVICE_TYPE" = "cpu" ]; then \
+        REQ_FILE="/app/requirements-cpu.txt"; \
+    else \
+        REQ_FILE="/app/requirements.txt"; \
+    fi && \
+    echo "Using requirements file: $REQ_FILE" && \
+    echo "$REQ_FILE" > /tmp/req_file.txt
 
 # Install core dependencies first (small packages, fast)
 RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
@@ -271,6 +330,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         uvicorn[standard]==0.30.6 \
         pydantic==2.8.2 \
         pydantic-settings==2.2.1 \
+        python-multipart>=0.0.6 \
         openai==1.43.0 \
         python-dotenv==1.0.1 \
         httpx==0.27.2 \
@@ -278,6 +338,8 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         python-json-logger==2.0.7 \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
+        asyncpg>=0.29.0 \
+        watchdog>=3.0.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
@@ -291,11 +353,21 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         langchain-chroma>=0.1.0 \
         langchain-milvus>=0.1.0 \
         langchain-text-splitters>=0.0.1 \
+        langchain-ollama>=0.1.0 \
+        langchain-huggingface>=0.0.3 \
         ollama>=0.1.0 && \
     echo "✓ LangChain packages installed successfully" || \
     (echo "❌ ERROR: Failed to install critical LangChain packages" && \
      pip list | grep -E "langchain|ollama" && \
      exit 1)
+
+# Install LangGraph packages (required for multi-agent workflows)
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+        langgraph>=0.2.0,<0.3.0 \
+        langgraph-checkpoint-redis>=0.2.0 || \
+    (echo "⚠️  WARNING: LangGraph packages installation failed (optional), continuing..." && \
+     pip list | grep -E "langgraph" || echo "LangGraph not installed") && \
+    echo "✓ LangGraph packages installation completed"
 
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \
@@ -361,6 +433,81 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
     pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=2 \
         tensorboard>=2.15.0 || echo "Warning: tensorboard installation failed (optional), continuing..."
 
+# Install platform-specific requirements (including document processing packages)
+# Filter out packages already installed individually to avoid redundancy
+# Note: pip's --upgrade-strategy=only-if-needed will skip packages that already meet requirements,
+# but we filter explicitly to reduce processing time and avoid version conflicts
+RUN REQ_FILE=$(cat /tmp/req_file.txt) && \
+    echo "Installing platform-specific requirements from $REQ_FILE..." && \
+    echo "Filtering out already-installed packages..." && \
+    pip list --format=freeze | cut -d'=' -f1 | tr '[:upper:]' '[:lower:]' | sed 's/-/_/g' > /tmp/installed_packages.txt && \
+    python3 << PYEOF
+import re
+import os
+
+# Read installed packages (normalized names)
+with open('/tmp/installed_packages.txt', 'r') as f:
+    installed = {line.strip() for line in f if line.strip()}
+
+# Get requirements file path from environment
+req_file_path = open('/tmp/req_file.txt', 'r').read().strip()
+
+# Read requirements file
+with open(req_file_path, 'r') as f:
+    lines = f.readlines()
+
+# Filter requirements
+filtered = []
+skipped_count = 0
+for line in lines:
+    stripped = line.strip()
+    # Keep comments and empty lines
+    if not stripped or stripped.startswith('#'):
+        filtered.append(line)
+        continue
+    
+    # Extract package name (handle: package==version, package>=version, package[extra], etc.)
+    # Remove comments first
+    pkg_line = stripped.split('#')[0].strip()
+    match = re.match(r'^([a-zA-Z0-9_-]+)', pkg_line)
+    if match:
+        pkg_name = match.group(1).lower().replace('-', '_')
+        # Check if already installed
+        if pkg_name in installed:
+            skipped_count += 1
+            print(f"Skipping already-installed: {match.group(1)}")
+        else:
+            filtered.append(line)
+    else:
+        # Keep lines we can't parse (might be URLs, etc.)
+        filtered.append(line)
+
+# Write filtered requirements
+with open('/tmp/filtered_requirements.txt', 'w') as f:
+    f.writelines(filtered)
+
+print(f"Filtered {skipped_count} already-installed packages")
+print(f"Remaining packages to install: {len([l for l in filtered if l.strip() and not l.strip().startswith('#')])}")
+PYEOF
+
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+    -r /tmp/filtered_requirements.txt && \
+    echo "✓ Platform-specific requirements installed successfully" || \
+    (echo "⚠️  WARNING: Some requirements installation failed" && \
+     pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
+     echo "Some packages may not be fully installed")
+
+# Force install PDF parsing packages if not already installed (critical for document indexing)
+RUN echo "Verifying PDF parsing packages..." && \
+    (python -c "import pdfplumber; print('✓ pdfplumber available')" 2>/dev/null || \
+     python -c "import PyPDF2; print('✓ PyPDF2 available')" 2>/dev/null || \
+     (echo "⚠️  Neither pdfplumber nor PyPDF2 found, installing..." && \
+      pip install --no-cache-dir --upgrade-strategy=only-if-needed pdfplumber>=0.10.0 PyPDF2>=3.0.0 pdfminer.six && \
+      (python -c "import pdfplumber; print('✓ pdfplumber installed')" 2>/dev/null || \
+       python -c "import PyPDF2; print('✓ PyPDF2 installed')" 2>/dev/null || \
+       (echo "ERROR: Failed to install PDF parsing packages" && exit 1)))) && \
+    echo "✓ PDF parsing packages verified"
+
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
     python -c "import torch; print('✓ torch version:', torch.__version__); print('✓ CUDA available:', torch.cuda.is_available() if hasattr(torch.cuda, 'is_available') else False)" && \
@@ -370,11 +517,37 @@ RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && 
 
 # Create non-root user and set up directories
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers && \
+    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \
     chown -R appuser:appuser /app
 
+# Copy deepiri-modelkit (shared library) before app code
+# This allows installing it as an editable package
+COPY deepiri-modelkit /app/deepiri-modelkit
+
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
 # Copy application code
-COPY app /app/app
+COPY diri-cyrex/app /app/app
+
+# Copy tests directory if it exists in build context
+# Create placeholder first to ensure directory exists
+RUN touch /app/tests/__init__.py
+# Copy tests directory - will fail build if tests/ doesn't exist, which is expected
+# If tests directory is missing, create it manually before building
+COPY diri-cyrex/tests /app/tests
+RUN chown -R appuser:appuser /app/tests
+
+# Copy K8s env loader scripts (before switching user)
+COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
+COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
 
 # Switch to non-root user
 USER appuser
@@ -386,13 +559,18 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start the application
+# Start the application with entrypoint that loads K8s env
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
 # =============================================================================
 # STAGE 6: Install All Packages (FROM-SCRATCH PATH)
 # =============================================================================
 FROM install-torch AS base-from-scratch
+
+# Re-declare ARG in this stage
+ARG DEVICE_TYPE=auto
+ARG BASE_IMAGE
 
 # Set common environment variables
 ENV PYTHONUNBUFFERED=1 \
@@ -401,7 +579,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=3 \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
     HF_HOME=/app/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
 
@@ -415,15 +592,68 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 FROM base-from-scratch AS final-from-scratch
 
-# Copy requirements and setup
-COPY requirements.txt /app/requirements.txt
+# Re-declare ARG in this stage
+ARG DEVICE_TYPE=auto
+ARG BASE_IMAGE
 
-# Remove torch from requirements.txt (already installed in base-from-scratch)
+# Copy deepiri-modelkit first (needed for installation)
+COPY deepiri-modelkit /app/deepiri-modelkit
+
+# Copy all requirements files for conditional installation
+COPY diri-cyrex/requirements/requirements.txt /app/requirements.txt
+COPY diri-cyrex/requirements/requirements-cpu.txt /app/requirements-cpu.txt
+COPY diri-cyrex/requirements/requirements-mpsos.txt /app/requirements-mpsos.txt
+
+# Remove torch and deepiri-modelkit editable install from requirements files
+# (torch already installed in base-from-scratch, modelkit installed separately)
 RUN sed -i '/^torch/d' /app/requirements.txt && \
-    sed -i '/torch/d' /app/requirements.txt || true
+    sed -i '/torch/d' /app/requirements.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements.txt || true && \
+    sed -i '/^torch/d' /app/requirements-cpu.txt && \
+    sed -i '/torch/d' /app/requirements-cpu.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements-cpu.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements-cpu.txt || true && \
+    sed -i '/^torch/d' /app/requirements-mpsos.txt && \
+    sed -i '/torch/d' /app/requirements-mpsos.txt && \
+    sed -i '/deepiri-modelkit/d' /app/requirements-mpsos.txt && \
+    sed -i '/^-e.*modelkit/d' /app/requirements-mpsos.txt || true
 
-# Verify torch is removed
-RUN grep -v 'torch' /app/requirements.txt > /tmp/requirements_no_torch.txt || true
+# Detect device type and set requirements file
+# Note: This detection runs after torch is installed, so we can check CUDA availability
+RUN if [ "$DEVICE_TYPE" = "auto" ]; then \
+        if python -c "import torch; exit(0 if torch.cuda.is_available() else 1)" 2>/dev/null; then \
+            DEVICE_TYPE="gpu"; \
+        elif echo "$BASE_IMAGE" | grep -qi "cpu\|slim"; then \
+            DEVICE_TYPE="cpu"; \
+        elif echo "$BASE_IMAGE" | grep -qi "mps\|macos\|darwin"; then \
+            DEVICE_TYPE="mpsos"; \
+        else \
+            DEVICE_TYPE="cpu"; \
+        fi; \
+    fi && \
+    echo "Detected device type: $DEVICE_TYPE" && \
+    if [ "$DEVICE_TYPE" = "mpsos" ]; then \
+        REQ_FILE="/app/requirements-mpsos.txt"; \
+    elif [ "$DEVICE_TYPE" = "cpu" ]; then \
+        REQ_FILE="/app/requirements-cpu.txt"; \
+    else \
+        REQ_FILE="/app/requirements.txt"; \
+    fi && \
+    echo "Using requirements file: $REQ_FILE" && \
+    echo "$REQ_FILE" > /tmp/req_file.txt
+
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
+# Verify torch and modelkit are removed
+RUN grep -v 'torch' /app/requirements.txt | grep -v 'modelkit' > /tmp/requirements_clean.txt || true
 
 # Copy downloaded ML packages (if available from download stage)
 # The download-ml-packages stage always creates /tmp/ml-packages (even if empty)
@@ -442,6 +672,7 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         uvicorn[standard]==0.30.6 \
         pydantic==2.8.2 \
         pydantic-settings==2.2.1 \
+        python-multipart>=0.0.6 \
         openai==1.43.0 \
         python-dotenv==1.0.1 \
         httpx==0.27.2 \
@@ -449,6 +680,8 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         python-json-logger==2.0.7 \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
+        asyncpg>=0.29.0 \
+        watchdog>=3.0.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
@@ -462,11 +695,21 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed \
         langchain-chroma>=0.1.0 \
         langchain-milvus>=0.1.0 \
         langchain-text-splitters>=0.0.1 \
+        langchain-ollama>=0.1.0 \
+        langchain-huggingface>=0.0.3 \
         ollama>=0.1.0 && \
     echo "✓ LangChain packages installed successfully" || \
     (echo "❌ ERROR: Failed to install critical LangChain packages" && \
      pip list | grep -E "langchain|ollama" && \
      exit 1)
+
+# Install LangGraph packages (required for multi-agent workflows)
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+        langgraph>=0.2.0,<0.3.0 \
+        langgraph-checkpoint-redis>=0.2.0 || \
+    (echo "⚠️  WARNING: LangGraph packages installation failed (optional), continuing..." && \
+     pip list | grep -E "langgraph" || echo "LangGraph not installed") && \
+    echo "✓ LangGraph packages installation completed"
 
 # Install ML libraries (prefer downloaded packages, fallback to PyPI)
 RUN if [ -d "/tmp/ml-packages" ] && [ "$(ls -A /tmp/ml-packages)" ]; then \
@@ -532,6 +775,81 @@ RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 -
     pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=2 \
         tensorboard>=2.15.0 || echo "Warning: tensorboard installation failed (optional), continuing..."
 
+# Install platform-specific requirements (including document processing packages)
+# Filter out packages already installed individually to avoid redundancy
+# Note: pip's --upgrade-strategy=only-if-needed will skip packages that already meet requirements,
+# but we filter explicitly to reduce processing time and avoid version conflicts
+RUN REQ_FILE=$(cat /tmp/req_file.txt) && \
+    echo "Installing platform-specific requirements from $REQ_FILE..." && \
+    echo "Filtering out already-installed packages..." && \
+    pip list --format=freeze | cut -d'=' -f1 | tr '[:upper:]' '[:lower:]' | sed 's/-/_/g' > /tmp/installed_packages.txt && \
+    python3 << PYEOF
+import re
+import os
+
+# Read installed packages (normalized names)
+with open('/tmp/installed_packages.txt', 'r') as f:
+    installed = {line.strip() for line in f if line.strip()}
+
+# Get requirements file path from environment
+req_file_path = open('/tmp/req_file.txt', 'r').read().strip()
+
+# Read requirements file
+with open(req_file_path, 'r') as f:
+    lines = f.readlines()
+
+# Filter requirements
+filtered = []
+skipped_count = 0
+for line in lines:
+    stripped = line.strip()
+    # Keep comments and empty lines
+    if not stripped or stripped.startswith('#'):
+        filtered.append(line)
+        continue
+    
+    # Extract package name (handle: package==version, package>=version, package[extra], etc.)
+    # Remove comments first
+    pkg_line = stripped.split('#')[0].strip()
+    match = re.match(r'^([a-zA-Z0-9_-]+)', pkg_line)
+    if match:
+        pkg_name = match.group(1).lower().replace('-', '_')
+        # Check if already installed
+        if pkg_name in installed:
+            skipped_count += 1
+            print(f"Skipping already-installed: {match.group(1)}")
+        else:
+            filtered.append(line)
+    else:
+        # Keep lines we can't parse (might be URLs, etc.)
+        filtered.append(line)
+
+# Write filtered requirements
+with open('/tmp/filtered_requirements.txt', 'w') as f:
+    f.writelines(filtered)
+
+print(f"Filtered {skipped_count} already-installed packages")
+print(f"Remaining packages to install: {len([l for l in filtered if l.strip() and not l.strip().startswith('#')])}")
+PYEOF
+
+RUN pip install --no-cache-dir --upgrade-strategy=only-if-needed --timeout=300 --retries=3 \
+    -r /tmp/filtered_requirements.txt && \
+    echo "✓ Platform-specific requirements installed successfully" || \
+    (echo "⚠️  WARNING: Some requirements installation failed" && \
+     pip list | grep -E "(pdfplumber|python-docx|pytesseract|Pillow|pdf2image|beautifulsoup4|openpyxl)" || \
+     echo "Some packages may not be fully installed")
+
+# Force install PDF parsing packages if not already installed (critical for document indexing)
+RUN echo "Verifying PDF parsing packages..." && \
+    (python -c "import pdfplumber; print('✓ pdfplumber available')" 2>/dev/null || \
+     python -c "import PyPDF2; print('✓ PyPDF2 available')" 2>/dev/null || \
+     (echo "⚠️  Neither pdfplumber nor PyPDF2 found, installing..." && \
+      pip install --no-cache-dir --upgrade-strategy=only-if-needed pdfplumber>=0.10.0 PyPDF2>=3.0.0 pdfminer.six && \
+      (python -c "import pdfplumber; print('✓ pdfplumber installed')" 2>/dev/null || \
+       python -c "import PyPDF2; print('✓ PyPDF2 installed')" 2>/dev/null || \
+       (echo "ERROR: Failed to install PDF parsing packages" && exit 1)))) && \
+    echo "✓ PDF parsing packages verified"
+
 # Verify critical packages
 RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && \
     python -c "import torch; print('✓ torch version:', torch.__version__); print('✓ CUDA available:', torch.cuda.is_available() if hasattr(torch.cuda, 'is_available') else False)" && \
@@ -541,11 +859,37 @@ RUN python -c "import numpy; print('✓ numpy version:', numpy.__version__)" && 
 
 # Create non-root user and set up directories
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
-    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers && \
+    mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \
     chown -R appuser:appuser /app
 
+# Copy deepiri-modelkit (shared library) before app code
+# This allows installing it as an editable package
+COPY deepiri-modelkit /app/deepiri-modelkit
+
+# Install deepiri-modelkit as editable package (before other requirements)
+RUN if [ -d "/app/deepiri-modelkit" ] && [ -f "/app/deepiri-modelkit/pyproject.toml" ]; then \
+        echo "Installing deepiri-modelkit..." && \
+        pip install --no-cache-dir -e /app/deepiri-modelkit || \
+        (echo "Warning: deepiri-modelkit installation failed" && true); \
+    else \
+        echo "Warning: deepiri-modelkit not found, skipping installation"; \
+    fi
+
 # Copy application code
-COPY app /app/app
+COPY diri-cyrex/app /app/app
+
+# Copy tests directory if it exists in build context
+# Create placeholder first to ensure directory exists
+RUN touch /app/tests/__init__.py
+# Copy tests directory - will fail build if tests/ doesn't exist, which is expected
+# If tests directory is missing, create it manually before building
+COPY diri-cyrex/tests /app/tests
+RUN chown -R appuser:appuser /app/tests
+
+# Copy K8s env loader scripts (before switching user)
+COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
+COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
 
 # Switch to non-root user
 USER appuser
@@ -557,7 +901,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Start the application
+# Start the application with entrypoint that loads K8s env
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
 
 # =============================================================================

@@ -11,6 +11,12 @@ from .reward_model import RewardModelService, get_reward_model
 from .embedding_service import EmbeddingService, get_embedding_service
 from .inference_service import InferenceService, get_inference_service
 
+# Cyrex Guard Services
+from .invoice_parser import UniversalInvoiceProcessor, get_universal_invoice_processor, ProcessedInvoice, InvoiceLineItem
+from .pricing_benchmark import PricingBenchmarkEngine, get_pricing_benchmark_engine, PricingBenchmark, PriceComparison, PricingTier
+from .lora_loader import IndustryLoRAService, get_industry_lora_service, LoRAAdapterInfo, LoRAAdapterStatus
+from .fraud_detector import UniversalFraudDetectionService, get_universal_fraud_detection_service, FraudDetectionResult, FraudIndicator
+
 __all__ = [
     # Standard services
     'TaskClassifier',
@@ -36,6 +42,24 @@ __all__ = [
     'EmbeddingService',
     'get_embedding_service',
     'InferenceService',
-    'get_inference_service'
+    'get_inference_service',
+    # Vendor Fraud Detection Services
+    'UniversalInvoiceProcessor',
+    'get_universal_invoice_processor',
+    'ProcessedInvoice',
+    'InvoiceLineItem',
+    'PricingBenchmarkEngine',
+    'get_pricing_benchmark_engine',
+    'PricingBenchmark',
+    'PriceComparison',
+    'PricingTier',
+    'IndustryLoRAService',
+    'get_industry_lora_service',
+    'LoRAAdapterInfo',
+    'LoRAAdapterStatus',
+    'UniversalFraudDetectionService',
+    'get_universal_fraud_detection_service',
+    'FraudDetectionResult',
+    'FraudIndicator',
 ]
 

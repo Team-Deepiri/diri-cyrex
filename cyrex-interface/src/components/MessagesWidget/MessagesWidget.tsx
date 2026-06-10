@@ -1,0 +1,1146 @@
+/**
+ * LinkedIn-style Messages Widget
+ * Can be opened from anywhere in the interface
+ */
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { FaComments, FaTimes, FaPlus, FaUsers, FaRobot, FaChevronDown, FaChevronUp, FaTools, FaCheckCircle, FaExclamationCircle } from 'react-icons/fa';
+import './MessagesWidget.css';
+
+const API_BASE = import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
+
+interface AgentChat {
+  instanceId: string;
+  agentId: string;
+  name: string;
+  lastMessage?: string;
+  lastMessageTime?: string;
+  unreadCount?: number;
+}
+
+interface GroupChat {
+  groupChatId: string;
+  name: string;
+  agentCount: number;
+  lastMessage?: string;
+  lastMessageTime?: string;
+}
+
+interface MessagesWidgetProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+interface AgentType {
+  id: string;
+  name: string;
+  description: string;
+  template_key: string;
+  temperature?: number;
+  max_tokens?: number;
+  tools?: string[];
+}
+
+export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
+  const [activeView, setActiveView] = useState<'list' | 'chat' | 'group-chat'>('list');
+  const [agentChats, setAgentChats] = useState<AgentChat[]>([]);
+  const [groupChats, setGroupChats] = useState<GroupChat[]>([]);
+  const [selectedChat, setSelectedChat] = useState<AgentChat | null>(null);
+  const [selectedGroupChat, setSelectedGroupChat] = useState<GroupChat | null>(null);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [inputMessage, setInputMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [agentTypes, setAgentTypes] = useState<AgentType[]>([]);
+  const [selectedAgentType, setSelectedAgentType] = useState<string>('conversational');
+  const [newAgentName, setNewAgentName] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('llama3:8b');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastSyncedMessageCountRef = useRef<number>(0);
+  const [showToolCallsModal, setShowToolCallsModal] = useState(false);
+  const [selectedAgentForToolCalls, setSelectedAgentForToolCalls] = useState<AgentChat | null>(null);
+  const [toolCallsData, setToolCallsData] = useState<any[]>([]);
+  const [showGroupChatDialog, setShowGroupChatDialog] = useState(false);
+  const [newGroupChatName, setNewGroupChatName] = useState('');
+  const [selectedAgentsForGroup, setSelectedAgentsForGroup] = useState<string[]>([]);
+  const [groupChatAgentTypes, setGroupChatAgentTypes] = useState<string[]>(['conversational', 'conversational']);
+  const [agentNames, setAgentNames] = useState<string[]>(['Agent 1', 'Agent 2']);
+
+  // Fetch agent chats
+  useEffect(() => {
+    if (isOpen && activeView === 'list') {
+      fetchAgentChats();
+      fetchGroupChats();
+      fetchAgentTypes();
+      fetchModels();
+    }
+  }, [isOpen, activeView]);
+
+  const fetchAgentTypes = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/agent-types`);
+      if (response.ok) {
+        const data = await response.json();
+        setAgentTypes(data.agent_types || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch agent types:', error);
+    }
+  };
+
+  const fetchModels = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/models`);
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableModels(data.model_names || ['llama3:8b']);
+        if (data.model_names && data.model_names.length > 0) {
+          setSelectedModel(data.model_names[0]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch models:', error);
+    }
+  };
+
+  const fetchAgentChats = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/instances`);
+      if (response.ok) {
+        const instances = await response.json();
+        setAgentChats(instances.map((inst: any) => ({
+          instanceId: inst.instance_id,
+          agentId: inst.agent_id,
+          name: inst.name || `Agent ${inst.agent_id.slice(0, 8)}`,
+          lastMessage: 'Click to start chatting',
+        })));
+      }
+    } catch (error) {
+      console.error('Failed to fetch agent chats:', error);
+    }
+  };
+
+  const fetchGroupChats = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/group-chat/list`);
+      if (response.ok) {
+        const chats = await response.json();
+        setGroupChats(chats);
+      }
+    } catch (error) {
+      console.error('Failed to fetch group chats:', error);
+    }
+  };
+
+  const openChat = async (chat: AgentChat) => {
+    setSelectedChat(chat);
+    setSelectedGroupChat(null);
+    setActiveView('chat');
+    // Don't clear messages immediately - load history first to avoid flicker
+    
+    // Load conversation history
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/${chat.instanceId}/conversation`);
+      if (response.ok) {
+        const data = await response.json();
+        const history = data.messages || [];
+        // Map history messages properly, ensuring content is a string
+        const mappedMessages = history.map((msg: any, index: number) => ({
+          id: msg.message_id || `msg-hist-${index}-${Date.now()}`,
+          role: msg.role || 'user',
+          content: String(msg.content || ''),
+          timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+          streaming: false,
+        }));
+        setMessages(mappedMessages);
+        lastSyncedMessageCountRef.current = mappedMessages.length;
+      } else {
+        // If no history, start with empty array
+        setMessages([]);
+      }
+    } catch (error) {
+      console.error('Failed to load conversation history:', error);
+      // On error, start with empty array
+      setMessages([]);
+    }
+  };
+
+  const openGroupChat = (groupChat: GroupChat) => {
+    setSelectedGroupChat(groupChat);
+    setSelectedChat(null);
+    setActiveView('group-chat');
+    setMessages([]);
+  };
+
+  const createGroupChat = async () => {
+    if (!newGroupChatName.trim()) {
+      alert('Please enter a group chat name');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      let agentInstanceIds: string[] = [];
+
+      // If we have existing agents selected, use them
+      if (selectedAgentsForGroup.length >= 2) {
+        agentInstanceIds = selectedAgentsForGroup;
+      } else {
+        // Initialize new agents automatically
+        const agentsToCreate = groupChatAgentTypes.map((agentType, index) => ({
+          name: `${newGroupChatName} - ${agentNames[index] || `Agent ${index + 1}`}`,
+          agent_type: agentType || 'conversational',
+          model: selectedModel,
+          temperature: 0.7,
+          max_tokens: 2000,
+          tools: [],
+        }));
+
+        // Initialize multiple agents
+        const initResponse = await fetch(`${API_BASE}/api/agent/initialize-multiple`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ agents: agentsToCreate }),
+        });
+
+        if (!initResponse.ok) {
+          throw new Error('Failed to initialize agents');
+        }
+
+        const initData = await initResponse.json();
+        agentInstanceIds = initData.instances.map((inst: any) => inst.instance_id);
+      }
+
+      // Create group chat
+      const response = await fetch(`${API_BASE}/api/agent/group-chat/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newGroupChatName,
+          agent_instance_ids: agentInstanceIds,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Refresh lists
+        await fetchGroupChats();
+        await fetchAgentChats();
+        // Close dialog and open the new group chat
+        setShowGroupChatDialog(false);
+        setNewGroupChatName('');
+        setSelectedAgentsForGroup([]);
+        setGroupChatAgentTypes(['conversational', 'conversational']);
+        setAgentNames(['Agent 1', 'Agent 2']);
+        const newGroupChat: GroupChat = {
+          groupChatId: data.group_chat_id,
+          name: data.name,
+          agentCount: data.agent_count,
+        };
+        await openGroupChat(newGroupChat);
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to create group chat: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to create group chat:', error);
+      alert('Failed to create group chat. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createAgent = async () => {
+    if (!newAgentName.trim()) {
+      alert('Please enter an agent name');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const agentType = agentTypes.find(t => t.id === selectedAgentType);
+      const response = await fetch(`${API_BASE}/api/agent/initialize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newAgentName,
+          agent_type: selectedAgentType,
+          model: selectedModel,
+          temperature: agentType?.temperature || 0.7,
+          max_tokens: agentType?.max_tokens || 2000,
+          tools: agentType?.tools || [],
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        // Refresh agent chats
+        await fetchAgentChats();
+        // Close dialog and open the new chat
+        setShowCreateDialog(false);
+        setNewAgentName('');
+        const newChat: AgentChat = {
+          instanceId: data.instance_id,
+          agentId: data.agent_id,
+          name: data.name || newAgentName,
+        };
+        await openChat(newChat);
+      } else {
+        const errorText = await response.text();
+        alert(`Failed to create agent: ${errorText}`);
+      }
+    } catch (error) {
+      console.error('Failed to create agent:', error);
+      alert('Failed to create agent. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!inputMessage.trim()) return;
+    
+    setIsLoading(true);
+    const messageContent = inputMessage;
+    const tempUserId = `temp-user-${Date.now()}`;
+    
+    // Add user message optimistically with temp ID
+    const userMessage = {
+      id: tempUserId,
+      role: 'user',
+      content: messageContent,
+      timestamp: new Date().toISOString(),
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    setInputMessage('');
+
+    try {
+      if (selectedChat) {
+        // Send to single agent
+        const response = await fetch(`${API_BASE}/api/agent/invoke`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instance_id: selectedChat.instanceId,
+            input: messageContent,
+            stream: true,
+          }),
+        });
+
+        if (response.ok) {
+          setIsStreaming(true);
+          const reader = response.body?.getReader();
+          const decoder = new TextDecoder();
+          const messageId = `msg-${Date.now()}-response`;
+          const contentRef = { current: '' }; // Use ref to track content across closures
+
+          const assistantMessage = {
+            id: messageId,
+            role: 'assistant',
+            content: '',
+            timestamp: new Date().toISOString(),
+            streaming: true,
+          };
+          setMessages(prev => {
+            const updated = [...prev, assistantMessage];
+            lastSyncedMessageCountRef.current = updated.length;
+            return updated;
+          });
+
+          if (reader) {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              // Decode chunk - handle incomplete UTF-8 sequences
+              let chunk = '';
+              try {
+                chunk = decoder.decode(value, { stream: true });
+              } catch (e) {
+                console.warn('Decode error, trying with flush:', e);
+                chunk = decoder.decode(value, { stream: false });
+              }
+              
+              const lines = chunk.split('\n').filter(line => line.trim());
+
+              for (const line of lines) {
+                try {
+                  const data = JSON.parse(line);
+                  if (data.type === 'token' && data.content) {
+                    // Accumulate content in ref
+                    contentRef.current += data.content;
+                    // Use functional update with message ID to ensure we update the correct message
+                    setMessages(prev => {
+                      const updated = prev.map(msg => {
+                        if (msg.id === messageId) {
+                          return { 
+                            ...msg, 
+                            content: contentRef.current,
+                            streaming: true // Keep streaming true until done
+                          };
+                        }
+                        return msg;
+                      });
+                      return updated;
+                    });
+                  } else if (data.type === 'done') {
+                    // Mark streaming as complete
+                    setMessages(prev => {
+                      const updated = prev.map(msg => {
+                        if (msg.id === messageId) {
+                          return { ...msg, streaming: false };
+                        }
+                        return msg;
+                      });
+                      return updated;
+                    });
+                  } else if (data.type === 'error') {
+                    setMessages(prev => {
+                      const updated = prev.map(msg => {
+                        if (msg.id === messageId) {
+                          return { ...msg, content: data.content || 'Error occurred', streaming: false, isError: true };
+                        }
+                        return msg;
+                      });
+                      return updated;
+                    });
+                  }
+                } catch (e) {
+                  // Non-JSON line, ignore
+                  console.debug('Failed to parse line:', line.substring(0, 100), e);
+                }
+              }
+            }
+            
+            // Flush decoder and ensure streaming is marked as complete
+            try {
+              decoder.decode(new Uint8Array(), { stream: false });
+            } catch (e) {
+              // Ignore flush errors
+            }
+            
+            // Final update to ensure streaming is marked as complete
+            setMessages(prev => {
+              const updated = prev.map(msg => {
+                if (msg.id === messageId) {
+                  return { ...msg, content: contentRef.current, streaming: false };
+                }
+                return msg;
+              });
+              return updated;
+            });
+            setIsStreaming(false);
+          }
+        }
+      } else if (selectedGroupChat) {
+        // Send to group chat
+        const response = await fetch(`${API_BASE}/api/agent/group-chat/${selectedGroupChat.groupChatId}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            group_chat_id: selectedGroupChat.groupChatId,
+            message: messageContent,
+            stream: true,
+          }),
+        });
+
+        if (response.ok) {
+          const reader = response.body?.getReader();
+          const decoder = new TextDecoder();
+
+            if (reader) {
+              let currentAgentId: string | null = null;
+              let agentResponses: Record<string, string> = {};
+
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n').filter(line => line.trim());
+
+                for (const line of lines) {
+                  try {
+                    const data = JSON.parse(line);
+                    if (data.type === 'agent_start') {
+                      currentAgentId = data.agent_id;
+                      if (currentAgentId) {
+                        agentResponses[currentAgentId] = '';
+                      }
+                    } else if (data.type === 'token') {
+                      const agentId = data.agent_id || currentAgentId;
+                      if (agentId) {
+                        agentResponses[agentId] = (agentResponses[agentId] || '') + data.content;
+                        // Update messages with agent responses
+                        setMessages(prev => {
+                          const updated = [...prev];
+                          // Find or create agent message
+                          let agentMsgIdx = updated.findIndex(
+                            (m: any) => m.role === 'assistant' && m.agentId === agentId
+                          );
+                          if (agentMsgIdx === -1) {
+                            updated.push({
+                              id: `msg-${Date.now()}-${agentId}`,
+                              role: 'assistant',
+                              agentId: agentId,
+                              agentName: data.agent_name,
+                              content: agentResponses[agentId] || '',
+                              timestamp: new Date().toISOString(),
+                            });
+                          } else {
+                            updated[agentMsgIdx] = {
+                              ...updated[agentMsgIdx],
+                              content: agentResponses[agentId] || '',
+                            };
+                          }
+                          return updated;
+                        });
+                      }
+                    } else if (data.type === 'agent_done') {
+                      // Agent finished responding
+                      currentAgentId = null;
+                    } else if (data.type === 'agent_error') {
+                      // Handle agent errors
+                      setMessages(prev => [...prev, {
+                        id: `error-${Date.now()}-${data.agent_id}`,
+                        role: 'system',
+                        content: `Error from ${data.agent_name || 'Agent'}: ${data.error || 'Unknown error'}`,
+                        agentId: data.agent_id,
+                        timestamp: new Date().toISOString(),
+                      }]);
+                    } else if (data.type === 'done') {
+                      // All agents done
+                      setIsStreaming(false);
+                    }
+                  } catch {
+                    // Non-JSON line, ignore
+                  }
+                }
+              }
+            }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      setMessages(prev => [...prev, {
+        id: `msg-${Date.now()}-error`,
+        role: 'system',
+        content: 'Failed to send message. Please try again.',
+        timestamp: new Date().toISOString(),
+      }]);
+      setIsStreaming(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Fetch tool calls for an agent
+  const fetchToolCalls = async (chat: AgentChat) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agent/${chat.instanceId}/conversation`);
+      if (response.ok) {
+        const data = await response.json();
+        const history = data.messages || [];
+        
+        // Extract all tool calls from messages
+        const toolCalls: any[] = [];
+        history.forEach((msg: any) => {
+          if (msg.tool_calls && Array.isArray(msg.tool_calls)) {
+            msg.tool_calls.forEach((tc: any) => {
+              toolCalls.push({
+                toolId: tc.tool_id || tc.toolId || `tc-${Date.now()}-${Math.random()}`,
+                toolName: tc.tool_name || tc.toolName || 'Unknown',
+                parameters: tc.parameters || {},
+                result: tc.result,
+                status: tc.status || 'completed',
+                duration: tc.duration,
+                timestamp: msg.timestamp || msg.created_at,
+                messageId: msg.message_id,
+              });
+            });
+          }
+        });
+        
+        setToolCallsData(toolCalls);
+        setSelectedAgentForToolCalls(chat);
+        setShowToolCallsModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to fetch tool calls:', error);
+      alert('Failed to load tool calls');
+    }
+  };
+
+  // Real-time message sync: Poll for new messages when chat is open
+  useEffect(() => {
+    if (activeView !== 'chat' || !selectedChat?.instanceId) {
+      lastSyncedMessageCountRef.current = 0;
+      return;
+    }
+
+    // Initialize ref with current messages length
+    lastSyncedMessageCountRef.current = messages.length;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/agent/${selectedChat.instanceId}/conversation`);
+        if (response.ok) {
+          const data = await response.json();
+          const history = data.messages || [];
+          
+          // Only update if we have new messages
+          if (history.length > lastSyncedMessageCountRef.current) {
+            const mappedMessages = history.map((msg: any, index: number) => ({
+              id: msg.message_id || `msg-hist-${index}-${Date.now()}`,
+              role: msg.role || 'user',
+              content: String(msg.content || ''),
+              timestamp: msg.timestamp || msg.created_at || new Date().toISOString(),
+              streaming: false,
+            }));
+            
+            // Simplified polling logic:
+            // - If streaming: Keep all current messages (including temp user message)
+            // - If not streaming: Replace temp messages with database versions
+            setMessages(prev => {
+              // If currently streaming, keep current state (including optimistic user message)
+              if (isStreaming) {
+                // But replace any temp user messages that now have database versions
+                const dbMessagesByContent = new Map<string, any>();
+                mappedMessages.forEach((msg: any) => {
+                  if (msg.role === 'user') {
+                    dbMessagesByContent.set(msg.content, msg);
+                  }
+                });
+                
+                return prev.map((msg: any) => {
+                  if (msg.id.startsWith('temp-user-')) {
+                    const dbVersion = dbMessagesByContent.get(msg.content);
+                    return dbVersion || msg;
+                  }
+                  return msg;
+                });
+              }
+              
+              // Not streaming - use database as source of truth
+              lastSyncedMessageCountRef.current = mappedMessages.length;
+              return mappedMessages;
+            });
+          }
+        }
+      } catch (error) {
+        // Silently fail - don't spam console
+        console.debug('Polling error (non-critical):', error);
+      }
+    }, 1000); // Poll every 1 second
+
+    return () => clearInterval(pollInterval);
+  }, [activeView, selectedChat?.instanceId, isStreaming]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="messages-widget-overlay" onClick={onClose}>
+      <div className="messages-widget" onClick={(e) => e.stopPropagation()}>
+        <div className="messages-widget-header">
+          <h3><FaComments /> Messages</h3>
+          <button className="btn-icon" onClick={onClose}>
+            <FaTimes />
+          </button>
+        </div>
+
+        {activeView === 'list' && (
+          <div className="messages-widget-content">
+            <div className="messages-widget-actions">
+              <button className="btn-primary btn-small" onClick={() => setShowCreateDialog(true)}>
+                <FaPlus /> New Agent
+              </button>
+              <button className="btn-secondary btn-small" onClick={() => {
+                setShowGroupChatDialog(true);
+                fetchAgentChats(); // Refresh to get latest agents
+              }}>
+                <FaUsers /> New Group
+              </button>
+            </div>
+
+            {showCreateDialog && (
+              <div className="modal-overlay" onClick={() => setShowCreateDialog(false)}>
+                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3>Create New Agent</h3>
+                    <button className="btn-icon" onClick={() => setShowCreateDialog(false)}>
+                      <FaTimes />
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="form-group">
+                      <label>Agent Name</label>
+                      <input
+                        type="text"
+                        value={newAgentName}
+                        onChange={(e) => setNewAgentName(e.target.value)}
+                        placeholder="Enter agent name..."
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label>Agent Type</label>
+                      <select
+                        value={selectedAgentType}
+                        onChange={(e) => setSelectedAgentType(e.target.value)}
+                        className="form-select"
+                      >
+                        {agentTypes.map(type => (
+                          <option key={type.id} value={type.id}>
+                            {type.name} - {type.description}
+                          </option>
+                        ))}
+                      </select>
+                      {agentTypes.find(t => t.id === selectedAgentType) && (
+                        <p className="form-help">
+                          {agentTypes.find(t => t.id === selectedAgentType)?.description}
+                        </p>
+                      )}
+                    </div>
+                    <div className="form-group">
+                      <label>Model</label>
+                      <select
+                        value={selectedModel}
+                        onChange={(e) => setSelectedModel(e.target.value)}
+                        className="form-select"
+                      >
+                        {availableModels.map(model => (
+                          <option key={model} value={model}>{model}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {agentTypes.find(t => t.id === selectedAgentType)?.tools && 
+                     agentTypes.find(t => t.id === selectedAgentType)!.tools!.length > 0 && (
+                      <div className="form-group">
+                        <label>Available Tools</label>
+                        <div className="tools-list">
+                          {agentTypes.find(t => t.id === selectedAgentType)!.tools!.map(tool => (
+                            <span key={tool} className="tool-badge">{tool}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button className="btn-secondary" onClick={() => setShowCreateDialog(false)}>
+                      Cancel
+                    </button>
+                    <button 
+                      className="btn-primary" 
+                      onClick={createAgent}
+                      disabled={isLoading || !newAgentName.trim()}
+                    >
+                      {isLoading ? 'Creating...' : 'Create Agent'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {showGroupChatDialog && (
+              <div className="modal-overlay" onClick={() => {
+                setShowGroupChatDialog(false);
+                setNewGroupChatName('');
+                setSelectedAgentsForGroup([]);
+              }}>
+                <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+                  <div className="modal-header">
+                    <h3><FaUsers /> Create Group Chat</h3>
+                    <button className="btn-icon" onClick={() => {
+                      setShowGroupChatDialog(false);
+                      setNewGroupChatName('');
+                      setSelectedAgentsForGroup([]);
+                      setGroupChatAgentTypes(['conversational', 'conversational']);
+                      setAgentNames(['Agent 1', 'Agent 2']);
+                    }}>
+                      <FaTimes />
+                    </button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="form-group">
+                      <label>Group Chat Name</label>
+                      <input
+                        type="text"
+                        value={newGroupChatName}
+                        onChange={(e) => setNewGroupChatName(e.target.value)}
+                        placeholder="Enter group chat name..."
+                        className="form-input"
+                      />
+                    </div>
+                    
+                    {agentChats.length >= 2 ? (
+                      <div className="form-group">
+                        <label>Select Existing Agents (or leave empty to create new ones)</label>
+                        <div className="agents-selection" style={{
+                          maxHeight: '200px',
+                          overflowY: 'auto',
+                          border: '1px solid rgba(255, 255, 255, 0.1)',
+                          borderRadius: '8px',
+                          padding: '8px',
+                          marginTop: '8px',
+                        }}>
+                          {agentChats.map(chat => (
+                            <label
+                              key={chat.instanceId}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                padding: '8px',
+                                cursor: 'pointer',
+                                borderRadius: '4px',
+                                marginBottom: '4px',
+                                background: selectedAgentsForGroup.includes(chat.instanceId)
+                                  ? 'rgba(255, 184, 77, 0.2)'
+                                  : 'transparent',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={selectedAgentsForGroup.includes(chat.instanceId)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedAgentsForGroup([...selectedAgentsForGroup, chat.instanceId]);
+                                  } else {
+                                    setSelectedAgentsForGroup(
+                                      selectedAgentsForGroup.filter(id => id !== chat.instanceId)
+                                    );
+                                  }
+                                }}
+                                style={{ marginRight: '8px' }}
+                              />
+                              <FaRobot style={{ marginRight: '8px', color: '#FFB84D' }} />
+                              <span>{chat.name}</span>
+                            </label>
+                          ))}
+                        </div>
+                        {selectedAgentsForGroup.length > 0 && (
+                          <p className="form-help" style={{ marginTop: '8px' }}>
+                            {selectedAgentsForGroup.length} agent(s) selected
+                          </p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="form-group">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                          <label>Agent Types (will be initialized automatically)</label>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <button
+                              type="button"
+                              className="btn-secondary btn-small"
+                              onClick={() => {
+                                setGroupChatAgentTypes([...groupChatAgentTypes, 'conversational']);
+                                setAgentNames([...agentNames, `Agent ${groupChatAgentTypes.length + 1}`]);
+                              }}
+                              title="Add agent"
+                              style={{ padding: '6px 12px', fontSize: '0.9rem' }}
+                            >
+                              <FaPlus /> Add Agent
+                            </button>
+                            {groupChatAgentTypes.length > 2 && (
+                              <button
+                                type="button"
+                                className="btn-secondary btn-small"
+                                onClick={() => {
+                                  setGroupChatAgentTypes(groupChatAgentTypes.slice(0, -1));
+                                  setAgentNames(agentNames.slice(0, -1));
+                                }}
+                                title="Remove agent"
+                                style={{ padding: '6px 12px', fontSize: '0.9rem', background: 'rgba(239, 68, 68, 0.2)' }}
+                              >
+                                <FaTimes /> Remove
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto', padding: '8px' }}>
+                          {groupChatAgentTypes.map((agentType, index) => (
+                            <div 
+                              key={index} 
+                              style={{ 
+                                display: 'grid', 
+                                gridTemplateColumns: '1fr 2fr', 
+                                gap: '12px', 
+                                padding: '12px',
+                                background: 'rgba(255, 184, 77, 0.1)',
+                                borderRadius: '6px',
+                                border: '1px solid rgba(255, 184, 77, 0.2)',
+                              }}
+                            >
+                              <div>
+                                <label style={{ fontSize: '0.85rem', marginBottom: '4px', display: 'block', color: '#FFB84D' }}>
+                                  Agent {index + 1} Name
+                                </label>
+                                <input
+                                  type="text"
+                                  value={agentNames[index] || `Agent ${index + 1}`}
+                                  onChange={(e) => {
+                                    const newNames = [...agentNames];
+                                    newNames[index] = e.target.value;
+                                    setAgentNames(newNames);
+                                  }}
+                                  className="form-input"
+                                  placeholder={`Agent ${index + 1}`}
+                                  style={{ fontSize: '0.85rem', padding: '6px' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: '0.85rem', marginBottom: '4px', display: 'block', color: '#FFB84D' }}>
+                                  Type
+                                </label>
+                                <select
+                                  value={agentType || 'conversational'}
+                                  onChange={(e) => {
+                                    const newTypes = [...groupChatAgentTypes];
+                                    newTypes[index] = e.target.value;
+                                    setGroupChatAgentTypes(newTypes);
+                                  }}
+                                  className="form-select"
+                                  style={{ fontSize: '0.85rem', padding: '6px' }}
+                                >
+                                  {agentTypes.map(type => (
+                                    <option key={type.id} value={type.id}>
+                                      {type.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="form-help" style={{ marginTop: '8px' }}>
+                          {groupChatAgentTypes.length} agent(s) will be automatically created for this group chat
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button className="btn-secondary" onClick={() => {
+                      setShowGroupChatDialog(false);
+                      setNewGroupChatName('');
+                      setSelectedAgentsForGroup([]);
+                      setGroupChatAgentTypes(['conversational', 'conversational']);
+                      setAgentNames(['Agent 1', 'Agent 2']);
+                    }}>
+                      Cancel
+                    </button>
+                    <button 
+                      className="btn-primary" 
+                      onClick={createGroupChat}
+                      disabled={isLoading || !newGroupChatName.trim()}
+                    >
+                      {isLoading ? 'Creating...' : 'Create Group Chat'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="messages-list">
+              <h4><FaRobot /> Agent Chats</h4>
+              {agentChats.length === 0 ? (
+                <div className="empty-state">
+                  <p>No agent chats yet. Start a chat from the Agent Playground.</p>
+                </div>
+              ) : (
+                agentChats.map(chat => (
+                  <div
+                    key={chat.instanceId}
+                    className="message-item"
+                  >
+                    <div 
+                      className="message-item-main"
+                      onClick={() => openChat(chat)}
+                    >
+                      <div className="message-item-avatar">
+                        <FaRobot />
+                      </div>
+                      <div className="message-item-content">
+                        <div className="message-item-name">{chat.name}</div>
+                        <div className="message-item-preview">{chat.lastMessage}</div>
+                      </div>
+                      {chat.unreadCount && chat.unreadCount > 0 && (
+                        <div className="message-item-badge">{chat.unreadCount}</div>
+                      )}
+                    </div>
+                    <button
+                      className="btn-icon btn-tool-inspect"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fetchToolCalls(chat);
+                      }}
+                      title="Inspect Tool Calls"
+                    >
+                      <FaTools />
+                    </button>
+                  </div>
+                ))
+              )}
+
+              <h4 style={{ marginTop: '20px' }}><FaUsers /> Group Chats</h4>
+              {groupChats.length === 0 ? (
+                <div className="empty-state">
+                  <p>No group chats yet. Create one from the Agent Playground.</p>
+                </div>
+              ) : (
+                groupChats.map(chat => (
+                  <div
+                    key={chat.groupChatId}
+                    className="message-item"
+                    onClick={() => openGroupChat(chat)}
+                  >
+                    <div className="message-item-avatar">
+                      <FaUsers />
+                    </div>
+                    <div className="message-item-content">
+                      <div className="message-item-name">{chat.name}</div>
+                      <div className="message-item-preview">{chat.agentCount} agents</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {(activeView === 'chat' || activeView === 'group-chat') && (
+          <div className="messages-widget-content chat-view">
+            <div className="chat-header">
+              <button className="btn-icon" onClick={() => setActiveView('list')}>
+                <FaChevronUp />
+              </button>
+              <div className="chat-title">
+                {selectedChat?.name || selectedGroupChat?.name}
+                {selectedGroupChat && (
+                  <span className="chat-subtitle">{selectedGroupChat.agentCount} agents</span>
+                )}
+              </div>
+            </div>
+
+            <div className="chat-messages">
+              {messages.length === 0 ? (
+                <div className="empty-state">
+                  <p>Start a conversation...</p>
+                </div>
+              ) : (
+                messages.map(msg => (
+                  <div key={msg.id} className={`chat-message ${msg.role}`}>
+                    {msg.role === 'assistant' && msg.agentName && (
+                      <div className="chat-message-agent">{msg.agentName}</div>
+                    )}
+                    <div className="chat-message-content">{msg.content}</div>
+                    {msg.streaming && <span className="cursor">▊</span>}
+                  </div>
+                ))
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            <div className="chat-input-container">
+              <input
+                type="text"
+                value={inputMessage}
+                onChange={e => setInputMessage(e.target.value)}
+                onKeyPress={e => e.key === 'Enter' && !isLoading && sendMessage()}
+                placeholder="Type a message..."
+                disabled={isLoading}
+              />
+              <button
+                className="btn-primary"
+                onClick={sendMessage}
+                disabled={isLoading || !inputMessage.trim()}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tool Calls Inspection Modal */}
+      {showToolCallsModal && (
+        <div className="modal-overlay" onClick={() => setShowToolCallsModal(false)}>
+          <div className="modal-content tool-calls-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                <FaTools /> Tool Calls - {selectedAgentForToolCalls?.name}
+              </h3>
+              <button className="btn-icon" onClick={() => setShowToolCallsModal(false)}>
+                <FaTimes />
+              </button>
+            </div>
+            <div className="modal-body tool-calls-body">
+              {toolCallsData.length === 0 ? (
+                <div className="empty-state">
+                  <FaTools size={48} />
+                  <p>No tool calls found for this agent</p>
+                </div>
+              ) : (
+                <div className="tool-calls-list">
+                  <div className="tool-calls-stats">
+                    <span>Total: {toolCallsData.length}</span>
+                    <span>Completed: {toolCallsData.filter((tc: any) => tc.status === 'completed').length}</span>
+                    <span>Failed: {toolCallsData.filter((tc: any) => tc.status === 'failed').length}</span>
+                  </div>
+                  {toolCallsData.map((tc: any, index: number) => (
+                    <div key={tc.toolId || `tc-${index}`} className={`tool-call-card ${tc.status}`}>
+                      <div className="tool-call-header">
+                        <div className="tool-call-title">
+                          <FaTools />
+                          <span className="tool-name">{tc.toolName}</span>
+                          <span className={`tool-status ${tc.status}`}>
+                            {tc.status === 'completed' && <FaCheckCircle className="success" />}
+                            {tc.status === 'failed' && <FaExclamationCircle className="error" />}
+                            {tc.status}
+                          </span>
+                        </div>
+                        {tc.timestamp && (
+                          <div className="tool-call-meta">
+                            <span>{new Date(tc.timestamp).toLocaleString()}</span>
+                            {tc.duration && <span>Duration: {tc.duration}ms</span>}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {tc.parameters && Object.keys(tc.parameters).length > 0 && (
+                        <div className="tool-call-section">
+                          <h4>Parameters</h4>
+                          <pre className="tool-call-data">
+                            {JSON.stringify(tc.parameters, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      
+                      {tc.result !== undefined && (
+                        <div className="tool-call-section">
+                          <h4>Result</h4>
+                          <pre className="tool-call-data">
+                            {typeof tc.result === 'string' 
+                              ? tc.result 
+                              : JSON.stringify(tc.result, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+

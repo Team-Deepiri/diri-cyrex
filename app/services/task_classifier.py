@@ -28,8 +28,12 @@ class TaskClassifier:
     
     def __init__(self):
         self.client = None
-        if settings.OPENAI_API_KEY:
-            self.client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        # Only initialize OpenAI client if API key is valid (not test keys)
+        if settings.OPENAI_API_KEY and settings.OPENAI_API_KEY != "test-key":
+            try:
+                self.client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+            except Exception:
+                self.client = None
     
     async def classify_task(self, task_text: str, description: Optional[str] = None) -> Dict:
         """
@@ -118,7 +122,11 @@ For each task, return JSON with:
         task_lower = task_text.lower()
         
         # Simple keyword-based classification
-        if any(kw in task_lower for kw in ['code', 'program', 'debug', 'fix', 'implement']):
+        # Check code keywords FIRST (before creative) to catch "write a Python function" etc.
+        code_keywords = ['code', 'program', 'debug', 'fix', 'implement', 'python', 'function', 
+                        'class', 'method', 'api', 'algorithm', 'script', 'variable', 'loop',
+                        'database', 'sql', 'javascript', 'java', 'c++', 'html', 'css']
+        if any(kw in task_lower for kw in code_keywords):
             task_type = 'code'
         elif any(kw in task_lower for kw in ['read', 'study', 'learn', 'homework', 'chapter']):
             task_type = 'study'

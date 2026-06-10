@@ -1,0 +1,403 @@
+"""
+Production RAG Pipeline for Challenge Generation
+Retrieval-Augmented Generation with vector search, reranking, and context management
+"""
+from typing import List, Dict, Optional, Tuple
+import os
+import numpy as np
+import threading
+import queue
+from sentence_transformers import SentenceTransformer
+from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
+import json
+from pathlib import Path
+from ..logging_config import get_logger
+from ..utils.device_detection import get_device
+
+logger = get_logger("rag.pipeline")
+
+
+class RAGPipeline:
+    """Production RAG system for challenge generation and task understanding."""
+    
+    def __init__(
+        self,
+        embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        collection_name: str = "deepiri_challenges",
+        milvus_host: Optional[str] = None,
+        milvus_port: Optional[int] = None
+    ):
+        # Detect and use GPU if available
+        device = get_device()
+        logger.info(f"Initializing RAG pipeline with embedding model on device: {device}")
+        self.embedding_model = SentenceTransformer(embedding_model, device=device)
+        self.collection_name = collection_name
+        # Use environment variables with fallback defaults
+        self.milvus_host = milvus_host or os.getenv("MILVUS_HOST", "localhost")
+        self.milvus_port = milvus_port or int(os.getenv("MILVUS_PORT", "19530"))
+        self.collection = None
+        self.reranker = None
+        self._milvus_available = False
+        self._initialize_milvus()
+        self._load_reranker()
+    
+    def _initialize_milvus(self):
+        """
+        Initialize Milvus connection and collection (lazy loading pattern).
+        Connection is established, but collection loading is deferred until first use.
+        """
+        try:
+            connections.connect(
+                alias="default",
+                host=self.milvus_host,
+                port=self.milvus_port,
+                timeout=5.0  # 5 second timeout to prevent hanging
+            )
+            
+            if utility.has_collection(self.collection_name):
+                self.collection = Collection(self.collection_name)
+            else:
+                self._create_collection()
+            
+            # Don't load collection at init - use lazy loading on first access
+            # This prevents blocking startup and connection issues
+            logger.info(
+                "Milvus connection established (lazy loading enabled)",
+                collection=self.collection_name,
+                host=self.milvus_host,
+                port=self.milvus_port
+            )
+            
+            self._milvus_available = True
+        except Exception as e:
+            self._milvus_available = False
+            logger.warning("Milvus initialization failed - RAG features will be unavailable", error=str(e), host=self.milvus_host, port=self.milvus_port)
+            # Don't raise - allow service to start without Milvus
+    
+    def _ensure_collection_loaded(self) -> bool:
+        """
+        Ensure collection is loaded (lazy loading pattern).
+        Checks loading state first to avoid redundant loads.
+        Returns True if loaded, False if failed.
+        """
+        if not self.collection or not self._milvus_available:
+            return False
+        
+        try:
+            # Check if collection is already loaded (optimization: avoid redundant loads)
+            try:
+                progress = utility.loading_progress(self.collection_name)
+                if progress.get("loading_progress", 0) == 100:
+                    logger.debug(f"Collection '{self.collection_name}' already loaded")
+                    return True
+            except Exception:
+                # Progress check failed, try to load anyway
+                pass
+            
+            # Load collection with timeout in background thread
+            return self._load_collection_with_timeout(self.collection, self.collection_name, timeout=15.0)
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            is_channel_error = (
+                "closed channel" in error_msg or 
+                "rpc" in error_msg or 
+                "cannot invoke" in error_msg
+            )
+            
+            if is_channel_error:
+                # Connection issue - try to reconnect
+                logger.warning(f"Channel error detected, attempting reconnection for '{self.collection_name}'")
+                try:
+                    connections.disconnect("default")
+                    connections.connect(
+                        alias="default",
+                        host=self.milvus_host,
+                        port=self.milvus_port,
+                        timeout=5.0
+                    )
+                    # Retry loading after reconnection
+                    return self._load_collection_with_timeout(self.collection, self.collection_name, timeout=15.0)
+                except Exception as reconnect_err:
+                    logger.warning(f"Reconnection failed: {reconnect_err}")
+            
+            logger.warning(f"Failed to ensure collection loaded: {e}")
+            return False
+    
+    def _load_collection_with_timeout(self, collection: Collection, collection_name: str, timeout: float = 10.0):
+        """
+        Load collection with timeout to prevent hanging.
+        Uses threading to enforce timeout since collection.load() is blocking.
+        """
+        result_queue = queue.Queue()
+        error_queue = queue.Queue()
+        
+        def load_collection():
+            try:
+                collection.load()
+                result_queue.put(True)
+            except Exception as e:
+                error_queue.put(e)
+        
+        # Run loading in thread with timeout
+        load_thread = threading.Thread(target=load_collection, daemon=True)
+        load_thread.start()
+        load_thread.join(timeout=timeout)
+        
+        if load_thread.is_alive():
+            # Thread is still running = timeout
+            logger.warning(
+                f"Collection loading timed out after {timeout}s for '{collection_name}'. "
+                "Collection may not be fully loaded, but will continue anyway."
+            )
+            # Don't raise - allow service to continue (collection might still work)
+            return
+        
+        # Check for errors
+        if not error_queue.empty():
+            error = error_queue.get()
+            error_msg = str(error).lower()
+            # Check for channel errors that we can recover from
+            is_channel_error = (
+                "closed channel" in error_msg or 
+                "rpc" in error_msg or 
+                "cannot invoke" in error_msg or
+                "channel closed" in error_msg
+            )
+            
+            if is_channel_error:
+                logger.warning(
+                    f"Collection loading failed due to channel error for '{collection_name}': {error}. "
+                    "Will retry on next access."
+                )
+                # Don't raise - allow service to continue
+            else:
+                logger.warning(
+                    f"Collection loading failed for '{collection_name}': {error}. "
+                    "Will retry on next access."
+                )
+                # Don't raise - allow service to continue
+        else:
+            # Success
+            logger.info("Collection loaded into memory", collection=collection_name)
+    
+    def _create_collection(self):
+        """Create Milvus collection schema."""
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="challenge_id", dtype=DataType.VARCHAR, max_length=100),
+            FieldSchema(name="task_type", dtype=DataType.VARCHAR, max_length=50),
+            FieldSchema(name="challenge_text", dtype=DataType.VARCHAR, max_length=2000),
+            FieldSchema(name="metadata", dtype=DataType.JSON),
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=384)
+        ]
+        
+        schema = CollectionSchema(
+            fields=fields,
+            description="Deepiri challenge and task embeddings"
+        )
+        
+        self.collection = Collection(
+            name=self.collection_name,
+            schema=schema
+        )
+        
+        index_params = {
+            "metric_type": "L2",
+            "index_type": "HNSW",
+            "params": {
+                "M": 16,
+                "efConstruction": 200
+            }
+        }
+        
+        self.collection.create_index(
+            field_name="embedding",
+            index_params=index_params
+        )
+        
+        logger.info("Milvus collection created with index", collection=self.collection_name)
+    
+    def _load_reranker(self):
+        """Load cross-encoder reranker for top-K refinement."""
+        try:
+            from sentence_transformers import CrossEncoder
+            device = get_device()
+            self.reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device=device)
+            logger.info(f"Reranker loaded on device: {device}")
+        except Exception as e:
+            logger.warning("Reranker not available", error=str(e))
+    
+    def add_challenges(self, challenges: List[Dict]):
+        """Add challenge embeddings to vector store."""
+        if not self._milvus_available or not self.collection:
+            logger.warning("Cannot add challenges - Milvus not available")
+            return
+        
+        if not challenges:
+            return
+        
+        texts = [c.get('challenge_text', '') for c in challenges]
+        # Disable progress bar to avoid cluttering logs during reloads
+        embeddings = self.embedding_model.encode(texts, show_progress_bar=False)
+        
+        entities = []
+        for i, challenge in enumerate(challenges):
+            entities.append({
+                "challenge_id": challenge.get('id', str(i)),
+                "task_type": challenge.get('task_type', 'manual'),
+                "challenge_text": challenge.get('challenge_text', ''),
+                "metadata": json.dumps(challenge.get('metadata', {})),
+                "embedding": embeddings[i].tolist()
+            })
+        
+        self.collection.insert(entities)
+        self.collection.flush()
+        
+        logger.info("Challenges added to vector store", count=len(challenges))
+    
+    def retrieve(
+        self,
+        query: str,
+        top_k: int = 10,
+        task_type_filter: Optional[str] = None,
+        rerank: bool = True
+    ) -> List[Dict]:
+        """Retrieve relevant challenges using semantic search."""
+        if not self._milvus_available or not self.collection:
+            logger.warning("Cannot retrieve - Milvus not available")
+            return []
+        
+        # Lazy load collection on first use (optimization: don't block startup)
+        if not self._ensure_collection_loaded():
+            logger.warning("Collection not loaded, cannot retrieve")
+            return []
+        
+        query_embedding = self.embedding_model.encode([query])[0]
+        
+        search_params = {
+            "metric_type": "L2",
+            "params": {"ef": 64}
+        }
+        
+        expr = None
+        if task_type_filter:
+            expr = f'task_type == "{task_type_filter}"'
+        
+        results = self.collection.search(
+            data=[query_embedding.tolist()],
+            anns_field="embedding",
+            param=search_params,
+            limit=top_k,
+            expr=expr,
+            output_fields=["challenge_id", "challenge_text", "task_type", "metadata"]
+        )
+        
+        retrieved = []
+        for hit in results[0]:
+            # Handle metadata - Milvus JSON fields may return as dict or string
+            metadata_raw = hit.entity.get("metadata", {})
+            if isinstance(metadata_raw, dict):
+                metadata = metadata_raw
+            elif isinstance(metadata_raw, str):
+                metadata = json.loads(metadata_raw) if metadata_raw else {}
+            else:
+                metadata = {}
+            
+            retrieved.append({
+                "challenge_id": hit.entity.get("challenge_id"),
+                "challenge_text": hit.entity.get("challenge_text"),
+                "task_type": hit.entity.get("task_type"),
+                "metadata": metadata,
+                "score": hit.distance
+            })
+        
+        if rerank and self.reranker and len(retrieved) > 1:
+            retrieved = self._rerank(query, retrieved)
+        
+        return retrieved
+    
+    def _rerank(self, query: str, candidates: List[Dict]) -> List[Dict]:
+        """Rerank candidates using cross-encoder."""
+        pairs = [[query, c["challenge_text"]] for c in candidates]
+        scores = self.reranker.predict(pairs)
+        
+        for i, candidate in enumerate(candidates):
+            candidate["rerank_score"] = float(scores[i])
+        
+        return sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)
+    
+    def generate_with_rag(
+        self,
+        task: Dict,
+        retrieved_challenges: List[Dict],
+        base_llm_prompt: str
+    ) -> Dict:
+        """Generate challenge using RAG context."""
+        context = "\n\n".join([
+            f"Example {i+1}: {c['challenge_text']}"
+            for i, c in enumerate(retrieved_challenges[:5])
+        ])
+        
+        enhanced_prompt = f"""{base_llm_prompt}
+
+Relevant Examples:
+{context}
+
+Task: {task.get('title', '')}
+Description: {task.get('description', '')}
+
+Generate a challenge similar in style to the examples above."""
+        
+        return {
+            "prompt": enhanced_prompt,
+            "context_challenges": retrieved_challenges,
+            "context_count": len(retrieved_challenges)
+        }
+
+
+class RAGDataPipeline:
+    """Pipeline for processing and indexing challenge data."""
+    
+    def __init__(self, rag_pipeline: RAGPipeline):
+        self.rag = rag_pipeline
+    
+    def process_challenge_dataset(self, dataset_path: str):
+        """Process and index challenge dataset."""
+        with open(dataset_path, 'r') as f:
+            challenges = [json.loads(line) for line in f]
+        
+        processed = []
+        for challenge in challenges:
+            processed.append({
+                "id": challenge.get("id"),
+                "task_type": challenge.get("task_type", "manual"),
+                "challenge_text": self._create_challenge_text(challenge),
+                "metadata": {
+                    "difficulty": challenge.get("difficulty"),
+                    "points": challenge.get("pointsReward"),
+                    "duration": challenge.get("configuration", {}).get("timeLimit")
+                }
+            })
+        
+        self.rag.add_challenges(processed)
+        logger.info("Dataset processed and indexed", count=len(processed))
+    
+    def _create_challenge_text(self, challenge: Dict) -> str:
+        """Create searchable text from challenge."""
+        parts = [
+            challenge.get("title", ""),
+            challenge.get("description", ""),
+            challenge.get("type", ""),
+            challenge.get("difficulty", "")
+        ]
+        return " ".join(filter(None, parts))
+
+
+def initialize_rag_system():
+    """Initialize production RAG system."""
+    # Use environment variables for Milvus connection
+    milvus_host = os.getenv("MILVUS_HOST", "localhost")
+    milvus_port = int(os.getenv("MILVUS_PORT", "19530"))
+    rag = RAGPipeline(milvus_host=milvus_host, milvus_port=milvus_port)
+    return rag

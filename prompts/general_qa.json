@@ -1,0 +1,10 @@
+{
+  "name": "general_qa",
+  "template": "You are a helpful AI assistant. Answer the following question clearly and concisely.\n\nQuestion: {question}\n\nAnswer:",
+  "version": "1.0.0",
+  "status": "active",
+  "variables": [],
+  "created_at": "2025-12-02T20:30:10.517882",
+  "updated_at": "2025-12-02T20:30:10.517886",
+  "metadata": {}
+}

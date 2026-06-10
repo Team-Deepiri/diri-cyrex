@@ -1,0 +1,141 @@
+# Cyrex Documentation
+
+Welcome to the Cyrex AI platform documentation. This directory contains comprehensive documentation organized by topic.
+
+## Documentation Structure
+
+### [Getting Started](./getting-started/)
+Quick start guides and tutorials to get you up and running quickly.
+
+- **[How to Use Cyrex](./getting-started/HOW_TO_USE_CYREX.md)** - Complete guide to using the Cyrex AI service
+- **[Vendor Fraud Quick Start](./getting-started/CYREX_VENDOR_FRAUD_QUICK_START.md)** - 5-minute guide to vendor fraud detection
+- **[Training Quick Start](./getting-started/QUICK_START_TRAINING.md)** - Quick guide to training models
+- **[Data Collection Quick Start](./getting-started/DATA_COLLECTION_QUICK_START.md)** - Guide to collecting training data
+
+### 🏗️ [Architecture](./architecture/)
+System architecture, design patterns, and core system documentation.
+
+- **[Architecture](./architecture/ARCHITECTURE.md)** - Overall system architecture and design
+- **[Core Systems](./architecture/CORE_SYSTEMS.md)** - Core infrastructure components
+- **[Complete Implementation](./architecture/CYREX_COMPLETE_IMPLEMENTATION.md)** - Full implementation details
+- **[Data Storage Architecture](./architecture/DATA_STORAGE_ARCHITECTURE.md)** - Storage system design
+- **[Final Storage Architecture](./architecture/FINAL_STORAGE_ARCHITECTURE.md)** - Finalized storage design
+- **[Postgres Schema Reorganization](./architecture/POSTGRES_SCHEMA_REORGANIZATION_COMPLETE.md)** - Database schema changes
+- **[Training Data Store](./architecture/TRAINING_DATA_STORE_IMPLEMENTATION.md)** - Training data storage system
+
+### [Features](./features/)
+Detailed documentation for specific features and capabilities.
+
+#### AI Agents
+- **[Agents Implementation](./features/AGENTS_IMPLEMENTATION.md)** - Complete agent system documentation
+
+#### RAG (Retrieval-Augmented Generation)
+- **[Complete RAG Implementation](./features/COMPLETE_RAG_IMPLEMENTATION.md)** - Full RAG system documentation
+- **[Advanced RAG Features](./features/ADVANCED_RAG_FEATURES.md)** - Advanced RAG capabilities
+
+#### Vendor Fraud Detection
+- **[Vendor Fraud System](./features/CYREX_VENDOR_FRAUD_SYSTEM.md)** - Vendor fraud detection system
+- **[Vendor Fraud Implementation Complete](./features/VENDOR_FRAUD_IMPLEMENTATION_COMPLETE.md)** - Implementation status and details
+- **[Cyrex Guard Platform](./features/CYREX_GUARD_PLATFORM.md)** - Universal vendor fraud detection platform for 6 industries
+
+#### Automation
+- **[Company Automation System](./features/COMPANY_AUTOMATION_SYSTEM.md)** - Automation system overview
+- **[Company Automation Alignment](./features/COMPANY_AUTOMATION_ALIGNMENT.md)** - Automation alignment guide
+
+#### Workflows & Interfaces
+- **[LangGraph Workflow Playground](./features/LANGGRAPH_WORKFLOW_PLAYGROUND.md)** - Testing interface for LangGraph multi-agent workflows
+- **[Additional API Endpoints](./features/UNDOCUMENTED_ENDPOINTS.md)** - Documentation for undocumented API endpoints
+
+### [Development](./development/)
+Development guides, training documentation, and technical deep-dives.
+
+#### Training & Models
+- **[Training Models](./development/TRAINING_MODELS.md)** - Guide to training AI models
+- **[How to Collect Training Data](./development/HOW_TO_COLLECT_TRAINING_DATA.md)** - Data collection guide
+- **[Data Collection Updated](./development/DATA_COLLECTION_UPDATED.md)** - Updated data collection methods
+
+#### Local Development
+- **[Local Model Setup](./development/LOCAL_MODEL_SETUP.md)** - Setting up local models
+- **[Run Without Docker](./development/RUN_WITHOUT_DOCKER.md)** - Local development setup
+- **[CUDA Dev Setup](./development/CUDA_DEV_SETUP.md)** - CUDA development environment
+- **[Apple Silicon MPS Setup](./development/APPLE_SILICON_MPS_SETUP.md)** - Apple GPU development
+- **[Debugging Guide](./development/DEBUGGING_GUIDE.md)** - Debugging tips and techniques
+
+#### Advanced Techniques
+- **[LoRA Integration](./development/LORA_INTEGRATION.md)** - Low-Rank Adaptation integration
+- **[LoRA/QLoRA System](./development/LORA_QLORA_SYSTEM.md)** - LoRA and QLoRA implementation
+- **[Model Customization](./development/MODEL_CUSTOMIZATION.md)** - Custom model configuration
+- **[LangChain 1.x Upgrade](./development/LANGCHAIN_1X_UPGRADE.md)** - Upgrading to LangChain 1.x
+- **[LangGraph Migration Plan](./development/LANGGRAPH_MIGRATION_PLAN.md)** - Migration to LangGraph
+- **[Tensor Loading Optimization](./development/TENSOR_LOADING_OPTIMIZATION_PLAN.md)** - GPU tensor optimization
+- **[Indexing Pipeline Blueprint](./development/INDEXING_PIPELINE_BLUEPRINT.md)** - Data indexing pipeline
+
+### [Operations](./operations/)
+Build, deployment, optimization, and operational documentation.
+
+- **[Build Guide](./operations/README_BUILD.md)** - Building the Cyrex platform
+- **[Build Optimization](./operations/BUILD_OPTIMIZATION.md)** - Optimizing builds
+- **[Dockerfile Build Options](./operations/Dockerfile.build-options.md)** - Docker build configuration
+- **[Packages Verification](./operations/PACKAGES_VERIFICATION.md)** - Package verification guide
+- **[AI System README](./operations/README_AI_SYSTEM.md)** - AI system overview
+- **[GPU Utils Host](./operations/GPU_UTILS_HOST.md)** - GPU detection utilities
+- **[Industry Latency Optimization](./operations/INDUSTRY_LATENCY_OPTIMIZATION_PLAN.md)** - Latency optimization by industry
+- **[Latency Analysis](./operations/LATENCY_ANALYSIS_AND_OPTIMIZATION.md)** - System latency analysis
+- **[PDGE Latency Optimization](./operations/PDGE_LATENCY_OPTIMIZATION_PLAN.md)** - PDGE system latency optimization
+
+## Quick Navigation
+
+### For New Users
+1. Start with [How to Use Cyrex](./getting-started/HOW_TO_USE_CYREX.md)
+2. Review the [Architecture](./architecture/ARCHITECTURE.md) overview
+3. Explore specific [Features](./features/) you're interested in
+
+### For Developers
+1. Check [Development](./development/) guides for setup
+2. Review [Core Systems](./architecture/CORE_SYSTEMS.md) for architecture
+3. See [Operations](./operations/) for build and deployment
+
+### For Feature Users
+1. Browse [Features](./features/) for specific capabilities
+2. Use [Getting Started](./getting-started/) guides for quick setup
+3. Refer to [Architecture](./architecture/) for system understanding
+
+### For Testing & Development
+1. Use [LangGraph Workflow Playground](./features/LANGGRAPH_WORKFLOW_PLAYGROUND.md) for workflow testing
+2. Check [Development](./development/) guides for setup
+3. Review [Operations](./operations/) for build and deployment
+
+## Additional Resources
+
+- **Root README**: See the [root README](../README.md) for project overview
+- **Algorithm Integration Analysis**: See [ALGORITHM_INTEGRATION_ANALYSIS.md](../ALGORITHM_INTEGRATION_ANALYSIS.md) - Cross-platform algorithm analysis
+- **RTX 5080 Support**: See [RTX_5080_SUPPORT.md](../RTX_5080_SUPPORT.md) - RTX 5080/5090 GPU compatibility guide
+- **Platform Documentation**: See [deepiri-platform/docs/DOCUMENTATION_INDEX.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/docs/DOCUMENTATION_INDEX.md) for the full platform documentation index (this repo is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform))
+- **API Documentation**: Swagger UI at http://localhost:8000/docs (when running)
+- **Code Comments**: Inline documentation in source files
+- **Component READMEs**: 
+  - [Agents README](../app/agents/README.md) - Agent system details
+  - [Tests README](../tests/README.md) - Test suite documentation
+  - [Cyrex Interface README](../cyrex-interface/README.md) - Frontend interface guide
+  - [Cyrex-AGI README](../cyrex-agi/README.md) - Autonomous AGI system (Phase 5, placeholder)
+
+## Documentation Updates
+
+This documentation is actively maintained. If you find issues or have suggestions:
+1. Check if the information exists in another section
+2. Review the codebase for the latest implementation
+3. Update documentation as needed
+
+## Note on Cross-Repo References
+
+This repo (`diri-cyrex`) is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform). Some documentation references external repos that are part of the platform:
+
+- **`deepiri-modelkit`** — Shared contracts for RAG components (see `COMPLETE_RAG_IMPLEMENTATION.md`)
+- **`deepiri-helox`** — ML training pipelines used by Cyrex-AGI
+- **`deepiri-synapse`** — Streaming/messaging platform used by Cyrex
+- **`deepiri-gpu-utils`** — GPU detection utilities for Docker builds
+
+---
+
+
+

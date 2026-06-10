@@ -1,0 +1,2 @@
+"""Streaming integration for AGI"""
+

@@ -1,4 +1,4 @@
-# CPU-only version for development (much faster, no CUDA downloads)
+# CPU-only version for development (no CUDA downloads)
 # Use this for local development if you don't need GPU
 FROM pytorch/pytorch:2.0.0-cpu
 
@@ -9,7 +9,6 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=300 \
     PIP_RETRIES=3 \
-    TRANSFORMERS_CACHE=/app/.cache/huggingface \
     HF_HOME=/app/.cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/.cache/sentence_transformers
 
@@ -39,6 +38,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
         python-json-logger==2.0.7 \
         prometheus-client==0.20.0 \
         redis==5.0.1 \
+        asyncpg>=0.29.0 \
         pytest==8.3.2 \
         pytest-asyncio==0.23.5 \
         pytest-cov==4.1.0
