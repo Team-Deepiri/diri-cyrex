@@ -110,8 +110,15 @@ Response
 | `time_optimizer` | Optimizes scheduling |
 | `creative_sparker` | Generates creative ideas |
 | `quality_assurance` | Reviews outputs for quality |
+| `engagement_specialist` | Maintains user engagement |
+| `memory_manager` | Manages multi-tier memory system |
+| `tool_executor` | Executes registered tools |
+| `guardrail_enforcer` | Enforces content guardrails |
 | `invoice_analyzer` | Analyzes vendor invoices |
+| `vendor_intelligence` | Gathers vendor profiles and history |
+| `pricing_benchmark` | Compares prices against benchmarks |
 | `fraud_detector` | Detects fraud patterns |
+| `document_processor` | Processes invoices/documents |
 | `risk_assessor` | Assesses risk levels |
 
 ## API Authentication
@@ -146,8 +153,22 @@ Key environment variables:
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host (use `postgres` in Docker) |
 | `MILVUS_HOST` | `localhost` | Milvus host (use `milvus` in Docker) |
 | `LOCAL_LLM_BACKEND` | `ollama` | Local LLM backend |
-| `LOCAL_LLM_MODEL` | `llama3:8b` | Ollama model name |
+| `LOCAL_LLM_MODEL` | `llama3:8b` | Ollama model name (`.env.example` default) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `POSTGRES_DB` | `deepiri` | PostgreSQL database name |
+| `POSTGRES_USER` | `deepiri` | PostgreSQL user |
+| `POSTGRES_PASSWORD` | `deepiripassword` | PostgreSQL password |
+| `LLAMA_CPP_MODEL_PATH` | — | Path to GGUF model file (llama_cpp backend) |
+| `MESSAGING_SERVICE_URL` | `http://messaging-service:5009` | Synapse messaging service URL |
+| `JWT_SECRET` | `default-secret-change-in-production` | JWT secret key |
+| `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
+| `NODE_BACKEND_URL` | `http://localhost:5000` | Node backend API URL |
+| `LANGCHAIN_API_KEY` | — | LangChain API key (optional) |
+| `LANGCHAIN_PROJECT` | `deepiri` | LangChain project name |
+| `MINIO_ROOT_USER` | `minioadmin` | MinIO access key |
+| `MINIO_ROOT_PASSWORD` | `minioadmin` | MinIO secret key |
+| `S3_ENDPOINT_URL` | `http://minio:9000` | S3/MinIO endpoint URL |
 
 ## Docker Build
 
@@ -191,6 +212,7 @@ docker build --build-arg BUILD_TYPE=prebuilt --build-arg BASE_IMAGE=pytorch/pyto
 | [docs/features/AGENTS_IMPLEMENTATION.md](docs/features/AGENTS_IMPLEMENTATION.md) | Agent system documentation |
 | [docs/features/COMPLETE_RAG_IMPLEMENTATION.md](docs/features/COMPLETE_RAG_IMPLEMENTATION.md) | RAG system documentation |
 | [docs/features/CYREX_VENDOR_FRAUD_SYSTEM.md](docs/features/CYREX_VENDOR_FRAUD_SYSTEM.md) | Vendor fraud detection |
+| [docs/features/UNDOCUMENTED_ENDPOINTS.md](docs/features/UNDOCUMENTED_ENDPOINTS.md) | Undocumented API endpoints |
 | [docs/getting-started/CYREX_VENDOR_FRAUD_QUICK_START.md](docs/getting-started/CYREX_VENDOR_FRAUD_QUICK_START.md) | Fraud detection quick start |
 | [cyrex-interface/README.md](cyrex-interface/README.md) | Frontend interface guide |
 
@@ -216,6 +238,7 @@ diri-cyrex/
 ├── app/                          # FastAPI application
 │   ├── main.py                   # Entry point
 │   ├── settings.py               # Configuration
+│   ├── logging_config.py         # Logging setup
 │   ├── agents/                   # Agent system
 │   │   ├── base_agent.py         # Base agent class
 │   │   ├── agent_factory.py      # Agent factory
@@ -226,9 +249,13 @@ diri-cyrex/
 │   │   ├── orchestrator.py       # Main orchestrator
 │   │   ├── system_initializer.py # Bootstrap
 │   │   ├── state_manager.py      # State management
+│   │   ├── langgraph_workflow.py # LangGraph workflow engine
+│   │   ├── realtime_data_pipeline.py # Real-time data pipeline
 │   │   └── ...
 │   ├── routes/                   # API routes
 │   │   ├── intelligence_api.py   # AI intelligence endpoints
+│   │   ├── orchestration_api.py  # Orchestration endpoints
+│   │   ├── universal_rag_api.py  # Universal RAG API
 │   │   ├── document_indexing_api.py
 │   │   ├── vendor_fraud_api.py
 │   │   ├── cyrex_guard_api.py
@@ -236,12 +263,20 @@ diri-cyrex/
 │   ├── services/                 # Business logic
 │   │   ├── vendor_intelligence_service.py
 │   │   ├── document_indexing_service.py
+│   │   ├── fraud_detector.py
+│   │   ├── pricing_benchmark.py
 │   │   └── ...
 │   ├── integrations/             # External integrations
 │   │   ├── ollama_container.py   # Ollama integration
 │   │   ├── universal_rag_engine.py
+│   │   ├── enhanced_universal_rag_engine.py
 │   │   └── ...
-│   └── database/                 # Database models
+│   ├── database/                 # Database models
+│   ├── config/                   # Configuration
+│   ├── middleware/               # HTTP middleware
+│   ├── ml_models/                # ML model classification
+│   ├── pipeline/                 # Pipeline contracts & tools
+│   └── utils/                    # Utility functions
 ├── cyrex-interface/              # React frontend UI
 ├── tests/                        # Test suite
 ├── scripts/                      # Utility scripts
