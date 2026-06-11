@@ -145,6 +145,28 @@ def configure_logging(log_level: str = "INFO", log_file: str = None) -> None:
         cache_logger_on_first_use=True,
     )
 
+    # If deepiri-logger submodule is present, attempt to initialize its Python
+    # adapter so services use the centralized schema + PII masking logic.
+    try:
+        import os
+
+        # Path: <repo-root>/deps/deepiri-logger/python
+        pkg_path = Path(__file__).resolve().parents[1] / "deps" / "deepiri-logger" / "python"
+        if pkg_path.exists():
+            pkg_path_str = str(pkg_path)
+            if pkg_path_str not in sys.path:
+                sys.path.insert(0, pkg_path_str)
+        # Import the adapter and initialize
+        from deepiri_logger import config as deepiri_logger_config
+
+        service_name = os.getenv("SERVICE_NAME", "diri-cyrex")
+        version = os.getenv("SERVICE_VERSION", "dev")
+        deepiri_logger_config.init(service_name=service_name, version=version, log_level=log_level, log_file=log_file)
+    except Exception as _e:
+        # Non-fatal: if the submodule isn't present or import fails, fall back
+        # to the existing logging configuration.
+        logging.getLogger(__name__).debug("deepiri-logger init skipped: %s", _e)
+
 
 def get_logger(name: str) -> structlog.BoundLogger:
     """
