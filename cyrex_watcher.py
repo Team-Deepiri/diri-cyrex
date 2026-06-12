@@ -112,7 +112,7 @@ class CyrexFileHandler(FileSystemEventHandler):
             # Check wildcard patterns
             for pattern in self.IGNORE_PATTERNS:
                 if '*' in pattern:
-                    if part.endswith(pattern.replace('*', '')):
+                    if path.name.endswith(pattern.replace('*', '')):
                         return True
         
         # Check file extension
