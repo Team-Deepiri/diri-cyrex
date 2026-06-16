@@ -1,5 +1,7 @@
 # How to Collect Training Data for DIRI-CYREX
 
+> **Status: Pending Implementation** — The `app/train/scripts/` directory and scripts referenced in this document are planned but not yet implemented. Scripts will be placed in `train/scripts/` (mapped to `/app/train` inside the Docker container).
+
 This guide shows you how to collect training data for all three tiers of the AI system.
 
 ---

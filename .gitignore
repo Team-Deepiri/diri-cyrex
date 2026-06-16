@@ -182,6 +182,7 @@ test_model_load.py
 .cache/
 .temp/
 temp/
+.pi/
 
 # ========================================
 # BINARY FILES & EXECUTABLES
