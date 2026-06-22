@@ -1,0 +1,25 @@
+[
+  {
+    "confessed": false,
+    "spans": [
+      {
+        "citation_id": "citation_01",
+        "document_id": "lease_01",
+        "source_doc_hash": "abc123",
+        "quote": "The base rent is $4500 per month",
+        "confidence": 0.95,
+        "extraction_pass": 1,
+        "locator": {
+          "locator_type": "char_range",
+          "char_start": 1042,
+          "char_end": 1080
+        }
+      }
+    ]
+  },
+  {
+    "confessed": true,
+    "spans": [],
+    "gaps": []
+  }
+]
