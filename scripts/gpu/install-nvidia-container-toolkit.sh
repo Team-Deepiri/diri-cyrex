@@ -355,7 +355,13 @@ if docker run --rm --gpus all nvidia/cuda:12.0.0-base-ubuntu22.04 nvidia-smi >/d
     echo ""
     echo "Your Docker containers can now access NVIDIA GPUs."
     echo ""
-    echo "Example usage in docker-compose.yml:"
+    if command -v deepiri-gpu >/dev/null 2>&1; then
+        echo "Canonical Docker Compose GPU hints (from deepiri-gpu-utils):"
+        echo "   deepiri-gpu compose-gpu          # human-readable"
+        echo "   deepiri-gpu compose-gpu --json   # machine-readable"
+        echo ""
+    fi
+    echo "Manual docker-compose.yml example (NVIDIA fallback):"
     echo "  deploy:"
     echo "    resources:"
     echo "      reservations:"

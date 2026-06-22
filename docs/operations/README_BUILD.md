@@ -34,9 +34,8 @@ docker build -t deepiri-dev-cyrex:latest .
 
 ```bash
 cd deepiri-platform
-# Optional: override build args
-export CYREX_BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
-export CYREX_DEVICE_TYPE=gpu
+# Set CYREX_DEVICE_TYPE, CYREX_BASE_IMAGE, and CYREX_BUILD_TYPE from GPU detection:
+eval "$(deepiri-gpu export-env --prefix CYREX_)"
 docker compose -f docker-compose.dev.yml build cyrex
 ```
 
@@ -45,9 +44,8 @@ Defaults in `docker-compose.dev.yml` keep a CUDA 12.8 base image when env vars a
 ## Force CPU Build
 
 ```bash
-# Via environment variables (from deepiri-platform)
-export CYREX_BASE_IMAGE=python:3.11-slim
-export CYREX_DEVICE_TYPE=cpu
+# From deepiri-platform — deepiri-gpu-utils stays the source of truth:
+eval "$(deepiri-gpu export-env --device-type cpu --prefix CYREX_)"
 docker compose -f docker-compose.dev.yml build cyrex
 ```
 
@@ -86,9 +84,19 @@ Policy lives in **deepiri-gpu-utils** (`detect`, `build_args`). Typical rules:
 - Check `nvidia-smi` on the host
 - Run `deepiri-gpu build-args` and read warnings
 
-### Want to Override Detection?
+### Advanced: manual override
 
-Set `CYREX_BASE_IMAGE` / `CYREX_DEVICE_TYPE` for compose, or pass `--build-arg` to `docker build`.
+Prefer the `deepiri-gpu export-env` forms above. Only if you must pin values yourself, set
+all three explicitly (from `deepiri-platform`):
+
+```bash
+export CYREX_DEVICE_TYPE=cpu
+export CYREX_BASE_IMAGE=python:3.11-slim
+export CYREX_BUILD_TYPE=prebuilt
+docker compose -f docker-compose.dev.yml build cyrex
+```
+
+Or pass `--build-arg BASE_IMAGE=... --build-arg DEVICE_TYPE=...` to `docker build`.
 
 ## Baseline snapshots
 
