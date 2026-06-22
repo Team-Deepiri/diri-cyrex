@@ -1,0 +1,9 @@
+{
+  "document_id": "lease_001",
+  "question": "What is the base rent amount?",
+  "persona_scope": {
+    "witness_set_only": true,
+    "hard_citation_gate": true,
+    "corpus_filter": ["lease_001"]
+  }
+}
