@@ -183,6 +183,7 @@ test_model_load.py
 .temp/
 temp/
 .pi/
+plans/
 
 # ========================================
 # BINARY FILES & EXECUTABLES
