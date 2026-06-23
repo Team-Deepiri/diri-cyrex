@@ -100,6 +100,9 @@ class BaseAgent(ABC):
         self._event_handler = None
         self._broker = None                        # SynapseBroker, lazy-initialized
         self._listener_task: Optional[asyncio.Task] = None  # background message listener
+        # ComprehensiveAPITools owns an async HTTP client; tracked here so it can
+        # be closed on teardown (set by AgentFactory when tools are registered).
+        self._comprehensive_tools = None
 
         # Prompt template (can be overridden by subclasses)
         self.prompt_template = agent_config.system_prompt or self._default_prompt_template()
@@ -154,6 +157,21 @@ class BaseAgent(ABC):
             self.logger.debug(f"Agent {self.agent_id} subscribed to channel {channel}")
         except Exception as e:
             self.logger.warning(f"Could not initialize SynapseBroker for agent {self.agent_id}: {e}")
+
+    async def close(self):
+        """Release async resources held by the agent.
+
+        Closes the ComprehensiveAPITools HTTP client (diri-agent-toolbox
+        AsyncHttpToolbox) to avoid leaked connections. Safe to call multiple
+        times.
+        """
+        if self._comprehensive_tools is not None:
+            try:
+                await self._comprehensive_tools.close()
+            except Exception as e:
+                self.logger.warning(f"Error closing comprehensive tools for {self.agent_id}: {e}")
+            finally:
+                self._comprehensive_tools = None
 
     def _default_prompt_template(self) -> str:
         """Default prompt template"""

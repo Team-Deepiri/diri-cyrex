@@ -67,6 +67,12 @@ class Settings(BaseSettings):
     LOCAL_LLM_MODEL: str = "llama3:8b"  # Model name/identifier
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
+
+    # Agent file sandbox: root directory agents may read/write within via the
+    # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are
+    # rejected. Resolved at runtime; override with the AGENT_FILE_SANDBOX_ROOT
+    # env var. Defaults to an app-relative persistent directory (./agent_sandbox).
+    AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
     
     # PostgreSQL Configuration
     # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
@@ -223,6 +229,12 @@ class Settings(BaseSettings):
     LOCAL_LLM_MODEL: str = "mistral:7b"  # Model name/identifier (Mistral as default)
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     LLAMA_CPP_MODEL_PATH: Optional[str] = None  # Path to .gguf model file
+
+    # Agent file sandbox: root directory agents may read/write within via the
+    # diri-agent-toolbox SandboxedFileToolbox. Paths outside this root are
+    # rejected. Resolved at runtime; override with the AGENT_FILE_SANDBOX_ROOT
+    # env var. Defaults to an app-relative persistent directory (./agent_sandbox).
+    AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
     
     # PostgreSQL Configuration
     # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments

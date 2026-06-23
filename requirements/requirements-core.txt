@@ -3,6 +3,8 @@
 # deliberately so Docker/test builds do not change underneath a PR.
 diri-agent-testing-utils @ git+https://github.com/Team-Deepiri/diri-agent-testing-utils.git@a934468cd142e2cb38bd365e8548b4bdde77bf73
 deepiri-dataset-processor[all] @ git+https://github.com/Team-Deepiri/deepiri-dataset-processor.git@4fc692fc2ba52509c67070e7cbf4b526277e0252
+# Deepiri Agent Tools (Team-Deepiri/diri-agent-toolbox). Local dev: pip install -e ../../diri-agent-toolbox
+diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git@8a2e551e80c9ab61d7f8863c0cf262f783423c5f
 
 # Core dependencies (torch is already in base PyTorch image)
 fastapi==0.112.2
