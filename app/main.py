@@ -9,7 +9,6 @@ from threading import Lock
 import time
 import uuid
 import logging
-import asyncio
 import numpy as np
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
