@@ -5,7 +5,6 @@ import logging
 import structlog
 import sys
 from pathlib import Path
-from pythonjsonlogger import jsonlogger
 from typing import Any, Dict
 from collections import defaultdict
 from threading import Lock
