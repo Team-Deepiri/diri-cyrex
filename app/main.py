@@ -291,7 +291,6 @@ async def api_complete(req: CompletionRequest, request: Request):
             raise HTTPException(status_code=503, detail="OpenAI API key not configured")
         import openai
         client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
-        import asyncio
         completion = await asyncio.to_thread(
             client.chat.completions.create,
             model=settings.OPENAI_MODEL,
