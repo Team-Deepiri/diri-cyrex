@@ -4,3 +4,6 @@
 [submodule "deepiri-dataset-processor"]
 	path = deepiri-dataset-processor
 	url = git@github.com:Team-Deepiri/deepiri-dataset-processor.git
+[submodule "deps/deepiri-logger"]
+	path = deps/deepiri-logger
+	url = git@github.com:Team-Deepiri/deepiri-logger.git
