@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime
 from typing import Any, List, Optional
 
 from app.pipeline.contracts.models import (
@@ -15,7 +14,6 @@ from app.pipeline.contracts.models import (
     Provenance,
 )
 from app.pipeline.registry.sqlite_store import init_db
-
 
 _CREATE_LEARNING = """\
 CREATE TABLE IF NOT EXISTS learning_artifacts (
@@ -112,7 +110,9 @@ class SqliteCorrectionStore:
                     artifact_id=row["artifact_id"],
                     document_id=row["document_id"],
                     field_name=row["field_name"],
-                    original_value=json.loads(row["original_value"]) if row["original_value"] else None,
+                    original_value=(
+                        json.loads(row["original_value"]) if row["original_value"] else None
+                    ),
                     corrected_value=json.loads(row["corrected_value"]),
                     corrected_citation=citation,
                     actor_id=row["actor_id"],

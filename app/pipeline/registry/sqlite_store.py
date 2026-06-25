@@ -28,10 +28,14 @@ import json
 import logging
 import sqlite3
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+_INSERT_ARTIFACT_REF = (
+    "INSERT OR IGNORE INTO artifact_refs "
+    "(from_artifact, to_artifact, ref_type, created_at) "
+)
 
 # ---------------------------------------------------------------------------
 # DDL
@@ -203,8 +207,7 @@ class SqliteArtifactStore:
 
     def _row_to_bundle(self, row: Dict[str, Any]) -> Any:
         """Deserialize a database row back into an ``ArtifactBundle``."""
-        from app.pipeline.contracts.models import ArtifactBundle, Provenance
-        from app.pipeline.contracts.models import ArtifactType
+        from app.pipeline.contracts.models import ArtifactBundle, ArtifactType, Provenance
 
         payload = json.loads(row["payload_json"])
         provenance_dict = json.loads(row["provenance_json"])
@@ -232,20 +235,17 @@ class SqliteArtifactStore:
 
         for ref_id in bundle.provenance.depends_on:
             conn.execute(
-                "INSERT OR IGNORE INTO artifact_refs (from_artifact, to_artifact, ref_type, created_at) "
-                "VALUES (?, ?, 'depends_on', ?)",
+                _INSERT_ARTIFACT_REF + "VALUES (?, ?, 'depends_on', ?)",
                 (bundle.artifact_id, ref_id, now),
             )
         for ref_id in bundle.provenance.depended_on_by:
             conn.execute(
-                "INSERT OR IGNORE INTO artifact_refs (from_artifact, to_artifact, ref_type, created_at) "
-                "VALUES (?, ?, 'depended_on_by', ?)",
+                _INSERT_ARTIFACT_REF + "VALUES (?, ?, 'depended_on_by', ?)",
                 (bundle.artifact_id, ref_id, now),
             )
         for ref_id in bundle.provenance.cross_references:
             conn.execute(
-                "INSERT OR IGNORE INTO artifact_refs (from_artifact, to_artifact, ref_type, created_at) "
-                "VALUES (?, ?, 'cross_reference', ?)",
+                _INSERT_ARTIFACT_REF + "VALUES (?, ?, 'cross_reference', ?)",
                 (bundle.artifact_id, ref_id, now),
             )
 

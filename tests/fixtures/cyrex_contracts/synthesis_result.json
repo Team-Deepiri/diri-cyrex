@@ -1,0 +1,110 @@
+{
+  "document_id": "lease_001",
+  "source_doc_hash": "sha256:a1b2c3d4e5f6",
+  "final_fields": [
+    {
+      "field_name": "base_rent",
+      "value": 4500,
+      "value_type": "currency",
+      "citations": [
+        {
+          "citation_id": "cit_syn_001",
+          "document_id": "lease_001",
+          "source_doc_hash": "sha256:a1b2c3d4e5f6",
+          "locator": {"locator_type": "char_range", "char_start": 120, "char_end": 127, "page_start": 1, "page_end": 1},
+          "quote": "4500.00",
+          "confidence": 0.95,
+          "extraction_pass": 1
+        }
+      ],
+      "confidence": 0.95
+    },
+    {
+      "field_name": "lease_start",
+      "value": "2024-01-01",
+      "value_type": "date",
+      "citations": [
+        {
+          "citation_id": "cit_syn_002",
+          "document_id": "lease_001",
+          "source_doc_hash": "sha256:a1b2c3d4e5f6",
+          "locator": {"locator_type": "char_range", "char_start": 200, "char_end": 210, "page_start": 1, "page_end": 1},
+          "quote": "Jan 1, 2024",
+          "confidence": 0.90,
+          "extraction_pass": 1
+        }
+      ],
+      "confidence": 0.90
+    }
+  ],
+  "all_citations": [
+    {
+      "citation_id": "cit_syn_001",
+      "document_id": "lease_001",
+      "source_doc_hash": "sha256:a1b2c3d4e5f6",
+      "locator": {"locator_type": "char_range", "char_start": 120, "char_end": 127, "page_start": 1, "page_end": 1},
+      "quote": "4500.00",
+      "confidence": 0.95,
+      "extraction_pass": 1
+    },
+    {
+      "citation_id": "cit_syn_002",
+      "document_id": "lease_001",
+      "source_doc_hash": "sha256:a1b2c3d4e5f6",
+      "locator": {"locator_type": "char_range", "char_start": 200, "char_end": 210, "page_start": 1, "page_end": 1},
+      "quote": "Jan 1, 2024",
+      "confidence": 0.90,
+      "extraction_pass": 1
+    }
+  ],
+  "confidence": 0.92,
+  "passes": [
+    {
+      "pass_number": 1,
+      "method": "regex",
+      "fields_extracted": ["lease_start"],
+      "extraction_time_ms": 50
+    },
+    {
+      "pass_number": 2,
+      "method": "llm",
+      "fields_extracted": ["base_rent", "lease_start", "security_deposit"],
+      "prompt_version": "lease-v2.1",
+      "extraction_time_ms": 1200
+    }
+  ],
+  "provenance": {
+    "source_doc_hash": "sha256:a1b2c3d4e5f6",
+    "document_id": "lease_001",
+    "version": 1,
+    "model_id": "gpt-4o",
+    "passes": [
+      {
+        "pass_number": 1,
+        "method": "regex",
+        "fields_extracted": ["lease_start"],
+        "extraction_time_ms": 50
+      },
+      {
+        "pass_number": 2,
+        "method": "llm",
+        "fields_extracted": ["base_rent", "lease_start", "security_deposit"],
+        "prompt_version": "lease-v2.1",
+        "extraction_time_ms": 1200
+      }
+    ],
+    "depends_on": [],
+    "depended_on_by": [],
+    "cross_references": [],
+    "synthesized_from": []
+  },
+  "discrepancies": [
+    {
+      "field_name": "base_rent",
+      "pass_a_value": 4400,
+      "pass_b_value": 4500,
+      "confidence_delta": 0.05,
+      "reason": "Regex pass found partial match; LLM pass confirmed exact value"
+    }
+  ]
+}

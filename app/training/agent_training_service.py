@@ -73,7 +73,9 @@ class AgentTrainingService:
             cfg = LiveFineTuneConfig(min_examples=2, max_steps=50)
             repro = ReproducibilityController(seed=cfg.seed)
             repro.set_seeds()
-            orch = TrainingOrchestrator({"lr": 1e-4}, reproducibility=repro, max_steps=cfg.max_steps)
+            orch = TrainingOrchestrator(
+                {"lr": 1e-4}, reproducibility=repro, max_steps=cfg.max_steps
+            )
             self._feedback_trainer = FeedbackLoopTrainer(orch, live_config=cfg)
 
     def submit_correction(
@@ -155,7 +157,11 @@ class AgentTrainingService:
                         break
 
         if not examples:
-            return {"status": "buffered", "artifact_ids": artifact_ids, "correlation_id": str(uuid4())}
+            return {
+                "status": "buffered",
+                "artifact_ids": artifact_ids,
+                "correlation_id": str(uuid4()),
+            }
 
         output_dir = tempfile.mkdtemp(prefix="cyrex-feedback-")
         provenance = corrections_to_manifest(examples, output_dir)

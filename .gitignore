@@ -170,6 +170,9 @@ model_cache/
 
 # Test files
 test_*.py
+!tests/contract/test_*.py
+!tests/pipeline/**/test_*.py
+!tests/training/test_*.py
 *_test.py
 test_model_load.py
 

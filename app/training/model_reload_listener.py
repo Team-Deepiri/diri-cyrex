@@ -74,7 +74,10 @@ class ModelReloadListener:
                 messages = await self._streaming.read_stream(stream, last_id=last_id, count=10)
                 for msg_id, fields in messages:
                     last_id = msg_id
-                    data = {k: json.loads(v) if v and v.startswith("{") else v for k, v in fields.items()}
+                    data = {
+                        k: json.loads(v) if v and v.startswith("{") else v
+                        for k, v in fields.items()
+                    }
                     await self._handle_event(data)
             except Exception as exc:
                 logger.debug("model_reload_poll_error", error=str(exc))
