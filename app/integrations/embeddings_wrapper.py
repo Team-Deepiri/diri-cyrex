@@ -20,69 +20,12 @@ class RobustEmbeddings:
         self._initialize_model()
     
     def _get_target_device(self):
-        """Determine target device with proper fallback: CUDA → MPS → CPU
-        
-        Actually tests GPU functionality, not just availability.
-        Checks CUDA capability and performs a test operation to verify GPU works.
-        """
-        import torch
-        
-        # Check CUDA first
-        if torch.cuda.is_available():
-            try:
-                # Get GPU info
-                gpu_name = torch.cuda.get_device_name(0)
-                cuda_capability = torch.cuda.get_device_capability(0)
-                
-                logger.info(f"CUDA available, detected GPU: {gpu_name}")
-                logger.info(f"CUDA Capability: {cuda_capability[0]}.{cuda_capability[1]}")
-                
-                # Check if CUDA capability is sufficient (PyTorch typically requires 7.0+)
-                if cuda_capability[0] < 7:
-                    logger.warning(
-                        f"GPU has CUDA capability {cuda_capability[0]}.{cuda_capability[1]}, "
-                        f"which may be insufficient. PyTorch typically requires 7.0+. "
-                        f"Attempting to use GPU anyway, will fallback to CPU if it fails."
-                    )
-                
-                # Actually test GPU with a simple tensor operation
-                try:
-                    test_tensor = torch.tensor([1.0], device='cuda')
-                    result = test_tensor * 2
-                    _ = result.cpu()  # Move result back to CPU to ensure operation completed
-                    del test_tensor, result
-                    torch.cuda.empty_cache()
-                    
-                    logger.info(f"GPU test successful, using CUDA device: {gpu_name}")
-                    return torch.device('cuda')
-                except Exception as gpu_test_error:
-                    logger.warning(
-                        f"GPU detected but test operation failed: {gpu_test_error}. "
-                        f"Falling back to CPU."
-                    )
-                    # Fall through to CPU
-            except Exception as cuda_error:
-                logger.warning(f"Error checking CUDA device: {cuda_error}. Falling back to CPU.")
-                # Fall through to CPU
-        
-        # Check MPS (Apple Silicon)
-        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            try:
-                # Test MPS with a simple operation
-                test_tensor = torch.tensor([1.0], device='mps')
-                result = test_tensor * 2
-                _ = result.cpu()
-                del test_tensor, result
-                
-                logger.info("MPS (Apple Silicon) available and tested, using MPS")
-                return torch.device('mps')
-            except Exception as mps_error:
-                logger.warning(f"MPS detected but test failed: {mps_error}. Falling back to CPU.")
-                # Fall through to CPU
-        
-        # Fallback to CPU
-        logger.info("Using CPU (no GPU/MPS available or GPU test failed)")
-        return torch.device('cpu')
+        """Resolve device via shared Deepiri gpu-utils policy (CUDA → MPS → CPU)."""
+        from ..utils.device_detection import get_torch_device
+
+        device = get_torch_device()
+        logger.info("Embeddings target device: %s", device)
+        return device
     
     def _initialize_model(self):
         """Initialize sentence-transformers model using proper PyTorch device handling."""
