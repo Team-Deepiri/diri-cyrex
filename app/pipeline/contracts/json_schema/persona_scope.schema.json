@@ -1,0 +1,25 @@
+{
+  "additionalProperties": false,
+  "description": "Scoping parameters for Voice of the Document mode.",
+  "properties": {
+    "corpus_filter": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Corpus Filter",
+      "type": "array"
+    },
+    "hard_citation_gate": {
+      "default": true,
+      "title": "Hard Citation Gate",
+      "type": "boolean"
+    },
+    "witness_set_only": {
+      "default": true,
+      "title": "Witness Set Only",
+      "type": "boolean"
+    }
+  },
+  "title": "PersonaScope",
+  "type": "object"
+}

@@ -1,0 +1,314 @@
+{
+  "$defs": {
+    "DuelDisagreement": {
+      "additionalProperties": false,
+      "description": "Disagreement detected between two duel agents.",
+      "properties": {
+        "agent_a_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent A Confidence"
+        },
+        "agent_a_value": {
+          "default": null,
+          "title": "Agent A Value"
+        },
+        "agent_b_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent B Confidence"
+        },
+        "agent_b_value": {
+          "default": null,
+          "title": "Agent B Value"
+        },
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "duel_disagreement",
+          "default": "duel_disagreement",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "field_name": {
+          "title": "Field Name",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "section_id": {
+          "title": "Section Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "section_id",
+        "field_name"
+      ],
+      "title": "DuelDisagreement",
+      "type": "object"
+    },
+    "LowConfidenceField": {
+      "additionalProperties": false,
+      "description": "Field extracted with confidence below the floor.",
+      "properties": {
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "low_confidence_field",
+          "default": "low_confidence_field",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "field_name": {
+          "title": "Field Name",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "section_id": {
+          "title": "Section Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "section_id",
+        "field_name",
+        "confidence"
+      ],
+      "title": "LowConfidenceField",
+      "type": "object"
+    },
+    "PassDiscrepancy": {
+      "additionalProperties": false,
+      "description": "Discrepancy detected between extraction passes.",
+      "properties": {
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "confidence_delta": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence Delta"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "pass_discrepancy",
+          "default": "pass_discrepancy",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "field_name": {
+          "title": "Field Name",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "pass_a_value": {
+          "default": null,
+          "title": "Pass A Value"
+        },
+        "pass_b_value": {
+          "default": null,
+          "title": "Pass B Value"
+        },
+        "section_id": {
+          "title": "Section Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "section_id",
+        "field_name"
+      ],
+      "title": "PassDiscrepancy",
+      "type": "object"
+    },
+    "ReflectFailure": {
+      "additionalProperties": false,
+      "description": "Reflection/validation failure on a field.",
+      "properties": {
+        "artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Id"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "event_type": {
+          "const": "reflect_failure",
+          "default": "reflect_failure",
+          "title": "Event Type",
+          "type": "string"
+        },
+        "field_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field Name"
+        },
+        "issue_code": {
+          "title": "Issue Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        },
+        "section_id": {
+          "title": "Section Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "section_id",
+        "issue_code",
+        "message"
+      ],
+      "title": "ReflectFailure",
+      "type": "object"
+    }
+  },
+  "anyOf": [
+    {
+      "$ref": "#/$defs/PassDiscrepancy"
+    },
+    {
+      "$ref": "#/$defs/ReflectFailure"
+    },
+    {
+      "$ref": "#/$defs/LowConfidenceField"
+    },
+    {
+      "$ref": "#/$defs/DuelDisagreement"
+    }
+  ]
+}

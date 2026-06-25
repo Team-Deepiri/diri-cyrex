@@ -1,0 +1,71 @@
+{
+  "additionalProperties": false,
+  "description": "A cell in the epistemic pressure map grid.",
+  "properties": {
+    "discrepancy_count": {
+      "default": 0,
+      "title": "Discrepancy Count",
+      "type": "integer"
+    },
+    "document_id": {
+      "title": "Document Id",
+      "type": "string"
+    },
+    "drill_down_artifact_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Drill Down Artifact Ids",
+      "type": "array"
+    },
+    "duel_disagreements": {
+      "default": 0,
+      "title": "Duel Disagreements",
+      "type": "integer"
+    },
+    "is_fault_zone": {
+      "default": false,
+      "title": "Is Fault Zone",
+      "type": "boolean"
+    },
+    "low_confidence_count": {
+      "default": 0,
+      "title": "Low Confidence Count",
+      "type": "integer"
+    },
+    "page": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Page"
+    },
+    "reflect_failures": {
+      "default": 0,
+      "title": "Reflect Failures",
+      "type": "integer"
+    },
+    "score": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Score",
+      "type": "number"
+    },
+    "section_id": {
+      "title": "Section Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "document_id",
+    "section_id",
+    "score"
+  ],
+  "title": "PressureCell",
+  "type": "object"
+}

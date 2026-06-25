@@ -1,0 +1,353 @@
+{
+  "$defs": {
+    "Citation": {
+      "additionalProperties": false,
+      "description": "A verbatim quote from a source document with provenance.",
+      "properties": {
+        "citation_id": {
+          "title": "Citation Id",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "document_id": {
+          "title": "Document Id",
+          "type": "string"
+        },
+        "extraction_pass": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Extraction Pass"
+        },
+        "locator": {
+          "$ref": "#/$defs/CitationLocator"
+        },
+        "quote": {
+          "description": "Verbatim quote, max 500 chars",
+          "maxLength": 500,
+          "title": "Quote",
+          "type": "string"
+        },
+        "source_doc_hash": {
+          "title": "Source Doc Hash",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "source_doc_hash",
+        "locator",
+        "quote",
+        "confidence"
+      ],
+      "title": "Citation",
+      "type": "object"
+    },
+    "CitationLocator": {
+      "additionalProperties": false,
+      "description": "Location within a source document where a quote was found.",
+      "properties": {
+        "char_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char End"
+        },
+        "char_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Char Start"
+        },
+        "element_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Element Id"
+        },
+        "locator_type": {
+          "enum": [
+            "char_range",
+            "page_range",
+            "element_id"
+          ],
+          "title": "Locator Type",
+          "type": "string"
+        },
+        "page_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page End"
+        },
+        "page_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page Start"
+        }
+      },
+      "required": [
+        "locator_type"
+      ],
+      "title": "CitationLocator",
+      "type": "object"
+    },
+    "CitedField": {
+      "additionalProperties": false,
+      "description": "A single extracted field backed by citations.",
+      "properties": {
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "field_name": {
+          "title": "Field Name",
+          "type": "string"
+        },
+        "referenced_by": {
+          "description": "artifact_ids referencing this field",
+          "items": {
+            "type": "string"
+          },
+          "title": "Referenced By",
+          "type": "array"
+        },
+        "references": {
+          "description": "artifact_ids this field references",
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "value": {
+          "title": "Value"
+        },
+        "value_type": {
+          "default": "string",
+          "title": "Value Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field_name",
+        "value",
+        "confidence"
+      ],
+      "title": "CitedField",
+      "type": "object"
+    },
+    "DuelResolutionStatus": {
+      "description": "Resolution status for a duel disagreement.",
+      "enum": [
+        "unresolved",
+        "resolved",
+        "ignored"
+      ],
+      "title": "DuelResolutionStatus",
+      "type": "string"
+    },
+    "FieldDiscrepancy": {
+      "additionalProperties": false,
+      "description": "Disagreement between passes or agents on a single field.",
+      "properties": {
+        "agent_a_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent A Confidence"
+        },
+        "agent_a_value": {
+          "default": null,
+          "title": "Agent A Value"
+        },
+        "agent_b_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent B Confidence"
+        },
+        "agent_b_value": {
+          "default": null,
+          "title": "Agent B Value"
+        },
+        "confidence_delta": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence Delta"
+        },
+        "field_name": {
+          "title": "Field Name",
+          "type": "string"
+        },
+        "pass_a_value": {
+          "default": null,
+          "title": "Pass A Value"
+        },
+        "pass_b_value": {
+          "default": null,
+          "title": "Pass B Value"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "field_name"
+      ],
+      "title": "FieldDiscrepancy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Result of a two-agent adversarial extraction duel.",
+  "properties": {
+    "agent_a_fields": {
+      "items": {
+        "$ref": "#/$defs/CitedField"
+      },
+      "title": "Agent A Fields",
+      "type": "array"
+    },
+    "agent_a_id": {
+      "title": "Agent A Id",
+      "type": "string"
+    },
+    "agent_b_fields": {
+      "items": {
+        "$ref": "#/$defs/CitedField"
+      },
+      "title": "Agent B Fields",
+      "type": "array"
+    },
+    "agent_b_id": {
+      "title": "Agent B Id",
+      "type": "string"
+    },
+    "artifact_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifact Id"
+    },
+    "disagreements": {
+      "items": {
+        "$ref": "#/$defs/FieldDiscrepancy"
+      },
+      "title": "Disagreements",
+      "type": "array"
+    },
+    "document_id": {
+      "title": "Document Id",
+      "type": "string"
+    },
+    "resolution_artifact_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolution Artifact Id"
+    },
+    "resolution_status": {
+      "$ref": "#/$defs/DuelResolutionStatus",
+      "default": "unresolved"
+    }
+  },
+  "required": [
+    "document_id",
+    "agent_a_id",
+    "agent_b_id"
+  ],
+  "title": "DuelState",
+  "type": "object"
+}
