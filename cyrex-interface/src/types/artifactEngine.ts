@@ -63,8 +63,8 @@ export interface WitnessSpan {
 }
 
 // When no factual answer is found.
-export interface ConfessionGap {
-  // TODO: ConfessionGap model not found
+export interface ConfusionGap {
+  // TODO: fill in later once interface is created
 }
 
 // Voice request.
@@ -78,7 +78,7 @@ export interface VoiceQueryRequest {
 export interface VoiceQueryResponse {
   confessed: boolean;
   spans: WitnessSpan[];
-  gaps?: ConfessionGap[];
+  gaps?: ConfusionGap[];
 }
 
 // Response object for artifact endpoints.
