@@ -7648,7 +7648,7 @@ description = "An audio package for PyTorch"
 optional = true
 python-versions = "*"
 groups = ["main"]
-markers = "extra == \"gpu\" or extra == \"mps\" or extra == \"cpu\""
+markers = "extra == \"gpu\" or extra == \"rocm\" or extra == \"mps\" or extra == \"cpu\""
 files = [
     {file = "torchaudio-2.11.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:6ebb59c694909eccb5d61b7cc199d297692012c43286e36d92983aa7bad7586d"},
     {file = "torchaudio-2.11.0-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:be7ad472acb16d16e98c005f0219b0db06a47dfe8f7b4d177062e1638f871e3b"},
@@ -7687,7 +7687,7 @@ description = "image and video datasets and models for torch deep learning"
 optional = true
 python-versions = "!=3.14.1,>=3.10"
 groups = ["main"]
-markers = "extra == \"gpu\" or extra == \"mps\" or extra == \"cpu\""
+markers = "extra == \"gpu\" or extra == \"rocm\" or extra == \"mps\" or extra == \"cpu\""
 files = [
     {file = "torchvision-0.27.1-cp310-cp310-macosx_14_0_arm64.whl", hash = "sha256:68ba63b48af92f06db995adb23d8411993dba1dee705a4e92411b83a00930b7f"},
     {file = "torchvision-0.27.1-cp310-cp310-manylinux_2_28_aarch64.whl", hash = "sha256:aabe47970a00a3c0574360bfbd4ca3d6162a51f3fa1283a29cd528018dd13088"},
@@ -8953,8 +8953,9 @@ hpo = ["hyperopt", "optuna"]
 mps = ["torch", "torchaudio", "torchvision"]
 optional-dbs = ["pinecone-client", "weaviate-client"]
 rl = ["stable-baselines3"]
+rocm = ["torch", "torchaudio", "torchvision"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "8589a98cfae74f7fb76ca31ef00d7f9c0b3c68370f7d4f8d29eacd54043cee64"
+content-hash = "b2a4a2d2a00c4aeb74ef1b7d046418112e4f6cf07311ec72fb8795458ac8c8b1"
