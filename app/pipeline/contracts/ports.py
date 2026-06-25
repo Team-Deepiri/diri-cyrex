@@ -25,7 +25,6 @@ from .models import (
 )
 from .pressure_events import PressureEvent
 
-
 # ============================================================================
 # Artifact Store (Track A implements this; everyone depends on it)
 # ============================================================================

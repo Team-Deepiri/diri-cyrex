@@ -9,6 +9,7 @@ from threading import Lock
 import time
 import uuid
 import logging
+import asyncio
 import numpy as np
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
@@ -44,6 +45,7 @@ from .routes.agent_playground_api import router as agent_playground_router
 from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.documents import router as documents_router
+from .routes.training_api import router as training_router
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -291,6 +293,7 @@ async def api_complete(req: CompletionRequest, request: Request):
             raise HTTPException(status_code=503, detail="OpenAI API key not configured")
         import openai
         client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        import asyncio
         completion = await asyncio.to_thread(
             client.chat.completions.create,
             model=settings.OPENAI_MODEL,
@@ -331,6 +334,7 @@ app.include_router(agent_playground_router)
 app.include_router(workflow_router)
 app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
+app.include_router(training_router)
 
 if __name__ == "__main__":
     import uvicorn
