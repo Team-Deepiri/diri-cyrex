@@ -4,7 +4,7 @@
 FROM pytorch/pytorch:2.0.0-cpu
 
 ARG POETRY_VERSION=1.8.5
-ARG INSTALL_GROUPS=training,service
+ARG POETRY_EXTRAS=cpu
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -24,16 +24,16 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 
 COPY pyproject.toml poetry.lock /app/
 
-ARG INSTALL_GROUPS=training,service
+ARG POETRY_EXTRAS=cpu
 RUN bash -ec '\
       if [ ! -d ../deepiri-modelkit ]; then \
         git clone --depth 1 -b feat/training-contracts-v0.2 \
           https://github.com/Team-Deepiri/deepiri-modelkit.git ../deepiri-modelkit; \
       fi; \
-      groups="${INSTALL_GROUPS}"; \
+      extras="${POETRY_EXTRAS}"; \
       args=(install --no-root --no-ansi); \
-      IFS=, read -ra gs <<< "$groups"; \
-      for g in "${gs[@]}"; do g="${g// /}"; [ -n "$g" ] && args+=(--with "$g"); done; \
+      IFS=, read -ra xs <<< "$extras"; \
+      for x in "${xs[@]}"; do x="${x// /}"; [ -n "$x" ] && args+=(--extras "$x"); done; \
       poetry "${args[@]}"; \
     '
 

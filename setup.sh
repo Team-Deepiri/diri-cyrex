@@ -2,8 +2,9 @@
 set -euo pipefail
 
 # OS-level dependencies for diri-cyrex (local dev and Docker image builds).
-# Python packages are managed by Poetry — run `poetry install --with training,service`
-# locally, or let the Dockerfile `poetry install` step handle container builds.
+# Python packages: Poetry (`pyproject.toml`). Optional host install:
+#   INSTALL_PYTHON_DEPS=1 ./setup.sh
+#   POETRY_DEVICE_EXTRA=gpu|rocm|mps|cpu|auto ./setup.sh
 
 readonly CYREX_APT_PACKAGES=(
     curl
@@ -124,4 +125,35 @@ case "${platform}" in
         ;;
 esac
 
-echo "setup.sh: system dependencies ready. Use Poetry for Python packages."
+echo "setup.sh: system dependencies ready."
+
+install_python_deps() {
+    if [ "${INSTALL_PYTHON_DEPS:-0}" != "1" ]; then
+        echo "setup.sh: skip Python deps (set INSTALL_PYTHON_DEPS=1 to run poetry install)."
+        return 0
+    fi
+    if ! command -v poetry >/dev/null 2>&1; then
+        echo "setup.sh: poetry not found; install Poetry 1.8+ then re-run." >&2
+        return 1
+    fi
+    local script_dir extra
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    extra="${POETRY_DEVICE_EXTRA:-auto}"
+    if [ "$extra" = "auto" ]; then
+        if command -v deepiri-gpu >/dev/null 2>&1; then
+            extra="$(deepiri-gpu detect --json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('backend','cpu'))" 2>/dev/null || echo cpu)"
+        else
+            extra="cpu"
+        fi
+    fi
+    case "$extra" in
+        cuda | nvidia | gpu) extra="gpu" ;;
+        amd | rocm) extra="rocm" ;;
+        mps | macos | darwin) extra="mps" ;;
+        cpu | *) extra="cpu" ;;
+    esac
+    echo "setup.sh: poetry install --extras ${extra}"
+    (cd "$script_dir" && poetry install --no-ansi --extras "$extra")
+}
+
+install_python_deps

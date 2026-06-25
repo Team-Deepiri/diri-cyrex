@@ -10,7 +10,7 @@ ARG PYTHON_VERSION=3.11
 ARG DEVICE_TYPE=auto
 ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 ARG POETRY_VERSION=1.8.5
-ARG INSTALL_GROUPS=training,service
+ARG POETRY_EXTRAS=gpu
 
 FROM ${BASE_IMAGE} AS base
 
@@ -49,20 +49,20 @@ RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 COPY diri-cyrex/pyproject.toml diri-cyrex/poetry.lock /app/
 COPY deepiri-modelkit /deepiri-modelkit
 
-ARG INSTALL_GROUPS=training,service
+ARG POETRY_EXTRAS=gpu
 RUN ln -sf /deepiri-modelkit ../deepiri-modelkit && \
     bash -ec '\
-      groups="${INSTALL_GROUPS}"; \
+      extras="${POETRY_EXTRAS}"; \
       args=(install --no-root --no-ansi); \
-      IFS=, read -ra gs <<< "$groups"; \
-      for g in "${gs[@]}"; do g="${g// /}"; [ -n "$g" ] && args+=(--with "$g"); done; \
+      IFS=, read -ra xs <<< "$extras"; \
+      for x in "${xs[@]}"; do x="${x// /}"; [ -n "$x" ] && args+=(--extras "$x"); done; \
       poetry "${args[@]}"; \
     '
 
 RUN python -c "import numpy; import fastapi; import redis; print('✓ core deps OK')" && \
     python -c "import torch; print('✓ torch', torch.__version__)" && \
     (python -c "import langchain_core; print('✓ langchain-core OK')" 2>/dev/null || \
-     echo "⚠ langchain not installed (service group may be omitted)")
+     echo "⚠ langchain import check skipped")
 
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     mkdir -p /app/logs /app/.cache/huggingface /app/.cache/sentence_transformers /app/tests && \

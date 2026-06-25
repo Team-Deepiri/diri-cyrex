@@ -126,7 +126,9 @@ pytest-timeout = ">=2.3.0"
 ruff = "^0.8.0"
 
 [tool.poetry.extras]
+# Torch wheels resolve per-host at install time (CUDA base image, MPS on macOS, ROCm index on AMD).
 gpu = ["torch", "torchvision", "torchaudio", "deepspeed", "bitsandbytes"]
+rocm = ["torch", "torchvision", "torchaudio"]
 mps = ["torch", "torchvision", "torchaudio"]
 cpu = ["torch", "torchvision", "torchaudio"]
 dev = ["watchdog", "psutil", "mlflow", "wandb"]
