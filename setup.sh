@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# OS-level dependencies for diri-cyrex (local dev and Docker image builds).
+# Python packages are managed by Poetry — run `poetry install --with training,service`
+# locally, or let the Dockerfile `poetry install` step handle container builds.
+
+readonly CYREX_APT_PACKAGES=(
+    curl
+    git
+    gcc
+    g++
+    poppler-utils
+    tesseract-ocr
+)
+
+readonly CYREX_BREW_PACKAGES=(
+    curl
+    git
+    poppler
+    tesseract
+)
+
+readonly CYREX_APK_PACKAGES=(
+    curl
+    git
+    gcc
+    g++
+    musl-dev
+    poppler-utils
+    tesseract-ocr
+)
+
+readonly CYREX_DNF_PACKAGES=(
+    curl
+    git
+    gcc
+    gcc-c++
+    poppler-utils
+    tesseract
+)
+
+detect_platform() {
+    case "$(uname -s)" in
+        Linux*)
+            if [ -f /etc/alpine-release ]; then
+                echo alpine
+            elif command -v apt-get >/dev/null 2>&1; then
+                echo debian
+            elif command -v dnf >/dev/null 2>&1; then
+                echo fedora
+            elif command -v yum >/dev/null 2>&1; then
+                echo rhel
+            else
+                echo linux-unknown
+            fi
+            ;;
+        Darwin*)
+            echo macos
+            ;;
+        *)
+            echo unknown
+            ;;
+    esac
+}
+
+run_as_root() {
+    if [ "$(id -u)" -eq 0 ]; then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "setup.sh: root privileges required to install system packages." >&2
+        exit 1
+    fi
+}
+
+install_debian() {
+    echo "setup.sh: installing Debian/Ubuntu packages..."
+    run_as_root apt-get update
+    run_as_root apt-get install -y --no-install-recommends "${CYREX_APT_PACKAGES[@]}"
+    if [ "$(id -u)" -eq 0 ]; then
+        rm -rf /var/lib/apt/lists/*
+    fi
+}
+
+install_alpine() {
+    echo "setup.sh: installing Alpine packages..."
+    run_as_root apk add --no-cache "${CYREX_APK_PACKAGES[@]}"
+}
+
+install_fedora() {
+    echo "setup.sh: installing Fedora packages..."
+    run_as_root dnf install -y "${CYREX_DNF_PACKAGES[@]}"
+}
+
+install_rhel() {
+    echo "setup.sh: installing RHEL/CentOS packages..."
+    run_as_root yum install -y "${CYREX_DNF_PACKAGES[@]}"
+}
+
+install_macos() {
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "setup.sh: Homebrew not found. Install from https://brew.sh then re-run." >&2
+        exit 1
+    fi
+    echo "setup.sh: installing macOS packages via Homebrew..."
+    brew install "${CYREX_BREW_PACKAGES[@]}"
+}
+
+platform="$(detect_platform)"
+echo "setup.sh: detected platform: ${platform}"
+
+case "${platform}" in
+    debian) install_debian ;;
+    alpine) install_alpine ;;
+    fedora) install_fedora ;;
+    rhel) install_rhel ;;
+    macos) install_macos ;;
+    linux-unknown | unknown)
+        echo "setup.sh: unsupported platform; install these manually if needed:"
+        printf '  - %s\n' "${CYREX_APT_PACKAGES[@]}"
+        exit 0
+        ;;
+esac
+
+echo "setup.sh: system dependencies ready. Use Poetry for Python packages."

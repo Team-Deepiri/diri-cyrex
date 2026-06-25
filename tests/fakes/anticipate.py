@@ -31,3 +31,7 @@ class FixedAnticipate(AnticipatePort):
         document_class: str,
     ) -> List[PredictionRecord]:
         return list(self._records)
+
+
+# Alias used by contract compliance tests
+FakeAnticipate = NoOpAnticipate

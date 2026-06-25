@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from app.pipeline.contracts.models import PredictionRecord
 from app.pipeline.contracts.ports import ReckoningReadPort

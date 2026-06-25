@@ -13,7 +13,7 @@ core shape (ReflectionResult) is frozen in contracts/models.py.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Iterable, List
 
 from app.pipeline.contracts.models import (
     CitedField,

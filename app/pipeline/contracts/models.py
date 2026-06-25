@@ -9,11 +9,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ============================================================================
 # Enums
@@ -108,8 +107,12 @@ class CitedField(BaseModel):
     value_type: str = "string"
     citations: List[Citation] = Field(default_factory=list)
     confidence: float = Field(..., ge=0.0, le=1.0)
-    referenced_by: List[str] = Field(default_factory=list, description="artifact_ids referencing this field")
-    references: List[str] = Field(default_factory=list, description="artifact_ids this field references")
+    referenced_by: List[str] = Field(
+        default_factory=list, description="artifact_ids referencing this field"
+    )
+    references: List[str] = Field(
+        default_factory=list, description="artifact_ids this field references"
+    )
 
 
 class ProvenancePass(BaseModel):
