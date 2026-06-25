@@ -41,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: |
           poetry install --with dev
-          pip install ./diri-agent-testing-utils
+          poetry run pip install ./diri-agent-testing-utils
 
       - name: Ruff
         run: poetry run ruff check app/pipeline app/training tests/contract tests/pipeline tests/training tests/fakes
