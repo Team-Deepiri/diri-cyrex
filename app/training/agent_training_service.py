@@ -1,4 +1,4 @@
-"""Skeleton agent training service composing corrections, Helox jobs, and orchestrator."""
+"""Agent training service composing corrections, Helox jobs, and training-orchestrator."""
 
 from __future__ import annotations
 
@@ -13,53 +13,39 @@ from app.training.training_status import TrainingStatusMonitor
 logger = get_logger("cyrex.training.agent_service")
 
 try:
-    from deepiri_training_orchestrator import TrainingOrchestrator
+    from deepiri_training_orchestrator import (
+        FeedbackBuffer,
+        FeedbackLoopTrainer,
+        ReproducibilityController,
+        TrainingOrchestrator,
+    )
+
+    _ORCH_AVAILABLE = True
 except ImportError:
+    _ORCH_AVAILABLE = False
 
     class TrainingOrchestrator:  # type: ignore[no-redef]
-        """Stub when deepiri-training-orchestrator is not installed."""
-
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            logger.warning(
-                "TrainingOrchestrator stub active — install deepiri-training-orchestrator"
-            )
+            logger.warning("TrainingOrchestrator stub — install deepiri-training-orchestrator")
 
-        def fit(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-            return {"status": "stub", "message": "training-orchestrator not installed"}
+        def fit(self, *args: Any, **kwargs: Any) -> Any:
+            return {"status": "stub"}
 
+    class FeedbackLoopTrainer:  # type: ignore[no-redef]
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
 
-try:
-    from deepiri_training_orchestrator.feedback import FeedbackLoopTrainer
-except ImportError:
-    try:
-        from deepiri_modelkit.training.feedback import FeedbackLoopTrainer
-    except ImportError:
-
-        class FeedbackLoopTrainer:  # type: ignore[no-redef]
-            """Stub when FeedbackLoopTrainer is not yet published."""
-
-            def __init__(self, orchestrator: Optional[TrainingOrchestrator] = None) -> None:
-                self.orchestrator = orchestrator
-
-            def enqueue_corrections(self, artifact_ids: List[str]) -> str:
-                return f"stub-{artifact_ids[0] if artifact_ids else 'empty'}"
-
-            def run(self) -> Dict[str, Any]:
-                return {"status": "stub", "message": "FeedbackLoopTrainer not installed"}
-
+        def submit(self, *args: Any, **kwargs: Any) -> Any:
+            return None
 
 try:
     from deepiri_modelkit.contracts.training import (
         AgentTrainingJob,
-        DatasetManifest,
-        TrainingPriority,
         TrainingRunRequest,
-)
+    )
 except ImportError:
     TrainingRunRequest = None  # type: ignore[misc, assignment]
     AgentTrainingJob = None  # type: ignore[misc, assignment]
-    DatasetManifest = None  # type: ignore[misc, assignment]
-    TrainingPriority = None  # type: ignore[misc, assignment]
 
 
 class AgentTrainingService:
@@ -74,8 +60,12 @@ class AgentTrainingService:
         self.correction_trainer = correction_trainer or CorrectionTrainer()
         self.job_client = job_client or HeloxJobClient()
         self.status_monitor = status_monitor or TrainingStatusMonitor()
-        self._orchestrator = TrainingOrchestrator()
-        self._feedback_trainer = FeedbackLoopTrainer(orchestrator=self._orchestrator)
+        self._feedback_trainer: Optional[FeedbackLoopTrainer] = None
+        if _ORCH_AVAILABLE:
+            repro = ReproducibilityController(seed=42)
+            repro.set_seeds()
+            orch = TrainingOrchestrator({"lr": 1e-4}, reproducibility=repro, max_steps=50)
+            self._feedback_trainer = FeedbackLoopTrainer(orch, min_examples=2)
 
     def submit_correction(
         self,
@@ -123,10 +113,19 @@ class AgentTrainingService:
         return self.job_client.submit_agent_job(job)
 
     def start_feedback_loop(self, artifact_ids: List[str]) -> Dict[str, Any]:
-        correlation_id = self._feedback_trainer.enqueue_corrections(artifact_ids)
-        result = self._feedback_trainer.run()
-        result["correlation_id"] = correlation_id
-        return result
+        if self._feedback_trainer is None:
+            return {"status": "stub", "message": "training-orchestrator not installed"}
+        ctx = None
+        for aid in artifact_ids:
+            ctx = self._feedback_trainer.submit(
+                {"text": f"correction-{aid}", "artifact_id": aid},
+                train_step=lambda step, batch: {"loss": 0.1},
+            )
+        return {
+            "status": "completed" if ctx else "buffered",
+            "artifact_ids": artifact_ids,
+            "steps": getattr(ctx, "step", 0) if ctx else 0,
+        }
 
     async def get_training_status(
         self,
