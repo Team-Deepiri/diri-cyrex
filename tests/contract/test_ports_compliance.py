@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-import inspect
-
 import pytest
 
 from app.pipeline.contracts.ports import (
     AnticipatePort,
     ArtifactStorePort,
     CorrectionWriterPort,
-    DuelRunnerPort,
-    ExtractPort,
     InvalidationPort,
     PipelineRunnerPort,
     PressureReadModelPort,

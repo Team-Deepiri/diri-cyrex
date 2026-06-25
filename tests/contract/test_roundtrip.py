@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from app.pipeline.contracts.models import (
     ArtifactBundle,
     DuelState,
@@ -19,7 +17,6 @@ from app.pipeline.contracts.pressure_events import (
     DuelDisagreement,
     LowConfidenceField,
     PassDiscrepancy,
-    PressureEvent,
     ReflectFailure,
 )
 
