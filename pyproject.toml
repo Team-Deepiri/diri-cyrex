@@ -1,0 +1,147 @@
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "diri-cyrex"
+version = "0.2.0"
+description = "AI agent orchestration platform with Ollama, LangGraph, and deep learning capabilities"
+readme = "README.md"
+license = "Apache-2.0"
+homepage = "https://github.com/Team-Deepiri/diri-cyrex"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = ">=3.11"
+
+# Core framework
+fastapi = ">=0.112.0"
+uvicorn = { version = ">=0.30.0", extras = ["standard"] }
+pydantic = ">=2.8.0"
+pydantic-settings = ">=2.2.0"
+python-dotenv = ">=1.0.0"
+httpx = ">=0.27.0"
+python-multipart = ">=0.0.6"
+
+# Observability
+structlog = ">=24.1.0"
+python-json-logger = ">=2.0.0"
+prometheus-client = ">=0.20.0"
+
+# Database
+asyncpg = ">=0.29.0"
+
+# Vector databases
+pymilvus = ">=2.3.0"
+
+# Caching / messaging
+redis = { version = ">=5.0.0", extras = ["hiredis"] }
+
+# LLM / AI SDK
+openai = ">=1.43.0"
+ollama = ">=0.1.0"
+
+# LangChain ecosystem
+langchain = ">=1.0.0"
+langchain-core = ">=1.2.0"
+langchain-community = ">=0.3.0"
+langchain-text-splitters = ">=1.1.0"
+langchain-openai = ">=1.1.0"
+langchain-milvus = ">=0.1.0"
+langchain-huggingface = ">=0.0.3"
+langchain-ollama = ">=1.0.0"
+langchain-classic = ">=0.0.20"
+langchain-experimental = ">=0.4.0"
+langsmith = ">=0.1.0"
+langgraph = ">=1.0.10"
+langgraph-checkpoint-redis = ">=0.2.0"
+
+# ML / AI training
+transformers = ">=4.30.0"
+datasets = ">=2.14.0"
+accelerate = ">=0.20.0"
+sentence-transformers = ">=2.2.0"
+scikit-learn = ">=1.3.0"
+numpy = ">=1.24.0"
+pandas = ">=2.0.0"
+peft = ">=0.7.0"
+gymnasium = ">=0.29.0"
+
+# Document processing
+pdfplumber = ">=0.10.0"
+PyPDF2 = ">=3.0.0"
+python-docx = ">=1.1.0"
+Pillow = ">=10.0.0"
+pdf2image = ">=1.16.0"
+beautifulsoup4 = ">=4.12.0"
+openpyxl = ">=3.1.0"
+
+# Compression
+zstandard = ">=0.22.0"
+brotli = ">=1.1.0"
+
+# Graph analysis
+networkx = ">=3.2"
+
+# MLOps
+kubernetes = ">=28.1.0"
+optuna = ">=3.5.0"
+tensorboard = ">=2.15.0"
+
+# Time-series
+influxdb-client = ">=1.38.0"
+
+# Internal packages (pinned by SHA)
+diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git", rev = "a934468cd142e2cb38bd365e8548b4bdde77bf73" }
+deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", rev = "4fc692fc2ba52509c67070e7cbf4b526277e0252", extras = ["all"] }
+diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "8a34be9e2576b862cab85cd0ca86460064e86ad6", extras = ["redis", "numpy"] }
+deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", rev = "7d8dce3c2434fada0ebe012460e77fe15ab10e77", extras = ["torch"] }
+
+# Platform-specific extras (not installed by default)
+torch = { version = ">=2.0.0", optional = true }
+torchvision = { version = ">=0.15.0", optional = true }
+torchaudio = { version = ">=2.0.0", optional = true }
+deepspeed = { version = ">=0.12.0", optional = true }
+bitsandbytes = { version = ">=0.41.0", optional = true }
+mlflow = { version = ">=2.7.0", optional = true }
+wandb = { version = ">=0.15.0", optional = true }
+llama-cpp-python = { version = ">=0.2.0", optional = true }
+pinecone-client = { version = ">=3.0.0", optional = true }
+weaviate-client = { version = ">=4.0.0", optional = true }
+stable-baselines3 = { version = ">=2.2.0", optional = true }
+hyperopt = { version = ">=0.2.7", optional = true }
+
+# Development tools
+watchdog = { version = ">=3.0.0", optional = true }
+psutil = { version = ">=5.9.0", optional = true }
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=9.0.0"
+pytest-asyncio = ">=0.23.0"
+pytest-cov = ">=4.1.0"
+pytest-timeout = ">=2.3.0"
+
+[tool.poetry.extras]
+gpu = ["torch", "torchvision", "torchaudio", "deepspeed", "bitsandbytes"]
+mps = ["torch", "torchvision", "torchaudio"]
+cpu = ["torch", "torchvision", "torchaudio"]
+dev = ["watchdog", "psutil", "mlflow", "wandb"]
+optional-dbs = ["pinecone-client", "weaviate-client"]
+rl = ["stable-baselines3"]
+hpo = ["optuna", "hyperopt"]
+docs = ["matplotlib", "seaborn", "jupyter", "notebook"]
+full = [
+    "gpu", "dev", "optional-dbs", "rl", "hpo", "docs",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
