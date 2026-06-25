@@ -2,30 +2,32 @@
 Task Execution Engine
 Orchestrates tool execution, manages execution trees, and handles step-by-step decomposition
 """
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
+import re
 from datetime import datetime
 from ..logging_config import get_logger
 from .tool_registry import ToolRegistry, get_tool_registry
 from .rate_limit_tools import ToolRateLimitExceeded
-from .state_manager import WorkflowStateManager, WorkflowState, StateStatus
+from .state_manager import WorkflowStateManager, StateStatus
 from .guardrails import SafetyGuardrails, get_guardrails
 
 logger = get_logger("cyrex.execution_engine")
+
+# Allowed tool names for workflow steps (alphanumeric, underscore, dot, hyphen).
+_TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_.-]{1,128}$")
 
 # LangChain imports with graceful fallbacks
 HAS_LANGCHAIN_RUNNABLES = False
 try:
     from langchain_core.runnables import Runnable, RunnableConfig
-    from langchain_core.callbacks import CallbackManager
     HAS_LANGCHAIN_RUNNABLES = True
 except ImportError as e:
     logger.warning(f"LangChain runnables not available: {e}")
     Runnable = None
     RunnableConfig = None
-    CallbackManager = None
 
 
 class ExecutionStatus(str, Enum):
@@ -130,7 +132,7 @@ class TaskExecutionEngine:
                 self.state_manager.save_state(state)
                 
                 # Create checkpoint before step
-                checkpoint = self.state_manager.create_checkpoint(
+                self.state_manager.create_checkpoint(
                     workflow_id,
                     step_name,
                     state_data=state.state_data.copy(),
@@ -197,22 +199,31 @@ class TaskExecutionEngine:
         )
         
         try:
-            # Safety check on input
-            if isinstance(step_input, dict) and "prompt" in step_input:
-                safety_result = self.guardrails.check_prompt(step_input["prompt"])
-                if self.guardrails.should_block(safety_result):
-                    raise ValueError(f"Safety check failed: {safety_result.message}")
-            
+            if current_state is None or not isinstance(current_state, dict):
+                raise ValueError("current_state must be a dict")
+            if step_input is None or not isinstance(step_input, dict):
+                raise ValueError("step_input must be a dict")
+
             # Execute tool if specified
             if tool_name:
+                if not isinstance(tool_name, str) or not tool_name.strip():
+                    raise ValueError("tool_name must be a non-empty string")
+                tool_name = tool_name.strip()
+                if not _TOOL_NAME_RE.match(tool_name):
+                    raise ValueError(f"Invalid tool_name format: {tool_name!r}")
+
                 tool = self.tool_registry.get_tool(tool_name)
                 if not tool:
                     raise ValueError(f"Tool not found: {tool_name}")
-                
-                # Merge current state into input
-                tool_input = {**current_state, **step_input}
 
-                # Execute tool via registry so per-tool rate limits are enforced.
+                # Merge current state into input (step keys override state).
+                tool_input: Dict[str, Any] = {**current_state, **step_input}
+
+                merged_safety = self.guardrails.validate_merged_tool_input(tool_input)
+                if self.guardrails.should_block(merged_safety):
+                    raise ValueError(f"Tool input validation failed: {merged_safety.message}")
+
+                # Execute tool via registry so Redis/Lua per-tool rate limits are enforced.
                 output = await self.tool_registry.aexecute_tool(
                     tool_name=tool_name,
                     tool_input=tool_input,

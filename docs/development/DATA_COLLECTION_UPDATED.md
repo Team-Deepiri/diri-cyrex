@@ -1,5 +1,7 @@
 # Data Collection System - Updated for Deepiri Platform
 
+> **Status: Pending Implementation** — The `app/train/scripts/` directory and scripts referenced in this document are planned but not yet implemented. The scripts will be placed in `train/scripts/` (mapped to `/app/train` inside the Docker container).
+
 ## What Changed
 
 The data collection system has been **completely updated** to support Deepiri's full platform:

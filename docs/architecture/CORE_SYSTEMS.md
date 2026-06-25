@@ -122,7 +122,7 @@ All tables are automatically created on initialization:
 The streaming system combines two revolutionary approaches to eliminate LLM latency:
 
 1. **Streaming Token Delivery** (<200ms first-token latency)
-2. **GPU Tensor Core Acceleration** (RTX 5080 with CUDA 12.0)
+2. **GPU Tensor Core Acceleration** (RTX 5080 with CUDA 12.8)
 
 Both coexist seamlessly with the PDGE (Parallel Dependency Graph Execution) system.
 
@@ -162,8 +162,9 @@ Ollama configured with NVIDIA runtime for tensor core acceleration:
 
 - **Runtime**: `nvidia` (enables GPU access)
 - **CUDA_VISIBLE_DEVICES**: "0" (use first GPU)
-- **Tensor Cores**: Automatically used for FP16/BF16 matrix operations
+- **Tensor Cores**: Automatically used for FP16/BF16 matrix operations (supports sm_50 through sm_120)
 - **VRAM Management**: ~9GB for models, optimized overhead
+- **Base Image**: `pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime`
 
 #### PDGE Integration
 

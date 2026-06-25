@@ -1,5 +1,7 @@
 # Complete Universal RAG Implementation - Full Documentation
 
+> **Note:** This document references components from the `deepiri-modelkit` submodule (`deepiri-modelkit/rag/`). This submodule is part of the parent [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform) repository. To access these shared contracts, run `git submodule update --init --recursive` in the platform root.
+
 ## Implementation Summary
 
 A **production-grade, enterprise-ready Universal RAG system** with advanced features, comprehensive monitoring, and high-performance optimizations.

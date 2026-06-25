@@ -5,9 +5,9 @@ watchdog>=3.0.0  # For custom file watcher in development
 psutil>=5.9.0  # For process management and port cleanup
 python-multipart>=0.0.6  # Required for FastAPI file uploads (File, Form)
 openai==1.109.1
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 httpx==0.27.2
-pytest==8.3.2
+pytest==9.0.3
 pytest-asyncio==0.23.5
 pytest-cov==4.1.0
 pytest-timeout==2.3.1
@@ -75,22 +75,25 @@ sentence-transformers>=2.2.0
 # All packages require: langchain-core >= 0.2.33 and < 0.3.0
 # IMPORTANT: langchain-ollama 0.1.x is compatible with langchain-core 0.2.x
 # Do NOT upgrade to langchain-ollama 0.2.x+ as it requires langchain-core >= 0.3.x
-langchain==0.2.12
-langchain-core==0.2.43  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
-langchain-community==0.2.10
-langchain-text-splitters==0.2.2
-langchain-openai==0.1.22
+langchain>=1.0.0
+langchain-core>=1.2.22  # Must be >= 0.2.33 for langchain-openai 0.1.22, >= 0.2.43 for langchain-chroma compatibility
+langchain-community>=0.3.29
+langchain-text-splitters>=1.1.2
+langchain-openai>=1.1.14
 langchain-milvus==0.1.4
 langchain-huggingface==0.0.3  # Modern embeddings (compatible with langchain-core 0.2.x, eliminates deprecation warnings)
-langchain-ollama==0.1.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
+langchain-ollama>=1.0.0  # Compatible with langchain-core 0.2.x (DO NOT upgrade to 0.2.x+ without upgrading langchain-core to 0.3.x+)
 langchain-classic>=0.0.20  # Provides deprecated AgentExecutor and other legacy functionality for LangChain 0.2.x
 langchain-experimental>=0.4.0  # Experimental agent functionality
 langsmith>=0.1.0  # Optional: for LangSmith monitoring and debugging
 
+# Deepiri Agent Tools (Team-Deepiri/diri-agent-toolbox). Local dev: pip install -e ../../diri-agent-toolbox
+diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git
+
 # LangGraph for tool-calling agents and multi-agent workflows
 # The primary agent execution path uses langgraph.prebuilt.create_react_agent
 # which provides native tool calling via ChatOllama (no ReAct text parsing needed)
-langgraph>=0.2.0,<0.3.0  # Graph-based agent workflows with native tool calling
+langgraph>=1.0.10  # Graph-based agent workflows with native tool calling
 langgraph-checkpoint-redis>=0.2.0  # Redis checkpointing for state persistence
 
 # Local LLM Support (Cost-effective alternatives to OpenAI)

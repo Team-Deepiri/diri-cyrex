@@ -22,8 +22,8 @@ psutil = ">=5.9.0"
 watchdog = ">=3.0.0"
 openai = "1.109.1"
 numpy = ">=1.24.0"
-deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", branch = "feat/training-contracts-v0.2" }
-deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", branch = "feat/v0.4.0-dataset-first", extras = ["modelkit", "distributed"] }
+deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.0" }
+deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.0", extras = ["modelkit", "distributed"] }
 
 [tool.poetry.group.training.dependencies]
 torch = ">=2.0.0"

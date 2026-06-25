@@ -1,15 +1,21 @@
-# Internal submodule packages
--e ./diri-agent-testing-utils
--e ./deepiri-dataset-processor[all]
+# Internal Deepiri packages pinned by git revision for deterministic builds.
+# Floating refs such as @main are possible, but these SHAs should be bumped
+# deliberately so Docker/test builds do not change underneath a PR.
+diri-agent-testing-utils @ git+https://github.com/Team-Deepiri/diri-agent-testing-utils.git@a934468cd142e2cb38bd365e8548b4bdde77bf73
+deepiri-dataset-processor[all] @ git+https://github.com/Team-Deepiri/deepiri-dataset-processor.git@4fc692fc2ba52509c67070e7cbf4b526277e0252
+# Deepiri Agent Tools (Team-Deepiri/diri-agent-toolbox). Local dev: pip install -e ../../diri-agent-toolbox
+diri-agent-toolbox @ git+https://github.com/Team-Deepiri/diri-agent-toolbox.git@8a2e551e80c9ab61d7f8863c0cf262f783423c5f
 
 # Core dependencies (torch is already in base PyTorch image)
 fastapi==0.112.2
 uvicorn[standard]==0.30.6
 pydantic==2.8.2
 openai==1.43.0
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 httpx==0.27.2
-pytest==8.3.2
+grpcio>=1.66.0
+protobuf>=5.27.0
+pytest==9.0.3
 pytest-asyncio==0.23.5
 pytest-cov==4.1.0
 structlog==24.1.0
@@ -54,20 +60,20 @@ hyperopt>=0.2.7  # For hyperparameter optimization
 tensorboard>=2.15.0  # For visualization
 
 # LangChain for AI orchestration and RAG
-langchain==0.2.12
-langchain-core==0.2.43
-langchain-community==0.2.10
-langchain-text-splitters==0.2.2
-langchain-openai==0.1.22
+langchain>=1.0.0
+langchain-core>=1.2.22
+langchain-community>=0.3.29
+langchain-text-splitters>=1.1.2
+langchain-openai>=1.1.14
 langchain-milvus==0.1.4
 langchain-huggingface==0.0.3
-langchain-ollama==0.1.0
+langchain-ollama>=1.0.0
 langchain-classic>=0.0.20
 langchain-experimental>=0.4.0
 langsmith>=0.1.0
 
 # LangGraph for tool-calling agents and multi-agent workflows
-langgraph>=0.2.0,<0.3.0
+langgraph>=1.0.10
 langgraph-checkpoint-redis>=0.2.0
 
 # Graph Analysis and Compression
@@ -77,4 +83,3 @@ brotli>=1.1.0  # Alternative compression (brotli)
 
 # Local LLM Support
 ollama>=0.1.0
-
