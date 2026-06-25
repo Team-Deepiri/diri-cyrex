@@ -45,6 +45,7 @@ from .routes.agent_playground_api import router as agent_playground_router
 from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.documents import router as documents_router
+from .routes.training_api import router as training_router
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -331,6 +332,7 @@ app.include_router(agent_playground_router)
 app.include_router(workflow_router)
 app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
+app.include_router(training_router)
 
 if __name__ == "__main__":
     import uvicorn
