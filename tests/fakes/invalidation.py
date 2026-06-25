@@ -22,3 +22,6 @@ class RecordingInvalidation(InvalidationPort):
 
     async def enqueue(self, artifact_ids: List[str]) -> None:
         self.enqueued.append(list(artifact_ids))
+
+
+FakeInvalidationPort = NoOpInvalidation

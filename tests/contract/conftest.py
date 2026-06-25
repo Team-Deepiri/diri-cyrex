@@ -1,4 +1,6 @@
-"""Shared fixtures for contract-layer tests."""
+"""Contract-test isolation from root conftest autouse fixtures."""
+
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -14,6 +16,12 @@ from app.pipeline.contracts.models import (
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "fixtures" / "cyrex_contracts"
+
+
+@pytest.fixture(autouse=True)
+def reset_tool_registry():
+    """Override root autouse fixture — contract tests must not import app.core."""
+    yield
 
 
 @pytest.fixture

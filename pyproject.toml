@@ -12,7 +12,7 @@ homepage = "https://github.com/Team-Deepiri/diri-cyrex"
 packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
-python = ">=3.11"
+python = ">=3.11,<3.14"
 
 # Core framework
 fastapi = ">=0.112.0"
@@ -75,6 +75,7 @@ Pillow = ">=10.0.0"
 pdf2image = ">=1.16.0"
 beautifulsoup4 = ">=4.12.0"
 openpyxl = ">=3.1.0"
+pytesseract = ">=0.3.10"
 
 # Compression
 zstandard = ">=0.22.0"
@@ -91,11 +92,13 @@ tensorboard = ">=2.15.0"
 # Time-series
 influxdb-client = ">=1.38.0"
 
-# Internal packages (pinned by SHA)
+# Internal Deepiri packages (git tags for cascade alignment)
 diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git", rev = "a934468cd142e2cb38bd365e8548b4bdde77bf73" }
-deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", rev = "4fc692fc2ba52509c67070e7cbf4b526277e0252", extras = ["all"] }
+deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.1", extras = ["all"] }
+deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.0" }
+deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.0", extras = ["modelkit", "distributed"] }
 diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "8a34be9e2576b862cab85cd0ca86460064e86ad6", extras = ["redis", "numpy"] }
-deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", rev = "7d8dce3c2434fada0ebe012460e77fe15ab10e77", extras = ["torch"] }
+deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.1.1", extras = ["torch"] }
 
 # Platform-specific extras (not installed by default)
 torch = { version = ">=2.0.0", optional = true }
@@ -120,6 +123,7 @@ pytest = ">=9.0.0"
 pytest-asyncio = ">=0.23.0"
 pytest-cov = ">=4.1.0"
 pytest-timeout = ">=2.3.0"
+ruff = "^0.8.0"
 
 [tool.poetry.extras]
 gpu = ["torch", "torchvision", "torchaudio", "deepspeed", "bitsandbytes"]
