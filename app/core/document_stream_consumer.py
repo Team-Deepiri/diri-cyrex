@@ -54,6 +54,26 @@ def _as_list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
 
 
+def _float_or_none(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _join_chunk_text(chunks: List[Any]) -> str:
+    parts: List[str] = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        text = chunk.get("text") or chunk.get("content")
+        if text:
+            parts.append(str(text))
+    return "\n\n".join(parts)
+
+
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
@@ -69,8 +89,15 @@ class DocumentRoutePayload:
     title: str = "Untitled Document"
     doc_type: str = "other"
     industry: str = "generic"
+    route_id: Optional[str] = None
     manifest_id: Optional[str] = None
     manifest_version: str = "v1"
+    document_type: Optional[str] = None
+    schema_id: Optional[str] = None
+    schema_version: Optional[str] = None
+    source_route: Dict[str, Any] = field(default_factory=dict)
+    artifact_requests: List[Any] = field(default_factory=list)
+    provenance: Dict[str, Any] = field(default_factory=dict)
     source_doc_hash: Optional[str] = None
     quality_score: Optional[float] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -80,16 +107,20 @@ class DocumentRoutePayload:
     @classmethod
     def from_stream_fields(cls, fields: Dict[str, Any]) -> "DocumentRoutePayload":
         decoded = {str(_decode(k)): _decode(v) for k, v in fields.items()}
-        nested = _as_dict(decoded.get("payload"))
-        raw = {**nested, **decoded}
+        legacy_payload = _as_dict(decoded.get("payload"))
+        canonical_data = _as_dict(decoded.get("data"))
+        raw = {**decoded, **legacy_payload, **canonical_data}
 
         metadata = _as_dict(raw.get("metadata"))
+        document = _as_dict(raw.get("document"))
+        chunks = _as_list(raw.get("chunks"))
         structured_payload = _as_dict(
             raw.get("structured_payload")
+            or raw.get("structuredOutput")
             or raw.get("structuredData")
             or raw.get("extraction")
         )
-        citations = _as_list(raw.get("citations"))
+        citations = _as_list(raw.get("citations") or structured_payload.get("citations"))
 
         text = (
             raw.get("text")
@@ -97,25 +128,51 @@ class DocumentRoutePayload:
             or raw.get("content")
             or raw.get("extractedText")
             or structured_payload.get("text")
+            or _join_chunk_text(chunks)
             or ""
         )
-        document_id = raw.get("document_id") or raw.get("documentId")
+        document_id = raw.get("document_id") or raw.get("documentId") or document.get("documentId")
         if not document_id:
             raise ValueError("document stream payload missing document_id")
         if not text and not structured_payload:
             raise ValueError("document stream payload has no text or structured payload")
 
         quality_score = raw.get("quality_score") or raw.get("qualityScore")
+        document_type = raw.get("document_type") or raw.get("documentType") or document.get("documentType")
+        schema_id = raw.get("schema_id") or raw.get("schemaId") or document.get("schemaId")
+        schema_version = (
+            raw.get("schema_version")
+            or raw.get("schemaVersion")
+            or document.get("schemaVersion")
+        )
+
         return cls(
             document_id=str(document_id),
             text=str(text),
-            title=str(raw.get("title") or metadata.get("title") or "Untitled Document"),
-            doc_type=str(raw.get("doc_type") or raw.get("documentType") or metadata.get("doc_type") or "other"),
+            title=str(
+                raw.get("title")
+                or document.get("title")
+                or metadata.get("title")
+                or "Untitled Document"
+            ),
+            doc_type=str(raw.get("doc_type") or document_type or metadata.get("doc_type") or "other"),
             industry=str(raw.get("industry") or metadata.get("industry") or "generic"),
+            route_id=raw.get("route_id") or raw.get("routeId"),
             manifest_id=raw.get("manifest_id") or raw.get("manifestId"),
             manifest_version=str(raw.get("manifest_version") or raw.get("manifestVersion") or "v1"),
-            source_doc_hash=raw.get("source_doc_hash") or raw.get("sourceDocHash"),
-            quality_score=float(quality_score) if quality_score is not None else None,
+            document_type=str(document_type) if document_type else None,
+            schema_id=str(schema_id) if schema_id else None,
+            schema_version=str(schema_version) if schema_version else None,
+            source_route=_as_dict(raw.get("sourceRoute") or raw.get("source_route")),
+            artifact_requests=_as_list(raw.get("artifactRequests") or raw.get("artifact_requests")),
+            provenance=_as_dict(raw.get("provenance")),
+            source_doc_hash=(
+                raw.get("source_doc_hash")
+                or raw.get("sourceDocHash")
+                or raw.get("fingerprint")
+                or document.get("fingerprint")
+            ),
+            quality_score=_float_or_none(quality_score),
             metadata=metadata,
             structured_payload=structured_payload,
             citations=citations,
@@ -321,8 +378,14 @@ class DocumentArtifactStreamConsumer:
             **payload.metadata,
             "source_stream": stream,
             "source_stream_id": entry_id,
+            "route_id": payload.route_id,
             "manifest_id": payload.manifest_id,
             "manifest_version": payload.manifest_version,
+            "document_type": payload.document_type,
+            "schema_id": payload.schema_id,
+            "schema_version": payload.schema_version,
+            "source_route": payload.source_route,
+            "artifact_requests": payload.artifact_requests,
             "source_doc_hash": payload.source_doc_hash,
             "producer": "cyrex-document-artifact-subscriber",
             "sugar_glider_role": "monitoring_only",
@@ -344,18 +407,32 @@ class DocumentArtifactStreamConsumer:
             "artifact_type": artifact_type,
             "document_id": payload.document_id,
             "source_doc_hash": payload.source_doc_hash,
+            "source_route": payload.source_route or {
+                "streamName": stream,
+                "schemaVersion": "document.route.v1",
+            },
+            "route_id": payload.route_id,
             "manifest_id": payload.manifest_id,
             "manifest_version": payload.manifest_version,
+            "document_type": payload.document_type,
+            "schema_id": payload.schema_id,
+            "schema_version": payload.schema_version,
+            "artifact_requests": payload.artifact_requests,
             "created_at": now,
             "confidence": payload.quality_score,
             "citations": payload.citations,
             "payload": artifact_payload,
             "provenance": {
+                **payload.provenance,
                 "transport": "redis_streams_v1",
                 "source_stream": stream,
                 "source_stream_id": entry_id,
                 "producer": "cyrex-document-artifact-subscriber",
-                "depends_on": [payload.manifest_id] if payload.manifest_id else [],
+                "depends_on": [
+                    value
+                    for value in [payload.route_id, payload.manifest_id]
+                    if value
+                ],
                 "sugar_glider_role": "monitoring_only",
             },
             "metadata": DocumentArtifactStreamConsumer._artifact_metadata(payload, entry_id, stream),

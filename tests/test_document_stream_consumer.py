@@ -104,6 +104,39 @@ def test_document_route_payload_accepts_nested_streaming_payload():
     assert payload.title == "Lease A"
 
 
+def test_document_route_payload_accepts_lis_data_envelope_and_chunks():
+    payload = DocumentRoutePayload.from_stream_fields(
+        {
+            "schemaVersion": "document.route.v1",
+            "event": "document.vectorize.route",
+            "data": (
+                '{"routeId":"document-route:doc-2:vectorize:manifest:document:4",'
+                '"documentId":"doc-2","manifestVersion":"document:4",'
+                '"documentType":"policy","schemaId":"generic.document",'
+                '"schemaVersion":"1.0","qualityScore":0.93,'
+                '"document":{"documentId":"doc-2","title":"Policy 2"},'
+                '"chunks":[{"chunkId":"chunk-1","index":0,"text":"first chunk"},'
+                '{"chunkId":"chunk-2","index":1,"text":"second chunk"}],'
+                '"sourceRoute":{"streamName":"document.vectorize","schemaVersion":"document.route.v1"},'
+                '"artifactRequests":[{"artifactType":"document.extraction"}],'
+                '"provenance":{"sourceService":"language-intelligence-service",'
+                '"extractionRunId":"run-1"}}'
+            ),
+        }
+    )
+
+    assert payload.document_id == "doc-2"
+    assert payload.text == "first chunk\n\nsecond chunk"
+    assert payload.route_id == "document-route:doc-2:vectorize:manifest:document:4"
+    assert payload.manifest_version == "document:4"
+    assert payload.document_type == "policy"
+    assert payload.schema_id == "generic.document"
+    assert payload.schema_version == "1.0"
+    assert payload.source_route["streamName"] == DOCUMENT_VECTORIZE_STREAM
+    assert payload.artifact_requests[0]["artifactType"] == "document.extraction"
+    assert payload.provenance["extractionRunId"] == "run-1"
+
+
 @pytest.mark.asyncio
 async def test_vectorize_stream_indexes_document_and_publishes_artifact():
     broker = DummyBroker()
@@ -134,6 +167,51 @@ async def test_vectorize_stream_indexes_document_and_publishes_artifact():
     assert artifact["provenance"]["transport"] == "redis_streams_v1"
     assert artifact["provenance"]["sugar_glider_role"] == "monitoring_only"
     assert broker._redis.xadd_calls[0][0] == DOCUMENT_ARTIFACT_STREAM
+
+
+@pytest.mark.asyncio
+async def test_vectorize_stream_preserves_lis_route_schema_fields():
+    broker = DummyBroker()
+    indexing = DummyIndexingService()
+    consumer = DocumentArtifactStreamConsumer(
+        broker=broker,
+        indexing_service_factory=lambda: indexing,
+    )
+
+    artifact = await consumer.handle_stream_entry(
+        DOCUMENT_VECTORIZE_STREAM,
+        "12-0",
+        {
+            "data": (
+                '{"routeId":"document-route:doc-3:vectorize:manifest:document:5",'
+                '"documentId":"doc-3","manifestVersion":"document:5",'
+                '"documentType":"policy","schemaId":"generic.document",'
+                '"schemaVersion":"1.0","qualityScore":0.94,'
+                '"document":{"documentId":"doc-3","title":"Policy 3"},'
+                '"chunks":[{"chunkId":"chunk-1","index":0,"text":"route text"}],'
+                '"sourceRoute":{"destination":"vectorize","streamName":"document.vectorize",'
+                '"schemaVersion":"document.route.v1"},'
+                '"artifactRequests":[{"artifactType":"document.extraction",'
+                '"capability":"cyrex.artifact_store"}],'
+                '"provenance":{"sourceService":"language-intelligence-service",'
+                '"extractionRunId":"run-3"}}'
+            )
+        },
+    )
+
+    assert indexing.calls[0]["text"] == "route text"
+    assert indexing.calls[0]["metadata"]["schema_id"] == "generic.document"
+    assert artifact["route_id"] == "document-route:doc-3:vectorize:manifest:document:5"
+    assert artifact["document_type"] == "policy"
+    assert artifact["schema_id"] == "generic.document"
+    assert artifact["schema_version"] == "1.0"
+    assert artifact["source_route"]["streamName"] == DOCUMENT_VECTORIZE_STREAM
+    assert artifact["artifact_requests"][0]["capability"] == "cyrex.artifact_store"
+    assert artifact["provenance"]["sourceService"] == "language-intelligence-service"
+    assert artifact["provenance"]["extractionRunId"] == "run-3"
+    assert artifact["provenance"]["depends_on"] == [
+        "document-route:doc-3:vectorize:manifest:document:5"
+    ]
 
 
 @pytest.mark.asyncio
