@@ -1,6 +1,10 @@
-# Example docker-compose override for CPU-only builds
-# Copy this to docker-compose.override.yml to force CPU builds
-# Or set environment variable: DOCKER_BUILDKIT=1 BASE_IMAGE_CPU=1 docker compose build
+# Example docker-compose override for CPU-only builds.
+# Copy this to docker-compose.override.yml to force a CPU base image.
+#
+# For canonical, detection-aligned host-side build args, prefer deepiri-gpu-utils:
+#   eval "$(deepiri-gpu export-env --prefix CYREX_)"   # CYREX_DEVICE_TYPE/BASE_IMAGE/BUILD_TYPE
+#   deepiri-gpu build-args                              # inspect/override individually
+# This file is a simple static fallback and does not perform GPU detection.
 
 version: '3.8'
 
@@ -8,10 +12,10 @@ services:
   cyrex:
     build:
       args:
-        BASE_IMAGE: pytorch/pytorch:2.0.0-cpu  # Force CPU build
-  
+        BASE_IMAGE: python:3.11-slim  # CPU base image (matches deepiri-gpu build-args)
+
   jupyter:
     build:
       args:
-        BASE_IMAGE: pytorch/pytorch:2.0.0-cpu  # Force CPU build
+        BASE_IMAGE: python:3.11-slim  # CPU base image (matches deepiri-gpu build-args)
 

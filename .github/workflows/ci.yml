@@ -1,0 +1,50 @@
+name: Deepiri CI - diri-cyrex
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Lint & Test
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Init submodules
+        run: |
+          set -euo pipefail
+          TOKEN="${{ secrets.DEEPIRI_CI_CLONE_PAT || secrets.GITHUB_TOKEN }}"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "git@github.com:"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "ssh://git@github.com/"
+          git config --global --add url."https://x-access-token:${TOKEN}@github.com/".insteadOf "https://github.com/"
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: |
+          poetry install --with dev
+          poetry run pip install ./diri-agent-testing-utils
+
+      - name: Ruff
+        run: poetry run ruff check app/pipeline app/training tests/contract tests/pipeline tests/training tests/fakes
+
+      - name: Unit tests
+        run: poetry run pytest tests/contract -q

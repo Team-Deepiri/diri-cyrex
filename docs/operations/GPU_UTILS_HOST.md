@@ -33,8 +33,8 @@ Helox declares `deepiri-gpu-utils` as a Poetry path dependency (see `diri-helox/
 To align `docker compose` Cyrex builds with detection, export build args before building:
 
 ```bash
-export CYREX_BASE_IMAGE=$(deepiri-gpu build-args --base-image-only)
-# optional: eval or map DEVICE_TYPE from `deepiri-gpu build-args`
+eval "$(deepiri-gpu export-env --prefix CYREX_)"
+# Sets CYREX_DEVICE_TYPE, CYREX_BASE_IMAGE, and CYREX_BUILD_TYPE from detection.
 docker compose -f docker-compose.dev.yml build cyrex
 ```
 

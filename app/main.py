@@ -46,6 +46,7 @@ from .routes.agent_playground_api import router as agent_playground_router
 from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.documents import router as documents_router
+from .routes.training_api import router as training_router
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -265,6 +266,7 @@ async def health():
     }
 
     # Redis health
+    r = None
     try:
         import redis.asyncio as redis
         redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}"
@@ -272,10 +274,12 @@ async def health():
             redis_url = f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}"
         r = redis.from_url(redis_url, db=settings.REDIS_DB, decode_responses=True, socket_connect_timeout=5.0)
         await r.ping()
-        await r.close()
         health_status["services"]["redis"] = "healthy"
     except Exception as e:
         health_status["services"]["redis"] = f"unhealthy: {e}"
+    finally:
+        if r:
+            await r.close()
 
     return health_status
 
@@ -381,6 +385,7 @@ app.include_router(agent_playground_router)
 app.include_router(workflow_router)
 app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
+app.include_router(training_router)
 
 if __name__ == "__main__":
     import uvicorn
