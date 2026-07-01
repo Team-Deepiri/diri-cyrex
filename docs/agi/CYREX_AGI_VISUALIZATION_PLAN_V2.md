@@ -413,7 +413,7 @@ interface DuelFieldRow {
 interface VoiceQueryResponse {
   confessed: boolean;
   spans: WitnessSpan[];      // only verbatim quotes
-  gaps?: ConfessionGap[];    // present when confessed
+  gaps?: ConfusionGap[];    // present when confessed
 }
 
 interface WitnessSpan {
@@ -424,7 +424,7 @@ interface WitnessSpan {
   page?: number;
 }
 
-interface ConfessionGap {
+interface ConfusionGap {
   claim_attempted: string;
   reason: string;            // e.g. "no_citation", "quote_not_found"
 }
@@ -506,7 +506,7 @@ cyrex-interface/src/
 │   ├── DisagreementRibbon.tsx        # VIZ-04 (SVG overlay)
 │   ├── ReckoningCompass.tsx          # VIZ-05
 │   ├── WitnessStitch.tsx             # VIZ-06
-│   ├── ConfessionGapPanel.tsx        # VIZ-07
+│   ├── ConfusionGapPanel.tsx        # VIZ-07
 │   ├── ProvenanceRiver.tsx           # VIZ-08 (@xyflow/react)
 │   ├── GhostGraph.tsx                # VIZ-09
 │   ├── SpliceColumnLive.tsx          # VIZ-10 (Phase 2)
