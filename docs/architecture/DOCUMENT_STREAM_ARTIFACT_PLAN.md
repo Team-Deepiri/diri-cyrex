@@ -16,11 +16,33 @@ document-routing plan.
 
 - `pipeline.*`: Cyrex runtime telemetry and agent-interaction training signals.
 - `document.*`: LIS document routing events.
+- `training-jobs`, `training-events`, and `model-events`: training control-plane
+  streams introduced by the Cyrex training tools.
 
 These namespaces must stay separate. Source documents should not be written into
 `cyrex.helox_training_samples` through the generic `pipeline.*` path. Only
 explicit training signals or Helox-owned `document.training` consumers should
 produce training rows.
+
+## Relationship To Cyrex Training Tools
+
+`RealtimeDataPipeline` is the data/sample producer path:
+
+- publishes eligible runtime samples to `pipeline.helox-training.raw`;
+- publishes eligible structured samples to `pipeline.helox-training.structured`;
+- writes the same logical samples to `cyrex.helox_training_samples` for durable
+  replay/backfill.
+
+The Cyrex training tools are the training control-plane path:
+
+- `AgentTrainingService` buffers corrections and creates training requests;
+- `HeloxJobClient` submits jobs to `training-jobs`;
+- `TrainingStatusMonitor` reads `training-events`;
+- the model reload listener reacts to `model-events`.
+
+Those pieces are complementary. This PR supplies the live/durable training data
+that Helox can consume; the training API and job client decide when that data is
+used for fine-tuning and adapter reload.
 
 ## Cyrex Subscriber Role
 
