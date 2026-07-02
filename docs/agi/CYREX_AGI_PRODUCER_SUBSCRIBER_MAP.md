@@ -60,13 +60,15 @@ RealtimeDataPipeline._route_to_helox()
         │              │
         │              ├──► StreamDataSource mode=live|subscribe  (Helox training jobs)
         │              │
-        │              └──► (PLANNED) training_emitter → cyrex.helox_training_samples  ❌ NOT WIRED
+        │              └──► RealtimeDataPipeline → cyrex.helox_training_samples
+        │                    (runtime-training producer; AGI artifact training_emitter remains planned)
         │
         └─► Redis  pipeline.helox-training.structured
                        │
                        ├──► HeloxRealtimeIngestion → JSONL structured/{category}/
                        ├──► StreamDataSource
-                       └──► (PLANNED) Postgres mirror  ❌ NOT WIRED
+                       └──► RealtimeDataPipeline → cyrex.helox_training_samples
+                             (runtime-training producer; AGI artifact training_emitter remains planned)
 ```
 
 | Subscriber | Where | How | Output |
@@ -139,7 +141,7 @@ Helox train complete → `publish_model_ready` → `model-events` → Cyrex can 
 |-------|------------|---------|
 | `cyrex.memories` | MemoryManager ← RealtimeDataPipeline | agents / memory search |
 | `cyrex.synapse_messages` | SynapseBroker | broker replay / audit |
-| `cyrex.helox_training_samples` | nobody yet | PostgresDataSource in Helox (ready, table may not exist) |
+| `cyrex.helox_training_samples` | RealtimeDataPipeline runtime-training producer; AGI `training_emitter` planned | PostgresDataSource in Helox |
 | `cyrex.agents`, workflows, events, etc. | agent runtime | ops APIs |
 | `cyrex.document_parsing_*` | template learning service | template learning |
 
@@ -197,7 +199,7 @@ POST /artifacts/upload
 
 | Stream | Producer(s) | Subscriber(s) | Status |
 |--------|-------------|---------------|--------|
-| `pipeline.helox-training.raw` | RealtimeDataPipeline; (planned) training_emitter | HeloxRealtimeIngestion, StreamDataSource | LIVE |
+| `pipeline.helox-training.raw` | RealtimeDataPipeline; AGI `training_emitter` planned | HeloxRealtimeIngestion, StreamDataSource | LIVE |
 | `pipeline.helox-training.structured` | same | same | LIVE |
 | `pipeline.cyrex-runtime` | RealtimeDataPipeline → SynapseBroker channel | MemoryManager + synapse in-proc subs | LIVE (not Redis stream name) |
 | `pipeline.dead-letter` | RealtimeDataPipeline | none | LIVE, orphan |
@@ -220,7 +222,7 @@ POST /artifacts/upload
 
 | Consumer | Reads from | Status |
 |----------|------------|--------|
-| Helox PostgresDataSource | helox_training_samples | code ready, table + writer missing |
+| Helox PostgresDataSource | helox_training_samples | runtime-training writer in RealtimeDataPipeline; AGI artifact training_emitter still planned |
 | Pressure API / MCP | pressure_cells | PLANNED |
 | Reckoning API | reckoning_records | PLANNED |
 | Artifact API / MCP | artifacts, citations, artifact_refs | PLANNED |
@@ -255,8 +257,9 @@ Agent/Orchestrator ──► PipelineAutoCapture ──► RealtimeDataPipeline
           ▼                           ▼
      JSONL on disk              training jobs
                                         │
-                                        └──► (optional) PostgresDataSource
-                                              helox_training_samples ❌ empty
+                                        └──► PostgresDataSource
+                                              helox_training_samples
+                                              (runtime samples)
 ```
 
 ### TARGET (AGI)
@@ -284,7 +287,7 @@ POST /artifacts/upload ──► artifact pipeline producers ──► Postgres 
 
 ## Gaps you should care about
 
-1. **helox_training_samples** — Helox can read it; no Cyrex producer writes it (mirror contract is doc-only).
+1. **AGI artifact training_emitter** — runtime samples are written by RealtimeDataPipeline; artifact-derived training samples and lineage still need the planned AGI `training_emitter`.
 2. **Artifact pipeline producers** — ports/models exist; no orchestrator, no subscribers on artifact tables.
 3. **pipeline.pressure.events** — no producer, no subscriber (cyrex-agi is a stub).
 4. **HeloxRealtimeIngestion** — exists but not in docker-compose as a service; manual / opt-in.
