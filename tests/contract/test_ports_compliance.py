@@ -8,6 +8,8 @@ from app.pipeline.contracts.ports import (
     AnticipatePort,
     ArtifactStorePort,
     CorrectionWriterPort,
+    DuelRunnerPort,
+    ExtractPort,
     InvalidationPort,
     PipelineRunnerPort,
     PressureReadModelPort,
@@ -17,6 +19,8 @@ from app.pipeline.contracts.ports import (
 from tests.fakes.anticipate import FakeAnticipate
 from tests.fakes.artifact_store import InMemoryArtifactStore
 from tests.fakes.correction import FakeCorrectionWriter
+from tests.fakes.duel import FakeDuelRunner
+from tests.fakes.extract import FakeExtract
 from tests.fakes.invalidation import FakeInvalidationPort
 from tests.fakes.pipeline_runner import FakePipelineRunner
 from tests.fakes.pressure import FakePressureReadModel, FakePressureSignalSink
@@ -49,6 +53,8 @@ class TestFakeCompliance:
             (FakeCorrectionWriter, CorrectionWriterPort),
             (FakePipelineRunner, PipelineRunnerPort),
             (FakeAnticipate, AnticipatePort),
+            (FakeExtract, ExtractPort),
+            (FakeDuelRunner, DuelRunnerPort),
         ],
     )
     def test_fake_implements_protocol_methods(self, fake_cls, protocol):
