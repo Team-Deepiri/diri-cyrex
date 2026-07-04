@@ -108,7 +108,11 @@ export interface FieldDiscrepancy {
 
 // Text in voice form.
 export interface WitnessSpan {
-  citation: Citation;
+  citation_id: string;
+  quote: string;
+  char_start: number;
+  char_end: number;
+  page?: number;
 }
 
 // When no factual answer is found.

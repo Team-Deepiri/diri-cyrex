@@ -19,7 +19,13 @@
   },
   {
     "confessed": true,
-    "spans": [],
+    "spans": [
+      {"citation_id": "citation_01",
+      "quote": "The base rent is $4500 per month",
+      "char_start": 1042,
+      "char_end": 1080,
+      "page": 1 }
+    ],
     "gaps": []
   }
 ]
