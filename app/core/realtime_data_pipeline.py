@@ -134,6 +134,7 @@ class PipelineRecord:
         """Transform into Helox-compatible instruction-tuning JSONL row"""
         base = {
             "id": self.record_id,
+            "producer": self.producer_name(),
             "instruction": self.instruction or self._derive_instruction(),
             "input": self.input_text,
             "output": self.output_text,
@@ -155,6 +156,7 @@ class PipelineRecord:
         """Minimal raw format – just text pairs for general pre-training"""
         return {
             "id": self.record_id,
+            "producer": self.producer_name(),
             "text": self._build_raw_text(),
             "source": f"cyrex.{self.category.value}",
             "quality_score": self.quality_score,
@@ -165,6 +167,7 @@ class PipelineRecord:
         """Transform into Cyrex runtime context payload"""
         base = {
             "record_id": self.record_id,
+            "producer": self.producer_name(),
             "category": self.category.value,
             "data_format": self.data_format.value,
             "content": self._build_context_content(),
@@ -190,6 +193,14 @@ class PipelineRecord:
                 content += f"|{json.dumps(self.structured_payload, sort_keys=True)}"
             self._content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
         return self._content_hash
+
+    def producer_name(self) -> str:
+        """Return the concrete Cyrex producer path that created this sample."""
+        producer = self.metadata.get("producer") or self.metadata.get("producer_source")
+        if producer is None:
+            return "cyrex.realtime_data_pipeline"
+        producer_text = str(producer).strip()
+        return producer_text or "cyrex.realtime_data_pipeline"
 
     # --- private helpers ---
     def _derive_instruction(self) -> str:
@@ -621,6 +632,7 @@ class RealtimeDataPipeline:
         user_id: Optional[str] = None,
         quality_score: Optional[float] = None,
         tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         schema_version: str = "1.0",
     ) -> str:
         """
@@ -642,6 +654,7 @@ class RealtimeDataPipeline:
             user_id=user_id,
             quality_score=quality_score,
             tags=tags or [],
+            metadata=metadata or {},
         )
         return await self.ingest(record)
 
@@ -1162,6 +1175,7 @@ class RealtimeDataPipeline:
                     else None
                 )
             )
+            producer = str(payload.get("producer") or record.producer_name())
 
             await self._postgres.execute(
                 """
@@ -1186,6 +1200,7 @@ class RealtimeDataPipeline:
                     output_text = EXCLUDED.output_text,
                     context = EXCLUDED.context,
                     quality_score = EXCLUDED.quality_score,
+                    producer = EXCLUDED.producer,
                     agent_id = EXCLUDED.agent_id,
                     session_id = EXCLUDED.session_id,
                     user_id = EXCLUDED.user_id,
@@ -1204,7 +1219,7 @@ class RealtimeDataPipeline:
                 record.output_text or payload.get("output"),
                 record.context,
                 quality_score,
-                "cyrex_realtime_pipeline",
+                producer,
                 record.agent_id,
                 record.session_id,
                 record.user_id,

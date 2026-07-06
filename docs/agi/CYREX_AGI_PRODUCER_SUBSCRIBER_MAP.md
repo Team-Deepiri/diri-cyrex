@@ -44,6 +44,25 @@ RealtimeDataPipeline.ingest(PipelineRecord)
 | Agent pipeline tools | `app/agents/tools/pipeline_tools.py` | same, via tool calls |
 | Direct `ingest()` | `realtime_data_pipeline.py` | anything that calls the API |
 
+Every Helox-bound sample carries a concrete `producer` field. This keeps the
+durable replay table from collapsing all data into the generic
+`cyrex_realtime_pipeline` label and makes it clear which runtime path produced
+the sample.
+
+| Producer label | Source | Sample type |
+|----------------|--------|-------------|
+| `cyrex.orchestrator.auto_capture` | `WorkflowOrchestrator.process_request()` | real user input -> agent response pairs |
+| `cyrex.orchestrator.intermediate_step_auto_capture` | orchestrator intermediate steps | tool call traces |
+| `cyrex.orchestrator.error_recovery_auto_capture` | orchestrator exception recovery | error -> recovery examples |
+| `cyrex.auto_capture.workflow_result` | workflow completion capture | workflow summaries |
+| `cyrex.auto_capture.user_feedback` | feedback/correction capture | rated response pairs |
+| `cyrex.auto_capture.document_extraction_training_signal` | explicit document extraction capture | document-derived training signal |
+| `cyrex.agent_tool.submit_training_data` | agent tool | agent-selected I/O examples |
+| `cyrex.agent_tool.submit_structured_data` | agent tool | typed JSON examples |
+| `cyrex.agent_tool.submit_to_helox` | agent tool | Helox-only instruction examples |
+| `cyrex.agent_tool.submit_raw_to_helox` | agent tool | raw text examples |
+| `cyrex.agent_tool.log_tool_result` | agent tool | tool input/result/timing examples |
+
 **PipelineRecord categories:** `agent_interaction`, `tool_execution`, `user_feedback`, `conversation`, `error_recovery`, `workflow_result`, `knowledge_update`, `performance_metric`, `document_processing`, `compliance_check`, `fraud_detection`
 
 ---
@@ -132,6 +151,23 @@ No separate Redis stream for `pipeline.cyrex-runtime` today — it's SynapseBrok
 | `cyrex-agi` | `cyrex-agi/app/` | placeholder — subscribes to nothing |
 
 Helox train complete → `publish_model_ready` → `model-events` → Cyrex can hot-swap models if something calls `subscribe_to_model_events()`.
+
+### Real-time fine-tuning handoff to Cyrex agents
+
+The loop is split across two PR lanes:
+
+| Step | Owner | Status |
+|------|-------|--------|
+| Produce runtime samples | Cyrex #79 `RealtimeDataPipeline` + producer labels above | LIVE in this PR |
+| Stream live samples | Redis `pipeline.helox-training.raw` / `.structured` | LIVE in this PR |
+| Durable replay/backfill | Postgres `cyrex.helox_training_samples` | LIVE in this PR |
+| Start/poll training jobs | Cyrex #105 `/training/*`, `HeloxJobClient`, `TrainingStatusMonitor` | control-plane PR |
+| Train/export adapters | Helox library/service | downstream consumer |
+| Notify Cyrex | Helox/modelkit `training-events` and `model-events` | downstream event |
+| Reload into agents | Cyrex `ModelReloadListener`, `AutoModelLoader`, or `CyrexEventPublisher.subscribe_to_model_events()` callback | runtime subscriber |
+
+So #79 answers where the fine-tuning data comes from; #105/Helox answer when the
+job runs and how the resulting adapter/model is reloaded into Cyrex agents.
 
 ---
 

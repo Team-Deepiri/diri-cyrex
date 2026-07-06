@@ -127,6 +127,28 @@ async def test_persist_to_postgres_upserts_payload():
     assert args[2] == DataCategory.AGENT_INTERACTION.value
     parsed_payload = json.loads(args[-1])
     assert parsed_payload["id"] == record.record_id
+    assert parsed_payload["producer"] == "cyrex.realtime_data_pipeline"
+    assert args[9] == "cyrex.realtime_data_pipeline"
+
+
+@pytest.mark.asyncio
+async def test_persist_to_postgres_keeps_concrete_sample_producer():
+    pipeline = RealtimeDataPipeline()
+    pg = DummyPostgres()
+    pipeline._postgres = pg
+
+    record = build_record()
+    record.metadata["producer"] = "cyrex.agent_tool.submit_training_data"
+    payload = record.to_helox_raw_format()
+
+    await pipeline._persist_helox_record_to_postgres(record, payload, "raw")
+
+    query, args = pg.calls[0]
+    parsed_payload = json.loads(args[-1])
+
+    assert "producer = EXCLUDED.producer" in query
+    assert args[9] == "cyrex.agent_tool.submit_training_data"
+    assert parsed_payload["producer"] == "cyrex.agent_tool.submit_training_data"
 
 
 @pytest.mark.asyncio
