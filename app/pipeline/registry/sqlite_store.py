@@ -30,6 +30,8 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from app.pipeline.contracts.ports import PressureSignalSink
+
 logger = logging.getLogger(__name__)
 
 _INSERT_ARTIFACT_REF = (
@@ -164,10 +166,20 @@ class SqliteArtifactStore:
     The constructor opens a connection (lazy on first use).  Call
     ``init_db()`` at application startup — it is safe to call
     repeatedly.
+
+    If a ``pressure_sink`` is provided, the store will emit pressure
+    events after every ``create()`` call by projecting the artifact
+    payload into ``PressureEvent`` union members per Appendix A of
+    the design plan.
     """
 
-    def __init__(self, db_path: str = ":memory:") -> None:
+    def __init__(
+        self,
+        db_path: str = ":memory:",
+        pressure_sink: Optional[PressureSignalSink] = None,
+    ) -> None:
         self.db_path = db_path
+        self._pressure_sink = pressure_sink
         self._conn: Optional[sqlite3.Connection] = None
 
     # ------------------------------------------------------------------
@@ -337,6 +349,15 @@ class SqliteArtifactStore:
         self._insert_citations(bundle)
 
         conn.commit()
+
+        # Emit pressure events if a sink is configured (lazy import
+        # to avoid circular dependency with projectors package).
+        if self._pressure_sink is not None:
+            from app.pipeline.projectors.pressure_signals import project_pressure_events
+            events = project_pressure_events(bundle)
+            if events:
+                await self._pressure_sink.emit_many(events)
+
         return bundle
 
     async def get(self, artifact_id: str) -> Optional[Any]:
