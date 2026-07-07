@@ -278,6 +278,39 @@ class SqliteArtifactStore:
                 ),
             )
 
+    def _load_citations(self, artifact_id: str) -> List[Any]:
+        """Load citations from the database for a given artifact_id."""
+        from app.pipeline.contracts.models import Citation, CitationLocator
+
+        conn = self.conn
+        rows = conn.execute(
+            """SELECT * FROM citations WHERE artifact_id = ?""",
+            (artifact_id,),
+        ).fetchall()
+
+        citations: List[Any] = []
+        for row in rows:
+            loc = CitationLocator(
+                locator_type=row["locator_type"],
+                char_start=row["char_start"],
+                char_end=row["char_end"],
+                page_start=row["page_start"],
+                page_end=row["page_end"],
+                element_id=row["element_id"],
+            )
+            citations.append(
+                Citation(
+                    citation_id=row["citation_id"],
+                    document_id=row["document_id"],
+                    source_doc_hash=row["source_doc_hash"],
+                    locator=loc,
+                    quote=row["quote"],
+                    confidence=row["confidence"],
+                    extraction_pass=row["extraction_pass"],
+                )
+            )
+        return citations
+
     # ------------------------------------------------------------------
     # ArtifactStorePort implementation
     # ------------------------------------------------------------------
@@ -307,7 +340,8 @@ class SqliteArtifactStore:
         return bundle
 
     async def get(self, artifact_id: str) -> Optional[Any]:
-        """Retrieve an artifact by ID. Returns ``None`` if not found or deleted."""
+        """Retrieve an artifact by ID. Returns ``None`` if not found or deleted.
+        Also loads associated citations from the citations table."""
         conn = self.conn
         row = conn.execute(
             "SELECT * FROM artifacts WHERE artifact_id = ?",
@@ -317,7 +351,9 @@ class SqliteArtifactStore:
             return None
         if row["is_deleted"]:
             return None
-        return self._row_to_bundle(dict(row))
+        bundle = self._row_to_bundle(dict(row))
+        bundle.citations = self._load_citations(bundle.artifact_id)
+        return bundle
 
     async def get_latest(
         self,
@@ -405,33 +441,36 @@ class SqliteArtifactStore:
                 return
             nodes.append(bundle)
 
-            for ref_row in conn.execute(
-                "SELECT to_artifact, ref_type FROM artifact_refs WHERE from_artifact = ?",
-                (current_id,),
-            ).fetchall():
-                ref_id = ref_row["to_artifact"]
-                if ref_id not in visited:
-                    edges.append({
-                        "from": current_id,
-                        "to": ref_id,
-                        "ref_type": ref_row["ref_type"],
-                    })
-                    visited.add(ref_id)
-                    await _traverse(ref_id, depth + 1)
+            # Only follow edges when next hop is within range
+            if depth < hops:
+                for ref_row in conn.execute(
+                    "SELECT to_artifact, ref_type FROM artifact_refs WHERE from_artifact = ?",
+                    (current_id,),
+                ).fetchall():
+                    ref_id = ref_row["to_artifact"]
+                    if ref_id not in visited:
+                        edges.append({
+                            "from": current_id,
+                            "to": ref_id,
+                            "ref_type": ref_row["ref_type"],
+                        })
+                        visited.add(ref_id)
+                        await _traverse(ref_id, depth + 1)
 
-            for ref_row in conn.execute(
-                "SELECT from_artifact, ref_type FROM artifact_refs WHERE to_artifact = ?",
-                (current_id,),
-            ).fetchall():
-                ref_id = ref_row["from_artifact"]
-                if ref_id not in visited:
-                    edges.append({
-                        "from": ref_id,
-                        "to": current_id,
-                        "ref_type": ref_row["ref_type"],
-                    })
-                    visited.add(ref_id)
-                    await _traverse(ref_id, depth + 1)
+            if depth < hops:
+                for ref_row in conn.execute(
+                    "SELECT from_artifact, ref_type FROM artifact_refs WHERE to_artifact = ?",
+                    (current_id,),
+                ).fetchall():
+                    ref_id = ref_row["from_artifact"]
+                    if ref_id not in visited:
+                        edges.append({
+                            "from": ref_id,
+                            "to": current_id,
+                            "ref_type": ref_row["ref_type"],
+                        })
+                        visited.add(ref_id)
+                        await _traverse(ref_id, depth + 1)
 
         await _traverse(artifact_id, 0)
         return {"nodes": nodes, "edges": edges}
@@ -477,6 +516,8 @@ class ManagedSqliteStore:
         self._store = SqliteArtifactStore(db_path)
 
     async def __aenter__(self):
+        # Initialize the connection so it's ready before any method call
+        _ = self._store.conn
         return self._store
 
     async def __aexit__(self, *exc):
