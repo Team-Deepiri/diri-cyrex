@@ -1089,6 +1089,8 @@ class RealtimeDataPipeline:
 
         This uses the real shared table (`cyrex.helox_training_samples`) so Helox
         can read directly from Postgres without any mirror-table indirection.
+        `id` is a DB-local surrogate key for operational tooling; `record_id` is
+        the application-level logical key used for idempotent upserts.
         """
         if not self._postgres:
             return
@@ -1142,16 +1144,38 @@ class RealtimeDataPipeline:
     @staticmethod
     def _build_training_text(record: PipelineRecord, payload: Dict[str, Any]) -> str:
         """Normalize a single training text field used by Helox PostgresDataSource."""
-        text = payload.get("text")
-        if text:
-            return str(text)
+        parts: List[str] = []
+        for value in [
+            record.instruction or payload.get("instruction"),
+            record.input_text or payload.get("input"),
+            record.output_text or payload.get("output"),
+            payload.get("text"),
+        ]:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text and text not in parts:
+                parts.append(text)
 
-        parts = [record.instruction, record.input_text, record.output_text]
-        combined = "\n\n".join(part for part in parts if part)
-        if combined:
-            return combined
+        if parts:
+            return "\n\n".join(parts)
 
         return json.dumps(payload, default=str)
+
+    @staticmethod
+    def _quality_score_for_postgres(
+        record: PipelineRecord,
+        payload: Dict[str, Any],
+    ) -> Optional[float]:
+        """Return the first valid quality score from payload or record metadata."""
+        for value in (payload.get("quality_score"), record.quality_score):
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
 
     async def _persist_helox_record_to_postgres(
         self,
@@ -1166,15 +1190,7 @@ class RealtimeDataPipeline:
         try:
             text = self._build_training_text(record, payload)
             category = payload.get("category") or record.category.value
-            quality_score = (
-                float(payload["quality_score"])
-                if payload.get("quality_score") is not None
-                else (
-                    float(record.quality_score)
-                    if record.quality_score is not None
-                    else None
-                )
-            )
+            quality_score = self._quality_score_for_postgres(record, payload)
             producer = str(payload.get("producer") or record.producer_name())
 
             await self._postgres.execute(

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 
 import pytest
 
-
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 APP_DIR = REPO_ROOT / "app"
 CORE_DIR = APP_DIR / "core"
@@ -62,6 +61,12 @@ class DummyIndexResult:
     document_id: str
     title: str
     chunk_count: int
+
+
+@dataclass
+class NestedResult:
+    result: DummyIndexResult
+    tags: tuple[str, ...]
 
 
 class DummyIndexingService:
@@ -167,6 +172,69 @@ async def test_vectorize_stream_indexes_document_and_publishes_artifact():
     assert artifact["provenance"]["transport"] == "redis_streams_v1"
     assert artifact["provenance"]["sugar_glider_role"] == "monitoring_only"
     assert broker._redis.xadd_calls[0][0] == DOCUMENT_ARTIFACT_STREAM
+
+
+@pytest.mark.asyncio
+async def test_artifact_publish_uses_configured_stream_maxlen():
+    broker = DummyBroker()
+    indexing = DummyIndexingService()
+    consumer = DocumentArtifactStreamConsumer(
+        broker=broker,
+        indexing_service_factory=lambda: indexing,
+        artifact_stream_maxlen=123,
+    )
+
+    await consumer.handle_stream_entry(
+        DOCUMENT_VECTORIZE_STREAM,
+        "10-1",
+        {
+            "document_id": "doc-1",
+            "text": "Document body suitable for vectorization",
+            "title": "Doc 1",
+        },
+    )
+
+    assert broker._redis.xadd_calls[0][2]["maxlen"] == 123
+
+
+@pytest.mark.asyncio
+async def test_dlq_publish_uses_configured_stream_maxlen():
+    broker = DummyBroker()
+    consumer = DocumentArtifactStreamConsumer(
+        broker=broker,
+        dlq_stream_maxlen=321,
+    )
+
+    await consumer._publish_dlq(
+        broker._redis,
+        DOCUMENT_VECTORIZE_STREAM,
+        "10-2",
+        {"payload": "bad"},
+        RuntimeError("boom"),
+    )
+
+    stream, fields, kwargs = broker._redis.xadd_calls[0]
+    assert stream == f"{DOCUMENT_VECTORIZE_STREAM}.dlq"
+    assert fields["error"] == "boom"
+    assert kwargs["maxlen"] == 321
+
+
+def test_object_to_dict_recursively_serializes_nested_dataclasses():
+    value = NestedResult(
+        result=DummyIndexResult(document_id="doc-9", title="Nested", chunk_count=3),
+        tags=("retrieval", "test"),
+    )
+
+    serialized = DocumentArtifactStreamConsumer._object_to_dict(value)
+
+    assert serialized == {
+        "result": {
+            "document_id": "doc-9",
+            "title": "Nested",
+            "chunk_count": 3,
+        },
+        "tags": ["retrieval", "test"],
+    }
 
 
 @pytest.mark.asyncio

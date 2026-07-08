@@ -115,6 +115,13 @@ The consumer is disabled by default and can be enabled with:
 CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED=true
 ```
 
+Artifact stream retention is tunable without a redeploy:
+
+```bash
+CYREX_DOCUMENT_ARTIFACT_STREAM_MAXLEN=50000
+CYREX_DOCUMENT_DLQ_STREAM_MAXLEN=10000
+```
+
 This PR does not implement the LIS `process-and-route` API or make Cyrex the
 document router. LIS remains the owner of document ingestion, source metadata,
 MinIO persistence, and conditional publication to `document.vectorize`,

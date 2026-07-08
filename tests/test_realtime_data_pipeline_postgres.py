@@ -1,5 +1,5 @@
-import json
 import importlib.util
+import json
 import pathlib
 import sys
 import types
@@ -58,7 +58,9 @@ class DummyPostgres:
         return {"healthy": self.healthy, "version": "test"}
 
 
-def build_record(*, data_format: DataFormat = DataFormat.RAW, quality_score: float = 0.9):
+def build_record(
+    *, data_format: DataFormat = DataFormat.RAW, quality_score: float = 0.9
+):
     return PipelineRecord(
         category=DataCategory.AGENT_INTERACTION,
         route=RouteTarget.HELOX,
@@ -149,6 +151,50 @@ async def test_persist_to_postgres_keeps_concrete_sample_producer():
     assert "producer = EXCLUDED.producer" in query
     assert args[9] == "cyrex.agent_tool.submit_training_data"
     assert parsed_payload["producer"] == "cyrex.agent_tool.submit_training_data"
+
+
+def test_build_training_text_prefers_full_interaction_context_over_payload_summary():
+    record = build_record()
+    payload = {
+        "text": "short summary",
+        "instruction": "payload instruction",
+        "input": "payload input",
+        "output": "payload output",
+    }
+
+    text = RealtimeDataPipeline._build_training_text(record, payload)
+
+    assert "Respond to this" in text
+    assert "hello" in text
+    assert "world" in text
+    assert "short summary" in text
+    assert text.index("Respond to this") < text.index("short summary")
+
+
+def test_quality_score_for_postgres_falls_back_to_record_value():
+    record = build_record(quality_score=0.87)
+    payload = {"quality_score": "not-a-number"}
+
+    assert RealtimeDataPipeline._quality_score_for_postgres(record, payload) == 0.87
+
+
+@pytest.mark.asyncio
+async def test_ingest_structured_preserves_metadata_for_producer_lineage():
+    pipeline = RealtimeDataPipeline()
+    captured = []
+
+    async def fake_ingest(record):
+        captured.append(record)
+        return record.record_id
+
+    pipeline.ingest = fake_ingest
+
+    await pipeline.ingest_structured(
+        {"intent": "qa"},
+        metadata={"producer": "cyrex.agent_tool.submit_structured_data"},
+    )
+
+    assert captured[0].metadata["producer"] == "cyrex.agent_tool.submit_structured_data"
 
 
 @pytest.mark.asyncio

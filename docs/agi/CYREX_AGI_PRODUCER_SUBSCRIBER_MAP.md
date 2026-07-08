@@ -181,6 +181,11 @@ job runs and how the resulting adapter/model is reloaded into Cyrex agents.
 | `cyrex.agents`, workflows, events, etc. | agent runtime | ops APIs |
 | `cyrex.document_parsing_*` | template learning service | template learning |
 
+For `cyrex.helox_training_samples`, `record_id` is the logical sample key used
+for idempotent upserts and replay. The `id` column is only a DB-local surrogate
+for operational tooling/indexing, so service code should continue to key on
+`record_id`.
+
 ---
 
 ## PLANNED (AGI plan) — not subscribed yet

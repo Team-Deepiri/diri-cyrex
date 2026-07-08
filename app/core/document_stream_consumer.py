@@ -9,12 +9,13 @@ events, but they are not in the write path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
 import inspect
 import json
+import os
 import uuid
+from dataclasses import asdict, dataclass, field, is_dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
 
 from ..logging_config import get_logger
 
@@ -26,6 +27,22 @@ DOCUMENT_STRUCTURED_STREAM = "document.structured"
 DOCUMENT_ARTIFACT_STREAM = "document.artifacts"
 DOCUMENT_CONSUMER_GROUP = "cyrex-document-artifacts"
 DOCUMENT_CONSUMER_NAME = "cyrex-artifact-subscriber"
+DEFAULT_DOCUMENT_ARTIFACT_STREAM_MAXLEN = 50_000
+DEFAULT_DOCUMENT_DLQ_STREAM_MAXLEN = 10_000
+
+
+def _env_int(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError:
+        logger.warning(
+            "Ignoring invalid integer env", env_name=name, env_value=raw_value
+        )
+        return default
+    return value if value > 0 else default
 
 
 def _decode(value: Any) -> Any:
@@ -52,6 +69,26 @@ def _as_dict(value: Any) -> Dict[str, Any]:
 def _as_list(value: Any) -> List[Any]:
     value = _json_or_value(value)
     return value if isinstance(value, list) else []
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _json_safe(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_json_safe(item) for item in value]
+    if is_dataclass(value) and not isinstance(value, type):
+        return _json_safe(asdict(value))
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump())
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "__dict__"):
+        return _json_safe(
+            {key: val for key, val in vars(value).items() if not key.startswith("_")}
+        )
+    return str(value)
 
 
 def _float_or_none(value: Any) -> Optional[float]:
@@ -120,7 +157,9 @@ class DocumentRoutePayload:
             or raw.get("structuredData")
             or raw.get("extraction")
         )
-        citations = _as_list(raw.get("citations") or structured_payload.get("citations"))
+        citations = _as_list(
+            raw.get("citations") or structured_payload.get("citations")
+        )
 
         text = (
             raw.get("text")
@@ -131,15 +170,27 @@ class DocumentRoutePayload:
             or _join_chunk_text(chunks)
             or ""
         )
-        document_id = raw.get("document_id") or raw.get("documentId") or document.get("documentId")
+        document_id = (
+            raw.get("document_id")
+            or raw.get("documentId")
+            or document.get("documentId")
+        )
         if not document_id:
             raise ValueError("document stream payload missing document_id")
         if not text and not structured_payload:
-            raise ValueError("document stream payload has no text or structured payload")
+            raise ValueError(
+                "document stream payload has no text or structured payload"
+            )
 
         quality_score = raw.get("quality_score") or raw.get("qualityScore")
-        document_type = raw.get("document_type") or raw.get("documentType") or document.get("documentType")
-        schema_id = raw.get("schema_id") or raw.get("schemaId") or document.get("schemaId")
+        document_type = (
+            raw.get("document_type")
+            or raw.get("documentType")
+            or document.get("documentType")
+        )
+        schema_id = (
+            raw.get("schema_id") or raw.get("schemaId") or document.get("schemaId")
+        )
         schema_version = (
             raw.get("schema_version")
             or raw.get("schemaVersion")
@@ -155,16 +206,25 @@ class DocumentRoutePayload:
                 or metadata.get("title")
                 or "Untitled Document"
             ),
-            doc_type=str(raw.get("doc_type") or document_type or metadata.get("doc_type") or "other"),
+            doc_type=str(
+                raw.get("doc_type")
+                or document_type
+                or metadata.get("doc_type")
+                or "other"
+            ),
             industry=str(raw.get("industry") or metadata.get("industry") or "generic"),
             route_id=raw.get("route_id") or raw.get("routeId"),
             manifest_id=raw.get("manifest_id") or raw.get("manifestId"),
-            manifest_version=str(raw.get("manifest_version") or raw.get("manifestVersion") or "v1"),
+            manifest_version=str(
+                raw.get("manifest_version") or raw.get("manifestVersion") or "v1"
+            ),
             document_type=str(document_type) if document_type else None,
             schema_id=str(schema_id) if schema_id else None,
             schema_version=str(schema_version) if schema_version else None,
             source_route=_as_dict(raw.get("sourceRoute") or raw.get("source_route")),
-            artifact_requests=_as_list(raw.get("artifactRequests") or raw.get("artifact_requests")),
+            artifact_requests=_as_list(
+                raw.get("artifactRequests") or raw.get("artifact_requests")
+            ),
             provenance=_as_dict(raw.get("provenance")),
             source_doc_hash=(
                 raw.get("source_doc_hash")
@@ -196,6 +256,8 @@ class DocumentArtifactStreamConsumer:
         memory_manager_factory: Optional[Callable[[], Any]] = None,
         consumer_group: str = DOCUMENT_CONSUMER_GROUP,
         consumer_name: str = DOCUMENT_CONSUMER_NAME,
+        artifact_stream_maxlen: Optional[int] = None,
+        dlq_stream_maxlen: Optional[int] = None,
     ):
         self._broker = broker
         self._indexing_service_factory = indexing_service_factory
@@ -203,6 +265,14 @@ class DocumentArtifactStreamConsumer:
         self.consumer_group = consumer_group
         self.consumer_name = consumer_name
         self.streams = (DOCUMENT_VECTORIZE_STREAM, DOCUMENT_STRUCTURED_STREAM)
+        self.artifact_stream_maxlen = artifact_stream_maxlen or _env_int(
+            "CYREX_DOCUMENT_ARTIFACT_STREAM_MAXLEN",
+            DEFAULT_DOCUMENT_ARTIFACT_STREAM_MAXLEN,
+        )
+        self.dlq_stream_maxlen = dlq_stream_maxlen or _env_int(
+            "CYREX_DOCUMENT_DLQ_STREAM_MAXLEN",
+            DEFAULT_DOCUMENT_DLQ_STREAM_MAXLEN,
+        )
 
     async def initialize(self) -> None:
         if self._broker is None:
@@ -284,7 +354,9 @@ class DocumentArtifactStreamConsumer:
             title=payload.title,
             doc_type=self._coerce_doc_type(payload.doc_type),
             industry=payload.industry,
-            metadata=self._artifact_metadata(payload, entry_id, DOCUMENT_VECTORIZE_STREAM),
+            metadata=self._artifact_metadata(
+                payload, entry_id, DOCUMENT_VECTORIZE_STREAM
+            ),
         )
         result_payload = self._object_to_dict(index_result)
         return self._artifact_envelope(
@@ -305,11 +377,16 @@ class DocumentArtifactStreamConsumer:
         if memory is not None:
             from .types import MemoryType
 
+            memory_payload = payload.structured_payload or {"text": payload.text}
             memory_id = await memory.store_memory(
-                content=json.dumps(payload.structured_payload or {"text": payload.text}, default=str),
+                content=json.dumps(memory_payload, default=str),
                 memory_type=MemoryType.SEMANTIC,
-                importance=payload.quality_score if payload.quality_score is not None else 0.6,
-                metadata=self._artifact_metadata(payload, entry_id, DOCUMENT_STRUCTURED_STREAM),
+                importance=(
+                    payload.quality_score if payload.quality_score is not None else 0.6
+                ),
+                metadata=self._artifact_metadata(
+                    payload, entry_id, DOCUMENT_STRUCTURED_STREAM
+                ),
             )
 
         return self._artifact_envelope(
@@ -356,17 +433,8 @@ class DocumentArtifactStreamConsumer:
 
     @staticmethod
     def _object_to_dict(value: Any) -> Dict[str, Any]:
-        if isinstance(value, dict):
-            return value
-        if hasattr(value, "model_dump"):
-            return value.model_dump()
-        if hasattr(value, "__dict__"):
-            return {
-                key: val
-                for key, val in vars(value).items()
-                if not key.startswith("_")
-            }
-        return {"value": str(value)}
+        safe_value = _json_safe(value)
+        return safe_value if isinstance(safe_value, dict) else {"value": safe_value}
 
     @staticmethod
     def _artifact_metadata(
@@ -407,7 +475,8 @@ class DocumentArtifactStreamConsumer:
             "artifact_type": artifact_type,
             "document_id": payload.document_id,
             "source_doc_hash": payload.source_doc_hash,
-            "source_route": payload.source_route or {
+            "source_route": payload.source_route
+            or {
                 "streamName": stream,
                 "schemaVersion": "document.route.v1",
             },
@@ -429,13 +498,15 @@ class DocumentArtifactStreamConsumer:
                 "source_stream_id": entry_id,
                 "producer": "cyrex-document-artifact-subscriber",
                 "depends_on": [
-                    value
-                    for value in [payload.route_id, payload.manifest_id]
-                    if value
+                    value for value in [payload.route_id, payload.manifest_id] if value
                 ],
                 "sugar_glider_role": "monitoring_only",
             },
-            "metadata": DocumentArtifactStreamConsumer._artifact_metadata(payload, entry_id, stream),
+            "metadata": DocumentArtifactStreamConsumer._artifact_metadata(
+                payload,
+                entry_id,
+                stream,
+            ),
         }
 
     async def _publish_artifact(self, artifact: Dict[str, Any]) -> None:
@@ -445,13 +516,15 @@ class DocumentArtifactStreamConsumer:
         await redis.xadd(
             DOCUMENT_ARTIFACT_STREAM,
             self._redis_fields(artifact),
-            maxlen=50_000,
+            maxlen=self.artifact_stream_maxlen,
             approximate=True,
         )
 
     async def _ensure_group(self, redis: Any, stream: str) -> None:
         try:
-            await redis.xgroup_create(stream, self.consumer_group, id="0", mkstream=True)
+            await redis.xgroup_create(
+                stream, self.consumer_group, id="0", mkstream=True
+            )
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
@@ -470,10 +543,13 @@ class DocumentArtifactStreamConsumer:
                 "source_stream": stream,
                 "source_stream_id": entry_id,
                 "error": str(exc),
-                "payload": json.dumps({str(_decode(k)): _decode(v) for k, v in fields.items()}, default=str),
+                "payload": json.dumps(
+                    {str(_decode(k)): _decode(v) for k, v in fields.items()},
+                    default=str,
+                ),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             },
-            maxlen=10_000,
+            maxlen=self.dlq_stream_maxlen,
             approximate=True,
         )
 
