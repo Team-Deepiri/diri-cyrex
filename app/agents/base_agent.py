@@ -24,7 +24,7 @@ import json
 try:
     # Exposed at module level so tests can patch this symbol directly.
     from ..integrations.synapse_broker import get_synapse_broker
-except Exception:  # pragma: no cover - fallback for environments without broker deps
+except ImportError:  # pragma: no cover - fallback for environments without broker deps
     get_synapse_broker = None
 
 logger = get_logger("cyrex.agent.base")

@@ -11,7 +11,11 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch, Mock
 from datetime import datetime, timezone
 
-from app.agents.metrics import get_agent_metrics_collector
+from app.agents.metrics import (
+    DEFAULT_METRICS_DB_TIMEOUT,
+    _metrics_db_timeout,
+    get_agent_metrics_collector,
+)
 from diri_agent_testing_utils import (
     AgentTestHarness,
     FakeLLMProvider,
@@ -91,6 +95,40 @@ class TestAgentMetricsCollector:
         c1 = get_agent_metrics_collector()
         c2 = get_agent_metrics_collector()
         assert c1 is c2
+
+    def test_metrics_db_timeout_uses_positive_environment_value(self, monkeypatch):
+        monkeypatch.setenv("CYREX_METRICS_DB_TIMEOUT", "7.5")
+
+        assert _metrics_db_timeout() == 7.5
+
+    @pytest.mark.parametrize("value", ["invalid", "0", "-1"])
+    def test_metrics_db_timeout_rejects_invalid_values(self, monkeypatch, value):
+        monkeypatch.setenv("CYREX_METRICS_DB_TIMEOUT", value)
+
+        assert _metrics_db_timeout() == DEFAULT_METRICS_DB_TIMEOUT
+
+    @pytest.mark.asyncio
+    async def test_ensure_db_uses_configured_timeout(self, collector, monkeypatch):
+        monkeypatch.setenv("CYREX_METRICS_DB_TIMEOUT", "4.5")
+        postgres = MagicMock()
+        postgres.fetchval = AsyncMock(return_value=True)
+        observed_timeouts = []
+
+        async def capture_wait_for(awaitable, timeout):
+            observed_timeouts.append(timeout)
+            return await awaitable
+
+        with patch(
+            "app.database.postgres.get_postgres_manager",
+            new=AsyncMock(return_value=postgres),
+        ), patch(
+            "app.agents.metrics.asyncio.wait_for",
+            side_effect=capture_wait_for,
+        ):
+            await collector.ensure_db()
+
+        assert observed_timeouts == [4.5]
+        assert collector._db_initialized is True
 
     def test_record_success(self, collector):
         collector.record(

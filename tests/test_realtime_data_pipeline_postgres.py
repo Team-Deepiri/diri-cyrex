@@ -3,7 +3,7 @@ import json
 import pathlib
 import sys
 import types
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -216,6 +216,7 @@ async def test_route_to_helox_postgres_failure_does_not_block_redis_send():
     pipeline = RealtimeDataPipeline()
     pipeline._postgres = DummyPostgres(fail_execute=True)
     pipeline._redis = AsyncMock()
+    pipeline.logger = MagicMock()
 
     record = build_record(data_format=DataFormat.STRUCTURED)
     record.structured_payload = {"intent": "qa", "confidence": 0.95}
@@ -224,6 +225,12 @@ async def test_route_to_helox_postgres_failure_does_not_block_redis_send():
     pipeline._redis.xadd.assert_called_once()
     assert pipeline._stats["helox_structured_sent"] == 1
     assert pipeline._stats["helox_postgres_errors"] == 1
+    postgres_warning = next(
+        call
+        for call in pipeline.logger.warning.call_args_list
+        if "Failed to persist Helox training record" in call.args[0]
+    )
+    assert postgres_warning.kwargs["exc_info"] is True
 
 
 @pytest.mark.asyncio

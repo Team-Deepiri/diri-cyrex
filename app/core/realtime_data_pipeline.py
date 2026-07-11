@@ -1248,7 +1248,8 @@ class RealtimeDataPipeline:
         except Exception as e:
             self._stats["helox_postgres_errors"] += 1
             self.logger.warning(
-                f"Failed to persist Helox training record {record.record_id} to Postgres: {e}"
+                f"Failed to persist Helox training record {record.record_id} to Postgres: {e}",
+                exc_info=True,
             )
 
     # ------------------------------------------------------------------

@@ -159,6 +159,7 @@ Key environment variables:
 | `POSTGRES_DB` | `deepiri` | PostgreSQL database name |
 | `POSTGRES_USER` | `deepiri` | PostgreSQL user |
 | `POSTGRES_PASSWORD` | `deepiripassword` | PostgreSQL password |
+| `CYREX_METRICS_DB_TIMEOUT` | `5.0` | Agent metrics database health-check timeout in seconds |
 | `LLAMA_CPP_MODEL_PATH` | — | Path to GGUF model file (llama_cpp backend) |
 | `MESSAGING_SERVICE_URL` | `http://messaging-service:5009` | Synapse messaging service URL |
 | `JWT_SECRET` | `default-secret-change-in-production` | JWT secret key |

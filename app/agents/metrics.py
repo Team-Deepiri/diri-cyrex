@@ -10,11 +10,40 @@ from datetime import datetime, timedelta, timezone
 from collections import defaultdict, deque
 import statistics
 import asyncio
+import os
 
 from prometheus_client import Counter, Histogram
 from ..logging_config import get_logger
 
 logger = get_logger("cyrex.agent.metrics")
+
+DEFAULT_METRICS_DB_TIMEOUT = 5.0
+
+
+def _metrics_db_timeout() -> float:
+    raw_value = os.getenv("CYREX_METRICS_DB_TIMEOUT")
+    if raw_value is None:
+        return DEFAULT_METRICS_DB_TIMEOUT
+
+    try:
+        timeout = float(raw_value)
+    except ValueError:
+        logger.warning(
+            "Invalid agent metrics DB timeout; using default",
+            value=raw_value,
+            default_seconds=DEFAULT_METRICS_DB_TIMEOUT,
+        )
+        return DEFAULT_METRICS_DB_TIMEOUT
+
+    if timeout <= 0:
+        logger.warning(
+            "Agent metrics DB timeout must be positive; using default",
+            value=raw_value,
+            default_seconds=DEFAULT_METRICS_DB_TIMEOUT,
+        )
+        return DEFAULT_METRICS_DB_TIMEOUT
+
+    return timeout
 
 # ---------------------------------------------------------------------------
 # Prometheus metrics (module-level, registered once)
@@ -163,7 +192,10 @@ class AgentMetricsCollector:
         try:
             from ..database.postgres import get_postgres_manager
             # Avoid long connection retry backoff in request paths.
-            postgres = await asyncio.wait_for(get_postgres_manager(), timeout=1.0)
+            postgres = await asyncio.wait_for(
+                get_postgres_manager(),
+                timeout=_metrics_db_timeout(),
+            )
             exists = await postgres.fetchval("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables
