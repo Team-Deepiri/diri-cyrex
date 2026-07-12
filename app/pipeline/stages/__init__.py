@@ -1,5 +1,6 @@
 """Pipeline stage implementations (Track B)."""
 
 from app.pipeline.stages.anticipate import AnticipateStage, InMemoryPriorLookup
+from app.pipeline.stages.extract import ExtractStage
 
-__all__ = ["AnticipateStage", "InMemoryPriorLookup"]
+__all__ = ["AnticipateStage", "ExtractStage", "InMemoryPriorLookup"]

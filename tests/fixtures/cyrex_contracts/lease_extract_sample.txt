@@ -1,0 +1,11 @@
+COMMERCIAL LEASE AGREEMENT
+
+Property: 123 Main Street, Suite 400
+
+base_rent: 4500.00
+security_deposit: 5000.00
+notice_period: 90 days
+
+The lease term shall commence on Jan 1, 2024 and continue for twelve months.
+
+lease_start: Jan 1, 2024
