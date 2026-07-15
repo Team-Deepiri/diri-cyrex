@@ -134,6 +134,29 @@ export interface VoiceQueryResponse {
   gaps?: ConfusionGap[];
 }
 
+// Correction request and response shapes.
+export interface CorrectionRequest {
+  field_name: string;
+  corrected_value: any;
+  corrected_citation: Citation;
+  actor_id: string;
+}
+
+export interface CorrectionResponse {
+  success: boolean;
+  artifact_id: string;
+  field_name: string;
+  corrected_value: any;
+  submitted_at: string;
+}
+
+// Walk the artifact graph backward to source PDF spans.
+export interface ProvenanceResponse {
+  artifact_id: string;
+  provenance: Provenance;
+  citations: Citation[];
+}
+
 // Response object for artifact endpoints.
 export interface ArtifactBundle {
   artifact_id: string;

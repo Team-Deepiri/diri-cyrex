@@ -6,9 +6,13 @@ import {
   VoiceQueryResponse,
   Provenance,
   Citation,
+  CorrectionRequest,
+  CorrectionResponse,
+  ProvenanceResponse
 } from '../types/artifactEngine';
+import { apiRequest, apiUpload } from './client';
 
-const BASE_URL = '/api/v1/artifacts';
+const ARTIFACTS = '/artifacts';
 
 // Upload a document and run the full pipeline. Returns ArtifactBundle.
 export async function uploadArtifact(
@@ -18,74 +22,38 @@ export async function uploadArtifact(
   const formData = new FormData();
   formData.append('file', file);
   if (documentId) formData.append('document_id', documentId);
-
-  const res = await fetch(`${BASE_URL}/upload`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-  const data = await res.json();
-  return data.artifact as ArtifactBundle;
+  const data = await apiUpload<{ artifact: ArtifactBundle }>(`${ARTIFACTS}/upload`, formData);
+  return data.artifact;
 }
 
 // Fetch an artifact bundle by ID.
 export async function getArtifact(artifactId: string): Promise<ArtifactBundle> {
-  const res = await fetch(`${BASE_URL}/${artifactId}`);
-  if (!res.ok) throw new Error(`Fetch failed: ${res.status}`);
-  const data = await res.json();
-  return data.artifact as ArtifactBundle;
-}
-
-// Walk the artifact graph backward to source PDF spans.
-export interface ProvenanceResponse {
-  artifact_id: string;
-  provenance: Provenance;
-  citations: Citation[];
+  const data = await apiRequest<{ artifact: ArtifactBundle }>(`${ARTIFACTS}/${artifactId}`);
+  return data.artifact;
 }
 
 export async function getProvenance(artifactId: string): Promise<ProvenanceResponse> {
-  const res = await fetch(`${BASE_URL}/${artifactId}/provenance`);
-  if (!res.ok) throw new Error(`Provenance fetch failed: ${res.status}`);
-  return res.json();
+  return apiRequest<ProvenanceResponse>(`${ARTIFACTS}/${artifactId}/provenance`);
 }
 
 // Submit a human correction for a field in an artifact.
-export interface CorrectionRequest {
-  field_name: string;
-  corrected_value: any;
-  corrected_citation: Citation;
-  actor_id: string;
-}
-
-export interface CorrectionResponse {
-  artifact_id: string;
-  field_name: string;
-  corrected_value: any;
-  submitted_at: string;
-}
-
 export async function submitCorrection(
   artifactId: string,
   correction: CorrectionRequest,
 ): Promise<CorrectionResponse> {
-  const res = await fetch(`${BASE_URL}/${artifactId}/corrections`, {
+  return apiRequest<CorrectionResponse>(`${ARTIFACTS}/${artifactId}/corrections`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(correction),
   });
-  if (!res.ok) throw new Error(`Correction failed: ${res.status}`);
-  return res.json();
 }
 
 // Send a voice query — returns verbatim cited spans or a confession.
 export async function voiceQuery(
   request: VoiceQueryRequest,
 ): Promise<VoiceQueryResponse> {
-  const res = await fetch(`${BASE_URL}/voice/query`, {
+  const data = await apiRequest<{ response: VoiceQueryResponse }>(`${ARTIFACTS}/voice/query`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
-  if (!res.ok) throw new Error(`Voice query failed: ${res.status}`);
-  return res.json();
+  return data.response;
 }
