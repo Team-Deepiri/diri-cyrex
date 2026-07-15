@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export const ArtifactEngineCanvas: React.FC = () => {
-  const [activePanel, setActivePanel] = useState<'terrain' | 'duel' | 'voice' | 'provenance'>('terrain');
+  const [activePanel] = useState<'terrain' | 'duel' | 'voice' | 'provenance'>('terrain');
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px' }}>
