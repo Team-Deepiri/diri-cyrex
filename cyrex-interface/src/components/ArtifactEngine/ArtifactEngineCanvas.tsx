@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { TerrainSurvey } from './TerrainSurvey';
 import { PressureCell } from '../../types/artifactEngine';
+import { FaultDrillDown } from './FaultDrillDown';
 
 const MOCK_CELLS: PressureCell[] = [
   { document_id: 'doc-1', section_id: 'financial_terms', page: 1, score: 0.85, is_fault_zone: true, discrepancy_count: 3, reflect_failures: 1, low_confidence_count: 2, duel_disagreements: 2, drill_down_artifact_ids: ['art_001'] },
@@ -11,6 +12,7 @@ const MOCK_CELLS: PressureCell[] = [
 
 export const ArtifactEngineCanvas: React.FC = () => {
   const [activePanel] = useState<'terrain' | 'duel' | 'voice' | 'provenance'>('terrain');
+  const [selectedFaultCell, setSelectedFaultCell] = useState<PressureCell | null>(null); 
 
   return (
     <div style={{ padding: '2rem', maxWidth: '1400px' }}>
@@ -35,9 +37,20 @@ export const ArtifactEngineCanvas: React.FC = () => {
         <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', minHeight: '300px' }}>
           <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Terrain Survey</h3>
           <TerrainSurvey
-            cells={MOCK_CELLS}
-            onFaultZoneClick={(cell: PressureCell) => console.log('Fault zone clicked:', cell)}
+          cells={MOCK_CELLS}
+          onFaultZoneClick={(cell) => setSelectedFaultCell(cell)}
           />
+
+          {/* Fault Drill-Down. On red zones only. */}
+            {selectedFaultCell && (
+              <div style={{ marginTop: '1rem' }}>
+                <FaultDrillDown
+                  cell={selectedFaultCell}
+                  onArtifactClick={(id) => console.log('Navigate to artifact:', id)}
+                  onClose={() => setSelectedFaultCell(null)}
+                />
+          </div>
+        )}
         </div>
 
         {/*Duel Arena Placeholder*/}
