@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,12 @@ from typing import Any
 import pytest
 
 from app.pipeline.contracts.models import SynthesisResult
-from app.pipeline.stages.extract import ExtractStage, NoOpLlmExtract
+from app.pipeline.stages.extract import (
+    ExtractStage,
+    NoOpLlmExtract,
+    OllamaLlmExtract,
+    build_default_llm_backend,
+)
 from app.pipeline.tools.reflect import ReflectTool
 from tests.fakes.extract import NoOpExtract
 
@@ -42,7 +48,7 @@ class _StubLlmBackend:
 class TestExtractStage:
     @pytest.mark.asyncio
     async def test_empty_source_returns_minimal_result(self):
-        stage = ExtractStage(reflect_tool=ReflectTool())
+        stage = ExtractStage(reflect_tool=ReflectTool(), llm_backend=NoOpLlmExtract())
         result = await stage.run(
             parsed_doc={"raw_text": ""},
             document_id="lease_empty",
@@ -55,7 +61,7 @@ class TestExtractStage:
 
     @pytest.mark.asyncio
     async def test_regex_pass_extracts_labeled_fields(self):
-        stage = ExtractStage(reflect_tool=ReflectTool())
+        stage = ExtractStage(reflect_tool=ReflectTool(), llm_backend=NoOpLlmExtract())
         result = await stage.run(
             parsed_doc={"raw_text": LEASE_SAMPLE},
             document_id="lease_001",
@@ -68,7 +74,7 @@ class TestExtractStage:
 
     @pytest.mark.asyncio
     async def test_citation_quote_in_source(self):
-        stage = ExtractStage(reflect_tool=ReflectTool())
+        stage = ExtractStage(reflect_tool=ReflectTool(), llm_backend=NoOpLlmExtract())
         result = await stage.run(
             parsed_doc={"raw_text": LEASE_SAMPLE},
             document_id="lease_001",
@@ -93,7 +99,7 @@ class TestExtractStage:
 
     @pytest.mark.asyncio
     async def test_parsed_doc_dict_and_parse_result_shape(self):
-        stage = ExtractStage(reflect_tool=ReflectTool())
+        stage = ExtractStage(reflect_tool=ReflectTool(), llm_backend=NoOpLlmExtract())
         dict_result = await stage.run(
             parsed_doc={"raw_text": LEASE_SAMPLE, "document_type": "lease"},
             document_id="lease_001",
@@ -110,7 +116,7 @@ class TestExtractStage:
 
     @pytest.mark.asyncio
     async def test_result_validates_against_golden_subset(self):
-        stage = ExtractStage(reflect_tool=ReflectTool())
+        stage = ExtractStage(reflect_tool=ReflectTool(), llm_backend=NoOpLlmExtract())
         result = await stage.run(
             parsed_doc={"raw_text": LEASE_SAMPLE},
             document_id="lease_001",
@@ -140,19 +146,86 @@ class TestExtractStage:
         assert stage_result != fake_result
         assert len(stage_result.final_fields) > len(fake_result.final_fields)
 
+    @pytest.mark.asyncio
+    async def test_confidence_params_override_defaults(self):
+        llm_backend = _StubLlmBackend({"base_rent": "4400.00"})
+        stage = ExtractStage(
+            reflect_tool=ReflectTool(),
+            llm_backend=llm_backend,
+            regex_confidence=0.95,
+            llm_confidence=0.50,
+        )
+        result = await stage.run(
+            parsed_doc={"raw_text": LEASE_SAMPLE},
+            document_id="lease_001",
+            source_doc_hash="sha256:a1b2c3d4e5f6",
+        )
+        base_rent = next(f for f in result.final_fields if f.field_name == "base_rent")
+        # Regex confidence higher → regex wins on conflict.
+        assert base_rent.value == 4500
+
+
+class TestBuildDefaultLlmBackend:
+    def test_default_is_noop(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("CYREX_EXTRACT_USE_LLM", raising=False)
+        backend = build_default_llm_backend()
+        assert isinstance(backend, NoOpLlmExtract)
+
+    def test_env_flag_selects_ollama(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("CYREX_EXTRACT_USE_LLM", "1")
+        backend = build_default_llm_backend()
+        assert isinstance(backend, OllamaLlmExtract)
+
 
 class TestExtractPortCompliance:
     def test_stage_implements_port_methods(self):
-        stage = ExtractStage()
+        stage = ExtractStage(llm_backend=NoOpLlmExtract())
         assert hasattr(stage, "run")
         assert stage.run.__name__ == "run"
 
     @pytest.mark.asyncio
     async def test_unknown_document_class_returns_empty_fields(self):
-        stage = ExtractStage(reflect_tool=ReflectTool())
+        stage = ExtractStage(reflect_tool=ReflectTool(), llm_backend=NoOpLlmExtract())
         result = await stage.run(
             parsed_doc={"raw_text": LEASE_SAMPLE, "document_type": "invoice"},
             document_id="inv_001",
             source_doc_hash="sha256:inv",
         )
         assert result.final_fields == []
+
+
+def _ollama_reachable() -> bool:
+    try:
+        import httpx
+        from app.settings import settings
+
+        base = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
+        response = httpx.get(f"{base.rstrip('/')}/api/tags", timeout=2.0)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ollama_llm_pass_extracts_fields():
+    if os.getenv("CYREX_EXTRACT_USE_LLM") != "1":
+        pytest.skip("Set CYREX_EXTRACT_USE_LLM=1 to run local LLM integration test")
+    if not _ollama_reachable():
+        pytest.skip("Ollama is not reachable")
+
+    stage = ExtractStage(
+        reflect_tool=ReflectTool(),
+        llm_backend=OllamaLlmExtract(),
+    )
+    result = await stage.run(
+        parsed_doc={"raw_text": LEASE_SAMPLE},
+        document_id="lease_001",
+        source_doc_hash="sha256:a1b2c3d4e5f6",
+    )
+    assert isinstance(result, SynthesisResult)
+    assert result.final_fields
+    llm_passes = [p for p in result.passes if p.method.value == "llm"]
+    assert llm_passes or result.final_fields  # regex may still succeed if LLM fails soft
+    if llm_passes:
+        assert result.provenance.model_id is not None

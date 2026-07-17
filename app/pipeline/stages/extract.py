@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -30,6 +32,8 @@ LLM_PASS = 2
 
 REGEX_CONFIDENCE = 0.85
 LLM_CONFIDENCE = 0.90
+# Citation.quote max_length in contracts/models.py
+MAX_QUOTE_LENGTH = 500
 
 DOCUMENT_CLASS_FIELDS: Dict[str, List[str]] = {
     "lease": [
@@ -75,6 +79,95 @@ class NoOpLlmExtract:
     ) -> dict[str, Any]:
         del raw_text, fields, document_class
         return {}
+
+
+class OllamaLlmExtract:
+    """Local Ollama-backed LLM extract — used when CYREX_EXTRACT_USE_LLM=1."""
+
+    def __init__(self, model_name: str | None = None) -> None:
+        self._model_name = model_name
+        self._provider: Any = None
+        self._model_id: str | None = None
+
+    @property
+    def model_id(self) -> str | None:
+        return self._model_id
+
+    def _ensure_provider(self) -> Any:
+        if self._provider is not None:
+            return self._provider
+        # Lazy import — keep default CI free of Ollama/LangChain at module load.
+        from app.integrations.local_llm import get_local_llm
+
+        provider = get_local_llm(backend="ollama", model_name=self._model_name)
+        if provider is None:
+            raise RuntimeError("Local Ollama LLM is not available")
+        self._provider = provider
+        self._model_id = getattr(provider.config, "model_name", None)
+        return provider
+
+    def _build_prompt(
+        self,
+        raw_text: str,
+        fields: list[str],
+        document_class: str,
+    ) -> str:
+        field_list = ", ".join(fields)
+        return (
+            f"Extract the following fields from this {document_class} document.\n"
+            f"Return ONLY a JSON object with keys: {field_list}.\n"
+            "Use null for missing fields. Values must be taken from the text.\n\n"
+            f"Document:\n{raw_text}\n\n"
+            "JSON:"
+        )
+
+    @staticmethod
+    def _parse_json_object(response: str) -> dict[str, Any]:
+        text = response.strip()
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match is None:
+            return {}
+        try:
+            parsed = json.loads(match.group(0))
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    async def extract_fields(
+        self,
+        raw_text: str,
+        fields: list[str],
+        document_class: str,
+    ) -> dict[str, Any]:
+        if not raw_text or not fields:
+            return {}
+        try:
+            provider = self._ensure_provider()
+            prompt = self._build_prompt(raw_text, fields, document_class)
+            response = await provider.ainvoke(prompt)
+            parsed = self._parse_json_object(str(response))
+            return {
+                field: parsed[field]
+                for field in fields
+                if field in parsed and parsed[field] is not None
+            }
+        except Exception as exc:
+            logger.warning("OllamaLlmExtract failed; continuing with regex-only: %s", exc)
+            return {}
+
+
+def build_default_llm_backend() -> LlmExtractBackend:
+    """NoOp in CI; Ollama when CYREX_EXTRACT_USE_LLM=1."""
+    if os.getenv("CYREX_EXTRACT_USE_LLM") == "1":
+        return OllamaLlmExtract()
+    return NoOpLlmExtract()
 
 
 def _coerce_source_text(parsed_doc: Any) -> str:
@@ -172,9 +265,10 @@ def _pass_field_from_raw(
         )
 
     quote, char_start, char_end = span
-    if len(quote) > 500:
-        quote = quote[:500]
-        char_end = char_start + 500
+    # Truncate quote for Citation.quote max_length; keep original char_end
+    # so the locator still points at the full source span.
+    if len(quote) > MAX_QUOTE_LENGTH:
+        quote = quote[:MAX_QUOTE_LENGTH]
     return _PassField(
         field_name=field_name,
         value=value,
@@ -190,12 +284,17 @@ def _pass_field_from_raw(
 async def _run_regex_pass(
     source_text: str,
     fields: List[str],
+    confidence: float = REGEX_CONFIDENCE,
 ) -> Tuple[Dict[str, _PassField], int]:
     if not source_text or not fields:
         return {}, 0
 
     started = time.perf_counter()
-    tool_result = await text_extract(source_text, fields)
+    try:
+        tool_result = await text_extract(source_text, fields)
+    except Exception as exc:
+        logger.error("Regex pass text_extract failed: %s", exc)
+        return {}, int((time.perf_counter() - started) * 1000)
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     if not tool_result.success or not isinstance(tool_result.result, dict):
@@ -208,7 +307,7 @@ async def _run_regex_pass(
             raw_value,
             source_text,
             REGEX_PASS,
-            REGEX_CONFIDENCE,
+            confidence,
         )
         if pass_field is not None:
             extracted[field_name] = pass_field
@@ -220,12 +319,19 @@ async def _run_llm_pass(
     source_text: str,
     fields: List[str],
     document_class: str,
+    confidence: float = LLM_CONFIDENCE,
 ) -> Tuple[Dict[str, _PassField], int]:
     if not source_text or not fields:
         return {}, 0
 
     started = time.perf_counter()
-    llm_values = await llm_backend.extract_fields(source_text, fields, document_class)
+    try:
+        llm_values = await llm_backend.extract_fields(
+            source_text, fields, document_class
+        )
+    except Exception as exc:
+        logger.error("LLM pass failed: %s", exc)
+        return {}, int((time.perf_counter() - started) * 1000)
     elapsed_ms = int((time.perf_counter() - started) * 1000)
 
     extracted: Dict[str, _PassField] = {}
@@ -235,7 +341,7 @@ async def _run_llm_pass(
             raw_value,
             source_text,
             LLM_PASS,
-            LLM_CONFIDENCE,
+            confidence,
         )
         if pass_field is not None:
             extracted[field_name] = pass_field
@@ -288,13 +394,19 @@ def _synthesize(
                 )
                 chosen = winner
             else:
+                # Prefer the pass that has a grounded verbatim quote.
                 chosen = llm_field if llm_field.quote else regex_field
                 if chosen.quote is None and regex_field.quote:
                     chosen = regex_field
         else:
             chosen = llm_field or regex_field
 
-        assert chosen is not None
+        if chosen is None:
+            logger.error(
+                "Synthesize invariant violated for field %s; skipping", field_name
+            )
+            continue
+
         citations: List[Citation] = []
         if chosen.quote is not None:
             citations.append(
@@ -334,6 +446,7 @@ def _build_synthesis_result(
     llm_fields: Dict[str, _PassField],
     regex_elapsed_ms: int,
     llm_elapsed_ms: int,
+    model_id: str | None = None,
 ) -> SynthesisResult:
     passes: List[ProvenancePass] = []
     if regex_fields:
@@ -367,6 +480,7 @@ def _build_synthesis_result(
     provenance = Provenance(
         source_doc_hash=source_doc_hash,
         document_id=document_id,
+        model_id=model_id if llm_fields else None,
         passes=passes,
     )
 
@@ -390,10 +504,14 @@ class ExtractStage(ExtractPort):
         reflect_tool: ReflectTool | None = None,
         llm_backend: LlmExtractBackend | None = None,
         field_templates: Dict[str, List[str]] | None = None,
+        regex_confidence: float = REGEX_CONFIDENCE,
+        llm_confidence: float = LLM_CONFIDENCE,
     ) -> None:
         self._reflect_tool = reflect_tool or ReflectTool()
-        self._llm_backend = llm_backend or NoOpLlmExtract()
+        self._llm_backend = llm_backend or build_default_llm_backend()
         self._field_templates = field_templates or DOCUMENT_CLASS_FIELDS
+        self._regex_confidence = regex_confidence
+        self._llm_confidence = llm_confidence
 
     async def run(
         self,
@@ -406,13 +524,16 @@ class ExtractStage(ExtractPort):
         field_names = _resolve_fields(parsed_doc, self._field_templates)
 
         regex_fields, regex_elapsed_ms = await _run_regex_pass(
-            source_text, field_names
+            source_text,
+            field_names,
+            confidence=self._regex_confidence,
         )
         llm_fields, llm_elapsed_ms = await _run_llm_pass(
             self._llm_backend,
             source_text,
             field_names,
             document_class,
+            confidence=self._llm_confidence,
         )
 
         final_fields, discrepancies = _synthesize(
@@ -423,6 +544,7 @@ class ExtractStage(ExtractPort):
             source_doc_hash,
         )
 
+        model_id = getattr(self._llm_backend, "model_id", None)
         result = _build_synthesis_result(
             document_id=document_id,
             source_doc_hash=source_doc_hash,
@@ -432,6 +554,7 @@ class ExtractStage(ExtractPort):
             llm_fields=llm_fields,
             regex_elapsed_ms=regex_elapsed_ms,
             llm_elapsed_ms=llm_elapsed_ms,
+            model_id=model_id,
         )
 
         reflection = self._reflect_tool.reflect_fields(
