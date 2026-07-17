@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { TerrainSurvey } from './TerrainSurvey';
 import { PressureCell } from '../../types/artifactEngine';
 import { FaultDrillDown } from './FaultDrillDown';
+import { ProvenanceRiver } from './ProvenanceRiver';
 
 const MOCK_CELLS: PressureCell[] = [
   { document_id: 'doc-1', section_id: 'financial_terms', page: 1, score: 0.85, is_fault_zone: true, discrepancy_count: 3, reflect_failures: 1, low_confidence_count: 2, duel_disagreements: 2, drill_down_artifact_ids: ['art_001'] },
@@ -84,10 +85,19 @@ export const ArtifactEngineCanvas: React.FC = () => {
           <p style={{ color: '#666' }}>Cited answer here</p>
         </div>
       </div>
+      
+      {/* Provenance River */}
+      <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', marginBottom: '1rem', position: 'relative' }}>
+        <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Provenance River</h3>
+        <ProvenanceRiver
+          artifact={null}
+          onNodeClick={(id) => console.log('Artifact node clicked:', id)}
+        />
+      </div>
 
       {/*Ghost Graph Placeholder*/}
       <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px' }}>
-        <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Artifact Graph.</h3>
+        <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Artifact Graph</h3>
         <div style={{ background: '#1a1a1a', height: '150px', borderRadius: '4px', border: '1px solid #444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <p style={{ color: '#666' }}>Ghost Graph here</p>
         </div>
