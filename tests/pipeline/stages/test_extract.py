@@ -197,6 +197,7 @@ class TestExtractPortCompliance:
 def _ollama_reachable() -> bool:
     try:
         import httpx
+
         from app.settings import settings
 
         base = getattr(settings, "OLLAMA_BASE_URL", "http://localhost:11434")
