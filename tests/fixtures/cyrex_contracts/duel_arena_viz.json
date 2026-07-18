@@ -1,0 +1,35 @@
+{
+  "document_id": "lease_001",
+  "agent_a_id": "agent_a_llama",
+  "agent_b_id": "agent_b_gpt",
+  "fields": [
+    {
+      "field_name": "base_rent",
+      "agent_a_value": 4500,
+      "agent_b_value": 4500,
+      "agent_a_confidence": 0.95,
+      "agent_b_confidence": 0.93,
+      "is_disagreement": false
+    },
+    {
+      "field_name": "notice_period",
+      "agent_a_value": 90,
+      "agent_b_value": 60,
+      "agent_a_confidence": 0.88,
+      "agent_b_confidence": 0.80,
+      "is_disagreement": true
+    }
+  ],
+  "disagreements": [
+    {
+      "field_name": "notice_period",
+      "agent_a_value": 90,
+      "agent_b_value": 60,
+      "agent_a_confidence": 0.88,
+      "agent_b_confidence": 0.80,
+      "confidence_delta": 0.08,
+      "reason": "Agent A parsed 'ninety days'; Agent B parsed '60 days' from the same span"
+    }
+  ],
+  "resolution_status": "unresolved"
+}

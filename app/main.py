@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
+from .routes.artifacts import router as artifacts_router
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from collections import defaultdict
@@ -386,6 +387,7 @@ app.include_router(workflow_router)
 app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
 app.include_router(training_router)
+app.include_router(artifacts_router)
 
 if __name__ == "__main__":
     import uvicorn
