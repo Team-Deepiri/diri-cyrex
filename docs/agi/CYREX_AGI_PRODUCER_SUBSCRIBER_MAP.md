@@ -326,7 +326,34 @@ POST /artifacts/upload ──► artifact pipeline producers ──► Postgres 
 
 ---
 
+## Consumer-group matrix (Sugar Glider / Synapse spine)
+
+Every bus stream should have a durable worker group plus an observer group.
+
+| Stream | Worker group | Observer group | Status |
+|--------|--------------|----------------|--------|
+| `pipeline.helox-training.*` | `helox-train-live` | `telemetry-helox-ingest` | LIVE (Helox StreamDataSource defaults to XREADGROUP) |
+| `pipeline.pressure.events` | `cyrex-agi-pressure` | `telemetry-pressure` / RTG | LIVE stub in `cyrex-agi` V1 |
+| `pipeline.artifact.invalidation` | `cyrex-agi-pressure` (same service) | Canvas SSE / telemetry | LIVE publisher + AGI consumer |
+| `pipeline.splice.events` | `canvas-splice` | telemetry | PLANNED emit; topic reserved |
+| `pipeline.dead-letter` | `telemetry-dlq` | `messaging-dlq-alert` | Topic reserved; Telemetry TBD |
+| `pipeline.metrics` | `telemetry-pipeline` | — | Topic reserved |
+| `model-events` | `cyrex-model-loader` | `rtg-ui` / `registry-sync` | LIVE (`CYREX_MODEL_RELOAD_LISTENER_ENABLED`) |
+| `training-events` | `jobs-status` | `rtg-ui` / telemetry | partial |
+| `training-jobs` | `helox-workers` | telemetry | LIVE worker path |
+| `document.*` | LIS / Cyrex document consumers | — | LIS-owned |
+
+**Transport rule:** prefer `SYNAPSE_TRANSPORT=sidecar` (Sugar Glider). Cyrex `BusPublisher` and Helox `SynapseEventPublisher` fall back to Redis only when sidecar is down.
+
+**AGI emitters (this PR stack):**
+- `app/pipeline/emitters/training_emitter.py` — dual-write Redis + `helox_training_samples` + `helox_sample_lineage`
+- `app/pipeline/projectors/pressure_bus_sink.py` — `PressureSignalSink` → `pipeline.pressure.events`
+- `app/pipeline/emitters/invalidation_publisher.py` — `pipeline.artifact.invalidation`
+
+---
+
 ## Gaps you should care about
+
 
 1. **AGI artifact training_emitter** — runtime samples are written by RealtimeDataPipeline; artifact-derived training samples and lineage still need the planned AGI `training_emitter`.
 2. **Artifact pipeline producers** — ports/models exist; no orchestrator, no subscribers on artifact tables.

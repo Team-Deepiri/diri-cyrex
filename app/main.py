@@ -124,6 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(f"Rate limiter disabled: {e}")
 
     document_stream_task: Optional[asyncio.Task] = None
+    model_reload_task: Optional[asyncio.Task] = None
     if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
         "1",
         "true",
@@ -139,16 +140,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Document stream artifact consumer disabled: {e}")
 
+    # Close the Helox→Cyrex model loop (model-ready → hot reload).
+    if os.getenv("CYREX_MODEL_RELOAD_LISTENER_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        try:
+            from .training.model_reload_listener import start_model_reload_listener
+
+            model_reload_task = asyncio.create_task(start_model_reload_listener())
+            app.state.model_reload_listener_task = model_reload_task
+            logger.info("Model reload listener enabled (model-events)")
+        except Exception as e:
+            logger.warning(f"Model reload listener disabled: {e}")
+
     yield
 
     # Shutdown systems
-    if document_stream_task:
-        document_stream_task.cancel()
-        try:
-            await document_stream_task
-        except asyncio.CancelledError:
-            # Expected during FastAPI shutdown after cancelling the subscriber task.
-            pass
+    for task in (document_stream_task, model_reload_task):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Expected during FastAPI shutdown after cancelling the subscriber task.
+                pass
 
     try:
         system = await get_system_initializer()

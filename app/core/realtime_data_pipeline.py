@@ -912,24 +912,24 @@ class RealtimeDataPipeline:
                 stream_type=stream_type,
             )
 
-        # Primary: Redis Streams
-        if self._redis:
-            try:
-                redis_payload = {
-                    k: json.dumps(v) if not isinstance(v, str) else v
-                    for k, v in payload.items() if v is not None
-                }
-                await self._redis.xadd(
-                    stream, redis_payload,
-                    maxlen=50_000, approximate=True,
-                )
+        # Primary: Sugar Glider bus (falls back to Redis XADD)
+        try:
+            from app.integrations.streaming.bus_publisher import get_bus_publisher
+
+            bus = get_bus_publisher(redis_client=self._redis)
+            entry_id = await bus.publish(
+                stream,
+                f"helox.training.{stream_type}",
+                payload,
+            )
+            if entry_id:
                 sent = True
                 self.logger.debug(
                     f"Helox route ({record.data_format.value}): "
-                    f"sent {record.record_id} via Redis Streams"
+                    f"sent {record.record_id} via bus publisher ({entry_id})"
                 )
-            except Exception as e:
-                self.logger.warning(f"Helox Redis push failed: {e}")
+        except Exception as e:
+            self.logger.warning(f"Helox bus publish failed: {e}")
 
         # Fallback: local file
         if not sent and self._training_store:
