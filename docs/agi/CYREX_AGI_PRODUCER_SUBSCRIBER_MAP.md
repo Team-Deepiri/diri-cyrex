@@ -345,7 +345,7 @@ Every bus stream should have a durable worker group plus an observer group.
 
 **Transport rule:** prefer `SYNAPSE_TRANSPORT=sidecar` (Sugar Glider). Cyrex `BusPublisher` and Helox `SynapseEventPublisher` fall back to Redis only when sidecar is down.
 
-**AGI emitters (this PR stack):**
+**AGI emitter foundations (not wired into artifact stages yet):**
 - `app/pipeline/emitters/training_emitter.py` — dual-write Redis + `helox_training_samples` + `helox_sample_lineage`
 - `app/pipeline/projectors/pressure_bus_sink.py` — `PressureSignalSink` → `pipeline.pressure.events`
 - `app/pipeline/emitters/invalidation_publisher.py` — `pipeline.artifact.invalidation`

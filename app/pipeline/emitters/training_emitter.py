@@ -6,8 +6,9 @@ Writes:
   - Postgres cyrex.helox_training_samples (durable mirror)
   - Postgres cyrex.helox_sample_lineage (provenance)
 
-Used by the artifact pipeline (corrections, uploads, MCP) in addition to
-RealtimeDataPipeline's runtime capture path.
+Reserved for the future artifact pipeline (corrections, uploads, MCP).
+RealtimeDataPipeline remains the live runtime-training producer until those
+artifact stages are wired to this emitter.
 """
 
 from __future__ import annotations
@@ -25,8 +26,8 @@ from app.integrations.streaming.bus_publisher import (
 from app.logging_config import get_logger
 from app.pipeline.helox_training_schema import (
     HELOX_SAMPLE_LINEAGE_INSERT_SQL,
-    HELOX_TRAINING_SAMPLES_DDL,
     HELOX_TRAINING_SAMPLE_UPSERT_SQL,
+    HELOX_TRAINING_SAMPLES_DDL,
 )
 
 logger = get_logger("cyrex.pipeline.training_emitter")

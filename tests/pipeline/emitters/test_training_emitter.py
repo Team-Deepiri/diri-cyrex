@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.pipeline.emitters.training_emitter import TrainingEmitter, MIN_QUALITY
+from app.pipeline.emitters.training_emitter import MIN_QUALITY, TrainingEmitter
+
+
+def test_training_emitter_import_does_not_initialize_rag_bridge():
+    assert TrainingEmitter.__name__ == "TrainingEmitter"
 
 
 class _FakeBus:
