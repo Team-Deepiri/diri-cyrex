@@ -170,6 +170,7 @@ model_cache/
 
 # Test files
 test_*.py
+!tests/test_realtime_data_pipeline_postgres.py
 !tests/contract/test_*.py
 !tests/pipeline/**/test_*.py
 !tests/training/test_*.py

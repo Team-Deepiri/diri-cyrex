@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, JSONResponse
 from .routes.artifacts import router as artifacts_router
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
@@ -12,6 +12,7 @@ import uuid
 import logging
 import asyncio
 import numpy as np
+import os
 
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 
@@ -122,9 +123,50 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Rate limiter disabled: {e}")
 
+    document_stream_task: Optional[asyncio.Task] = None
+    model_reload_task: Optional[asyncio.Task] = None
+    if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        try:
+            from .core.document_stream_consumer import get_document_artifact_stream_consumer
+
+            document_consumer = await get_document_artifact_stream_consumer()
+            document_stream_task = asyncio.create_task(document_consumer.run_forever())
+            app.state.document_stream_consumer_task = document_stream_task
+            logger.info("Document stream artifact consumer enabled")
+        except Exception as e:
+            logger.warning(f"Document stream artifact consumer disabled: {e}")
+
+    # Close the Helox→Cyrex model loop (model-ready → hot reload).
+    if os.getenv("CYREX_MODEL_RELOAD_LISTENER_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        try:
+            from .training.model_reload_listener import start_model_reload_listener
+
+            model_reload_task = asyncio.create_task(start_model_reload_listener())
+            app.state.model_reload_listener_task = model_reload_task
+            logger.info("Model reload listener enabled (model-events)")
+        except Exception as e:
+            logger.warning(f"Model reload listener disabled: {e}")
+
     yield
 
     # Shutdown systems
+    for task in (document_stream_task, model_reload_task):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Expected during FastAPI shutdown after cancelling the subscriber task.
+                pass
+
     try:
         system = await get_system_initializer()
         await system.shutdown_all()
@@ -183,14 +225,18 @@ async def middleware(request: Request, call_next):
                     request_id,
                     path
                 )
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                response.headers["x-request-id"] = request_id
+                return response
             if is_desktop and api_key and api_key != settings.CYREX_API_KEY:
                 error_logger.log_api_error(
                     HTTPException(status_code=401, detail="Invalid API key"),
                     request_id,
                     path
                 )
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                response.headers["x-request-id"] = request_id
+                return response
 
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
@@ -225,7 +271,16 @@ async def health():
         "status": "healthy",
         "version": "3.0.0",
         "timestamp": time.time(),
-        "services": {"ai": "ready" if settings.OPENAI_API_KEY else "disabled"}
+        "services": {
+            "ai": "ready" if settings.OPENAI_API_KEY else "disabled",
+            "node_backend": "configured" if settings.NODE_BACKEND_URL else "not_configured",
+        },
+        "configuration": {
+            "cors_origin": settings.CORS_ORIGIN,
+            "node_backend_url": settings.NODE_BACKEND_URL,
+            "openai_model": settings.OPENAI_MODEL,
+            "api_key_required": bool(settings.CYREX_API_KEY),
+        },
     }
 
     # Redis health
@@ -243,7 +298,14 @@ async def health():
     finally:
         if r:
             await r.close()
+
     return health_status
+
+
+@app.options("/health")
+async def health_options_handler():
+    """Support bare OPTIONS /health checks in tests and simple preflight flows."""
+    return Response(status_code=204)
 
 # Metrics
 @app.get("/metrics")
@@ -277,11 +339,15 @@ class CompletionRequest(BaseModel):
 async def api_embeddings(req: EmbeddingRequest, request: Request):
     request_id = getattr(request.state, 'request_id', 'unknown')
     try:
-        from ..services.embedding_service import get_embedding_service
+        if not req.text or not req.text.strip():
+            raise HTTPException(status_code=422, detail="Text must not be empty")
+        from .services.embedding_service import get_embedding_service
         service = get_embedding_service()
         embedding_result = service.embed(req.text, use_cache=True)
         embedding_list = embedding_result.tolist() if isinstance(embedding_result, np.ndarray) else list(embedding_result)
         return {"embedding": embedding_list, "dimension": len(embedding_list), "model": req.model}
+    except HTTPException:
+        raise
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/embeddings")
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
@@ -305,6 +371,8 @@ async def api_complete(req: CompletionRequest, request: Request):
         return {"completion": completion.choices[0].message.content,
                 "tokens_used": completion.usage.total_tokens if completion.usage else 0,
                 "model": completion.model}
+    except HTTPException:
+        raise
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/complete")
         raise HTTPException(status_code=500, detail=f"Completion generation failed: {e}")

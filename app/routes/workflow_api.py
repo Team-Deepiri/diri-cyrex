@@ -11,7 +11,10 @@ import asyncio
 import json
 import uuid
 
-from ..core.langgraph_workflow import get_langgraph_workflow
+from ..core.langgraph_workflow import (
+    get_langgraph_workflow,
+    get_langgraph_workflow_instance,
+)
 from ..logging_config import get_logger
 
 logger = get_logger("cyrex.routes.workflow")
@@ -219,17 +222,28 @@ async def list_workflow_types() -> List[Dict[str, Any]]:
 async def workflow_health() -> Dict[str, Any]:
     """Check workflow system health"""
     try:
-        workflow = await get_langgraph_workflow()
-        
+        # Keep health checks cheap and non-blocking: report the current instance
+        # without triggering full workflow initialization.
+        workflow = get_langgraph_workflow_instance()
+        if workflow is None:
+            return {
+                "status": "degraded",
+                "workflow_available": False,
+                "langgraph_available": False,
+                "checkpointing_available": False,
+                "message": "Workflow not initialized",
+            }
+
         return {
-            "status": "healthy" if workflow else "degraded",
-            "workflow_available": workflow is not None,
-            "langgraph_available": workflow.graph is not None if workflow else False,
-            "checkpointing_available": workflow.checkpointer is not None if workflow else False,
+            "status": "healthy",
+            "workflow_available": True,
+            "langgraph_available": workflow.graph is not None,
+            "checkpointing_available": workflow.checkpointer is not None,
         }
-    except Exception as e:
+    except Exception:
+        logger.exception("Workflow health check failed")
         return {
             "status": "unhealthy",
-            "error": str(e),
+            "error": "An internal error has occurred",
         }
 
