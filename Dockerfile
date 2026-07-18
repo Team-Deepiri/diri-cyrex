@@ -78,6 +78,13 @@ COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
 COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
 
+
+# Bedd runtime (Bun-style) — glibc binary
+ARG BEDD_IMAGE=ghcr.io/team-deepiri/bedd:0.6
+COPY --from=${BEDD_IMAGE} /usr/local/bin/bedd /usr/local/bin/bedd
+COPY --from=${BEDD_IMAGE} /opt/bedd/skills /opt/bedd/skills
+ENV BEDD_SKILLS_DIR=/opt/bedd/skills
+
 USER appuser
 
 EXPOSE 8000
