@@ -759,20 +759,26 @@ class RealtimeDataPipeline:
                 self.logger.error(f"DLQ retry error: {e}")
 
     async def _metrics_publish_loop(self):
-        """Publish pipeline metrics periodically"""
+        """Publish pipeline metrics periodically via Sugar Glider bus."""
         while True:
             try:
                 await asyncio.sleep(30)  # every 30 seconds
-                if self._redis:
-                    metrics = {
-                        k: json.dumps(v) if not isinstance(v, (str, int, float)) else str(v)
-                        for k, v in self._stats.items()
-                    }
-                    metrics["timestamp"] = datetime.now(timezone.utc).isoformat()
-                    await self._redis.xadd(
-                        self.METRICS_STREAM, metrics,
-                        maxlen=5_000, approximate=True,
-                    )
+                from app.integrations.streaming.bus_publisher import get_bus_publisher
+
+                metrics = {
+                    k: v
+                    for k, v in self._stats.items()
+                }
+                metrics["timestamp"] = datetime.now(timezone.utc).isoformat()
+                metrics["event"] = "pipeline.metrics"
+                metrics["source"] = "cyrex.realtime_data_pipeline"
+                bus = get_bus_publisher(redis_client=self._redis)
+                await bus.publish(
+                    self.METRICS_STREAM,
+                    "pipeline.metrics",
+                    metrics,
+                    maxlen=5_000,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -1028,23 +1034,29 @@ class RealtimeDataPipeline:
                 f"Record {record.record_id} exhausted retries ({record.max_retries}), "
                 f"errors: {record.errors}"
             )
-            # Persist to Redis DLQ stream if available
-            if self._redis:
-                try:
-                    dlq_payload = {
-                        "record_id": record.record_id,
-                        "category": record.category.value,
-                        "errors": json.dumps(record.errors),
-                        "retry_count": str(record.retry_count),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "input_text": record.input_text[:500],  # truncate
-                    }
-                    await self._redis.xadd(
-                        self.DLQ_STREAM, dlq_payload,
-                        maxlen=10_000, approximate=True,
-                    )
-                except Exception:
-                    pass
+            # Persist to DLQ stream via Sugar Glider bus when available
+            try:
+                from app.integrations.streaming.bus_publisher import get_bus_publisher
+
+                dlq_payload = {
+                    "event": "pipeline.dead_letter",
+                    "source": "cyrex.realtime_data_pipeline",
+                    "record_id": record.record_id,
+                    "category": record.category.value,
+                    "errors": record.errors,
+                    "retry_count": record.retry_count,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "input_text": record.input_text[:500],  # truncate
+                }
+                bus = get_bus_publisher(redis_client=self._redis)
+                await bus.publish(
+                    self.DLQ_STREAM,
+                    "pipeline.dead_letter",
+                    dlq_payload,
+                    maxlen=10_000,
+                )
+            except Exception:
+                pass
             return
 
         try:
