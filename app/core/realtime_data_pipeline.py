@@ -1099,59 +1099,15 @@ class RealtimeDataPipeline:
         """
         Ensure durable table for Helox training records exists.
 
-        This uses the real shared table (`cyrex.helox_training_samples`) so Helox
-        can read directly from Postgres without any mirror-table indirection.
-        `id` is a DB-local surrogate key for operational tooling; `record_id` is
-        the application-level logical key used for idempotent upserts.
+        DDL is centralized in `app.pipeline.helox_training_schema` so
+        TrainingEmitter and this pipeline cannot drift.
         """
         if not self._postgres:
             return
 
-        await self._postgres.execute("CREATE SCHEMA IF NOT EXISTS cyrex")
-        await self._postgres.execute(
-            """
-            CREATE TABLE IF NOT EXISTS cyrex.helox_training_samples (
-                id BIGSERIAL PRIMARY KEY,
-                record_id TEXT UNIQUE NOT NULL,
-                stream_type TEXT NOT NULL,
-                category TEXT,
-                text TEXT NOT NULL,
-                instruction TEXT,
-                input_text TEXT,
-                output_text TEXT,
-                context TEXT,
-                quality_score DOUBLE PRECISION,
-                producer TEXT NOT NULL DEFAULT 'cyrex_realtime_pipeline',
-                agent_id TEXT,
-                session_id TEXT,
-                user_id TEXT,
-                tool_name TEXT,
-                model_name TEXT,
-                schema_version TEXT,
-                payload JSONB NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )
-            """
-        )
-        await self._postgres.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_helox_training_samples_created_at
-            ON cyrex.helox_training_samples (created_at)
-            """
-        )
-        await self._postgres.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_helox_training_samples_stream_type
-            ON cyrex.helox_training_samples (stream_type)
-            """
-        )
-        await self._postgres.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_helox_training_samples_producer
-            ON cyrex.helox_training_samples (producer)
-            """
-        )
+        from app.pipeline.helox_training_schema import HELOX_TRAINING_SAMPLES_DDL
+
+        await self._postgres.execute(HELOX_TRAINING_SAMPLES_DDL)
 
     @staticmethod
     def _build_training_text(record: PipelineRecord, payload: Dict[str, Any]) -> str:

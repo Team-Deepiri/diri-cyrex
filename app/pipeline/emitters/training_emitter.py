@@ -23,73 +23,15 @@ from app.integrations.streaming.bus_publisher import (
     get_bus_publisher,
 )
 from app.logging_config import get_logger
+from app.pipeline.helox_training_schema import (
+    HELOX_SAMPLE_LINEAGE_INSERT_SQL,
+    HELOX_TRAINING_SAMPLES_DDL,
+    HELOX_TRAINING_SAMPLE_UPSERT_SQL,
+)
 
 logger = get_logger("cyrex.pipeline.training_emitter")
 
 MIN_QUALITY = 0.4
-
-_ENSURE_SAMPLES_SQL = """
-CREATE SCHEMA IF NOT EXISTS cyrex;
-
-CREATE TABLE IF NOT EXISTS cyrex.helox_training_samples (
-    id BIGSERIAL,
-    record_id TEXT PRIMARY KEY,
-    stream_type TEXT NOT NULL CHECK (stream_type IN ('raw', 'structured')),
-    producer TEXT NOT NULL DEFAULT 'training_emitter',
-    text TEXT,
-    instruction TEXT,
-    input_text TEXT,
-    output_text TEXT,
-    category TEXT,
-    quality_score DOUBLE PRECISION NOT NULL DEFAULT 1.0,
-    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS cyrex.helox_sample_lineage (
-    lineage_id TEXT PRIMARY KEY,
-    record_id TEXT NOT NULL,
-    source_type TEXT NOT NULL,
-    source_id TEXT,
-    producer TEXT NOT NULL,
-    document_id TEXT,
-    artifact_id TEXT,
-    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-"""
-
-_UPSERT_SAMPLE_SQL = """
-INSERT INTO cyrex.helox_training_samples (
-    record_id, stream_type, producer, text, instruction, input_text,
-    output_text, category, quality_score, metadata_json, created_at
-) VALUES (
-    %(record_id)s, %(stream_type)s, %(producer)s, %(text)s, %(instruction)s,
-    %(input_text)s, %(output_text)s, %(category)s, %(quality_score)s,
-    %(metadata_json)s::jsonb, %(created_at)s
-)
-ON CONFLICT (record_id) DO UPDATE SET
-    stream_type = EXCLUDED.stream_type,
-    producer = EXCLUDED.producer,
-    text = EXCLUDED.text,
-    instruction = EXCLUDED.instruction,
-    input_text = EXCLUDED.input_text,
-    output_text = EXCLUDED.output_text,
-    category = EXCLUDED.category,
-    quality_score = EXCLUDED.quality_score,
-    metadata_json = EXCLUDED.metadata_json
-"""
-
-_INSERT_LINEAGE_SQL = """
-INSERT INTO cyrex.helox_sample_lineage (
-    lineage_id, record_id, source_type, source_id, producer,
-    document_id, artifact_id, metadata_json, created_at
-) VALUES (
-    %(lineage_id)s, %(record_id)s, %(source_type)s, %(source_id)s, %(producer)s,
-    %(document_id)s, %(artifact_id)s, %(metadata_json)s::jsonb, %(created_at)s
-)
-ON CONFLICT (lineage_id) DO NOTHING
-"""
 
 
 class TrainingEmitter:
@@ -111,9 +53,9 @@ class TrainingEmitter:
         if self._schema_ready or self._postgres is None:
             return
         if hasattr(self._postgres, "execute"):
-            await self._postgres.execute(_ENSURE_SAMPLES_SQL)
+            await self._postgres.execute(HELOX_TRAINING_SAMPLES_DDL)
         elif hasattr(self._postgres, "run"):
-            await self._postgres.run(_ENSURE_SAMPLES_SQL)
+            await self._postgres.run(HELOX_TRAINING_SAMPLES_DDL)
         self._schema_ready = True
 
     async def emit_structured(
@@ -285,18 +227,37 @@ class TrainingEmitter:
         try:
             await self._ensure_schema()
             now = datetime.now(timezone.utc)
+            training_text = text or "\n\n".join(
+                p for p in (instruction, input_text, output_text) if p
+            ) or json.dumps(metadata)
             sample_params = {
                 "record_id": record_id,
                 "stream_type": stream_type,
-                "producer": producer,
-                "text": text,
+                "category": category,
+                "text": training_text,
                 "instruction": instruction,
                 "input_text": input_text,
                 "output_text": output_text,
-                "category": category,
+                "context": None,
                 "quality_score": quality_score,
+                "producer": producer,
+                "agent_id": None,
+                "session_id": None,
+                "user_id": None,
+                "tool_name": None,
+                "model_name": None,
+                "schema_version": "training_emitter.v1",
+                "payload": json.dumps(
+                    {
+                        "instruction": instruction,
+                        "input_text": input_text,
+                        "output_text": output_text,
+                        "text": text,
+                        "metadata": metadata,
+                    },
+                    default=str,
+                ),
                 "metadata_json": json.dumps(metadata),
-                "created_at": now,
             }
             lineage_params = {
                 "lineage_id": str(uuid.uuid4()),
@@ -310,11 +271,15 @@ class TrainingEmitter:
                 "created_at": now,
             }
             if hasattr(self._postgres, "execute"):
-                await self._postgres.execute(_UPSERT_SAMPLE_SQL, sample_params)
-                await self._postgres.execute(_INSERT_LINEAGE_SQL, lineage_params)
+                await self._postgres.execute(
+                    HELOX_TRAINING_SAMPLE_UPSERT_SQL, sample_params
+                )
+                await self._postgres.execute(
+                    HELOX_SAMPLE_LINEAGE_INSERT_SQL, lineage_params
+                )
             elif hasattr(self._postgres, "run"):
-                await self._postgres.run(_UPSERT_SAMPLE_SQL, sample_params)
-                await self._postgres.run(_INSERT_LINEAGE_SQL, lineage_params)
+                await self._postgres.run(HELOX_TRAINING_SAMPLE_UPSERT_SQL, sample_params)
+                await self._postgres.run(HELOX_SAMPLE_LINEAGE_INSERT_SQL, lineage_params)
         except Exception as exc:
             logger.warning(
                 "training_emitter_postgres_failed",

@@ -1,8 +1,9 @@
 """
 cyrex-agi V1 pressure observer — consumes pipeline.pressure.events.
 
-Subscribes via Sugar Glider when available; falls back to Redis XREADGROUP.
-Logs pressure events and exposes last-seen state for /health and hooks.
+Consumes via Redis Streams consumer groups (same substrate Sugar Glider
+writes to). Producers publish through Sugar Glider; this observer does not
+import the Cyrex app package (avoids brittle sys.path hacks).
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import asyncio
 import json
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import FastAPI
 
@@ -49,59 +50,18 @@ def _parse_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
             except json.JSONDecodeError:
                 pass
         out[key] = value
-    return out
-
-
-async def _consume_via_sidecar(stream: str, counter_key: str, last_key: str) -> None:
-    # Prefer in-tree Cyrex sugar-glider client when cyrex-agi is co-located.
-    try:
-        import sys
-        from pathlib import Path
-
-        cyrex_root = Path(__file__).resolve().parents[2]
-        if str(cyrex_root) not in sys.path:
-            sys.path.insert(0, str(cyrex_root))
-        from app.integrations.streaming.synapse_sugar_glider_client import (
-            SynapseSidecarClient,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"sidecar client unavailable: {exc}") from exc
-
-    url = (
-        os.getenv("SYNAPSE_SUGAR_GLIDER_URL")
-        or os.getenv("SYNAPSE_SIDECAR_URL")
-        or "http://synapse-sugar-glider:8081"
-    )
-    client = SynapseSidecarClient(base_url=url, default_sender="cyrex-agi")
-    while True:
+    # Sugar Glider often wraps JSON under "payload"
+    inner = out.get("payload")
+    if isinstance(inner, str) and inner.startswith(("{", "[")):
         try:
-            events = await client.read(
-                stream=stream,
-                consumer_group=CONSUMER_GROUP,
-                consumer_name=CONSUMER_NAME,
-                count=32,
-                block_ms=2000,
-            )
-            for event in events:
-                payload = _parse_fields(event.fields)
-                _state[counter_key] = int(_state[counter_key]) + 1
-                _state[last_key] = {
-                    "at": datetime.now(timezone.utc).isoformat(),
-                    "entry_id": event.entry_id,
-                    "payload": payload,
-                }
-                print(
-                    f"[cyrex-agi] {stream} event={payload.get('event')} "
-                    f"doc={payload.get('document_id')}"
-                )
-                try:
-                    await client.ack(stream, CONSUMER_GROUP, [event.entry_id])
-                except Exception:
-                    pass
-        except Exception as exc:
-            _state["errors"] = int(_state["errors"]) + 1
-            _state["status"] = f"sidecar_error:{exc}"
-            await asyncio.sleep(2.0)
+            parsed = json.loads(inner)
+            if isinstance(parsed, dict):
+                return {**out, **parsed}
+        except json.JSONDecodeError:
+            pass
+    if isinstance(inner, dict):
+        return {**out, **inner}
+    return out
 
 
 async def _consume_via_redis(stream: str, counter_key: str, last_key: str) -> None:
@@ -145,28 +105,17 @@ async def _consume_via_redis(stream: str, counter_key: str, last_key: str) -> No
             await asyncio.sleep(2.0)
 
 
-async def _run_consumer(stream: str, counter_key: str, last_key: str) -> None:
-    transport = (os.getenv("SYNAPSE_TRANSPORT", "sidecar") or "sidecar").strip().lower()
-    if transport == "sidecar":
-        try:
-            await _consume_via_sidecar(stream, counter_key, last_key)
-            return
-        except Exception as exc:
-            _state["status"] = f"sidecar_init_failed:{exc};falling_back_redis"
-    await _consume_via_redis(stream, counter_key, last_key)
-
-
 @app.on_event("startup")
 async def startup() -> None:
     _state["status"] = "running"
     _tasks.append(
         asyncio.create_task(
-            _run_consumer(PRESSURE_STREAM, "pressure_events_seen", "last_pressure")
+            _consume_via_redis(PRESSURE_STREAM, "pressure_events_seen", "last_pressure")
         )
     )
     _tasks.append(
         asyncio.create_task(
-            _run_consumer(
+            _consume_via_redis(
                 INVALIDATION_STREAM, "invalidation_events_seen", "last_invalidation"
             )
         )
@@ -188,6 +137,7 @@ async def health():
         "phase": "v1-pressure-observer",
         "consumer_group": CONSUMER_GROUP,
         "streams": [PRESSURE_STREAM, INVALIDATION_STREAM],
+        "transport": "redis-streams (Sugar Glider publish substrate)",
         "pressure_events_seen": _state["pressure_events_seen"],
         "invalidation_events_seen": _state["invalidation_events_seen"],
         "last_pressure": _state["last_pressure"],
