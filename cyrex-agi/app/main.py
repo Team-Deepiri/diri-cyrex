@@ -73,8 +73,12 @@ async def _consume_via_redis(stream: str, counter_key: str, last_key: str) -> No
     client = redis.from_url(redis_url, decode_responses=True)
     try:
         await client.xgroup_create(stream, CONSUMER_GROUP, id="0", mkstream=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Idempotent startup: ignore "group already exists", surface anything else.
+        if "BUSYGROUP" in str(exc):
+            pass
+        else:
+            raise
 
     while True:
         try:
