@@ -4,6 +4,7 @@ import { PressureCell } from '../../types/artifactEngine';
 import { FaultDrillDown } from './FaultDrillDown';
 import { ProvenanceRiver } from './ProvenanceRiver';
 
+// TODO: replace MOCK_CELLS with usePressureMap(documentId) hook
 const MOCK_CELLS: PressureCell[] = [
   { document_id: 'doc-1', section_id: 'financial_terms', page: 1, score: 0.85, is_fault_zone: true, discrepancy_count: 3, reflect_failures: 1, low_confidence_count: 2, duel_disagreements: 2, drill_down_artifact_ids: ['art_001'] },
   { document_id: 'doc-1', section_id: 'termination_clause', page: 2, score: 0.4, is_fault_zone: false, discrepancy_count: 1, reflect_failures: 0, low_confidence_count: 1, duel_disagreements: 0, drill_down_artifact_ids: [] },

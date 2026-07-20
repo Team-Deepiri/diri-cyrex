@@ -29,7 +29,7 @@ def get_pipeline_runner() -> PipelineRunnerPort:
     return FakePipelineRunner()
 
 def get_correction_writer() -> CorrectionWriterPort:
-    # TODO: replace with real PostgresArtifactStore-backed writer
+    # TODO: replace with real PostgresArtifactStore-backed writer. Current implementation is in-memory
     return CorrectionStage()
 
 # ----------------------------------------------------------------------------
