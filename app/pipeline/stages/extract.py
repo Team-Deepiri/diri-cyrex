@@ -129,7 +129,9 @@ class OllamaLlmExtract:
             if isinstance(parsed, dict):
                 return parsed
         except json.JSONDecodeError:
-            pass
+            # Direct parse can fail when the model wraps JSON in extra text;
+            # fall through to regex-based object extraction below.
+            parsed = None
 
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match is None:
