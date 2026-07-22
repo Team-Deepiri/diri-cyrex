@@ -70,6 +70,7 @@ async def register_pipeline_tools(agent):
                 session_id=getattr(agent, "session_id", None),
                 quality_score=quality_score,
                 tags=tag_list,
+                metadata={"producer": "cyrex.agent_tool.submit_training_data"},
             )
             return f"Data submitted to pipeline (record: {record_id}). Routed to Helox training + Cyrex runtime."
         except Exception as e:
@@ -114,6 +115,7 @@ async def register_pipeline_tools(agent):
                 session_id=getattr(agent, "session_id", None),
                 quality_score=quality_score,
                 tags=tag_list,
+                metadata={"producer": "cyrex.agent_tool.submit_structured_data"},
             )
             return f"Structured data submitted (record: {record_id}). Routed to Helox + Cyrex."
         except Exception as e:
@@ -163,6 +165,7 @@ async def register_pipeline_tools(agent):
                 session_id=getattr(agent, "session_id", None),
                 quality_score=quality_score,
                 tags=tag_list,
+                metadata={"producer": "cyrex.agent_tool.submit_to_helox"},
             )
             return f"Data submitted to Helox training (record: {record_id})."
         except Exception as e:
@@ -202,7 +205,10 @@ async def register_pipeline_tools(agent):
                 agent_id=getattr(agent, "agent_id", None),
                 quality_score=quality_score,
                 tags=["raw_text", source],
-                metadata={"source": source},
+                metadata={
+                    "producer": "cyrex.agent_tool.submit_raw_to_helox",
+                    "source": source,
+                },
             )
             return f"Raw text submitted to Helox (record: {record_id})."
         except Exception as e:
@@ -247,6 +253,7 @@ async def register_pipeline_tools(agent):
                 session_id=getattr(agent, "session_id", None),
                 quality_score=quality_score,
                 tags=tag_list,
+                metadata={"producer": "cyrex.agent_tool.submit_to_cyrex_runtime"},
             )
             return (
                 f"Knowledge stored in Cyrex runtime (record: {record_id}). "
@@ -297,7 +304,10 @@ async def register_pipeline_tools(agent):
                 quality_score=quality_score,
                 execution_time_ms=execution_time_ms,
                 tags=["tool_execution", tool_name],
-                metadata={"execution_time_ms": execution_time_ms},
+                metadata={
+                    "producer": "cyrex.agent_tool.log_tool_result",
+                    "execution_time_ms": execution_time_ms,
+                },
                 structured_payload={
                     "tool_name": tool_name,
                     "input": input_params,

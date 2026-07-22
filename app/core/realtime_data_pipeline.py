@@ -16,6 +16,7 @@ Architecture:
       ├── Route 1 ─ Helox Training
       │   ├── Raw data   → Redis Streams (pipeline.helox-training.raw)
       │   ├── Structured → Redis Streams (pipeline.helox-training.structured)
+      │   ├── Durable    → PostgreSQL (cyrex.helox_training_samples)
       │   └── Fallback   → local TrainingDataStore (CSV/JSONL)
       │
       ├── Route 2 ─ Cyrex Runtime
@@ -27,15 +28,16 @@ Architecture:
 All data is processed asynchronously with back-pressure support.
 """
 
-from typing import Dict, List, Optional, Any, Callable
+from typing import Dict, List, Optional, Any, Literal, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import asyncio
 import json
 import uuid
 import re
 import hashlib
+import traceback
 
 from ..logging_config import get_logger
 
@@ -46,10 +48,8 @@ logger = get_logger("cyrex.realtime_pipeline")
 # Data models
 # ---------------------------------------------------------------------------
 
-
 class DataCategory(str, Enum):
     """Categories of pipeline data"""
-
     AGENT_INTERACTION = "agent_interaction"
     TOOL_EXECUTION = "tool_execution"
     USER_FEEDBACK = "user_feedback"
@@ -65,7 +65,6 @@ class DataCategory(str, Enum):
 
 class RouteTarget(str, Enum):
     """Pipeline route targets"""
-
     HELOX = "helox"
     CYREX = "cyrex"
     BOTH = "both"
@@ -73,14 +72,12 @@ class RouteTarget(str, Enum):
 
 class DataFormat(str, Enum):
     """Whether data is raw (unprocessed) or structured (parsed/typed)"""
-
     RAW = "raw"
     STRUCTURED = "structured"
 
 
 class RecordStatus(str, Enum):
     """Processing status of a pipeline record"""
-
     PENDING = "pending"
     VALIDATED = "validated"
     TRANSFORMED = "transformed"
@@ -93,11 +90,9 @@ class RecordStatus(str, Enum):
 # Pipeline record
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class PipelineRecord:
     """A single record flowing through the pipeline"""
-
     record_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     category: DataCategory = DataCategory.AGENT_INTERACTION
     route: RouteTarget = RouteTarget.BOTH
@@ -119,11 +114,11 @@ class PipelineRecord:
     user_id: Optional[str] = None
     tool_name: Optional[str] = None
     model_name: Optional[str] = None
-    quality_score: Optional[float] = None  # 0.0–1.0
+    quality_score: Optional[float] = None        # 0.0–1.0
     execution_time_ms: Optional[float] = None
     tags: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Processing state
     status: RecordStatus = RecordStatus.PENDING
@@ -139,6 +134,7 @@ class PipelineRecord:
         """Transform into Helox-compatible instruction-tuning JSONL row"""
         base = {
             "id": self.record_id,
+            "producer": self.producer_name(),
             "instruction": self.instruction or self._derive_instruction(),
             "input": self.input_text,
             "output": self.output_text,
@@ -160,6 +156,7 @@ class PipelineRecord:
         """Minimal raw format – just text pairs for general pre-training"""
         return {
             "id": self.record_id,
+            "producer": self.producer_name(),
             "text": self._build_raw_text(),
             "source": f"cyrex.{self.category.value}",
             "quality_score": self.quality_score,
@@ -170,6 +167,7 @@ class PipelineRecord:
         """Transform into Cyrex runtime context payload"""
         base = {
             "record_id": self.record_id,
+            "producer": self.producer_name(),
             "category": self.category.value,
             "data_format": self.data_format.value,
             "content": self._build_context_content(),
@@ -195,6 +193,14 @@ class PipelineRecord:
                 content += f"|{json.dumps(self.structured_payload, sort_keys=True)}"
             self._content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
         return self._content_hash
+
+    def producer_name(self) -> str:
+        """Return the concrete Cyrex producer path that created this sample."""
+        producer = self.metadata.get("producer") or self.metadata.get("producer_source")
+        if producer is None:
+            return "cyrex.realtime_data_pipeline"
+        producer_text = str(producer).strip()
+        return producer_text or "cyrex.realtime_data_pipeline"
 
     # --- private helpers ---
     def _derive_instruction(self) -> str:
@@ -226,9 +232,7 @@ class PipelineRecord:
         if self.context:
             parts.append(f"[Context] {self.context}")
         if self.structured_payload:
-            parts.append(
-                f"[Structured Data] {json.dumps(self.structured_payload, default=str)}"
-            )
+            parts.append(f"[Structured Data] {json.dumps(self.structured_payload, default=str)}")
         return "\n".join(parts) if parts else self.input_text or self.output_text
 
     def _build_raw_text(self) -> str:
@@ -246,7 +250,6 @@ class PipelineRecord:
 # ---------------------------------------------------------------------------
 # Validation
 # ---------------------------------------------------------------------------
-
 
 class RecordValidator:
     """Validates pipeline records before processing"""
@@ -267,25 +270,17 @@ class RecordValidator:
 
         # Must have some content
         has_text = bool(record.input_text or record.output_text or record.instruction)
-        has_structured = (
-            record.data_format == DataFormat.STRUCTURED and record.structured_payload
-        )
+        has_structured = record.data_format == DataFormat.STRUCTURED and record.structured_payload
         if not has_text and not has_structured:
             errors.append("Record has no content (no text and no structured payload)")
 
         # Content length check
-        total_len = (
-            len(record.input_text) + len(record.output_text) + len(record.instruction)
-        )
+        total_len = len(record.input_text) + len(record.output_text) + len(record.instruction)
         if has_text and total_len < cls.MIN_CONTENT_LENGTH:
-            errors.append(
-                f"Content too short ({total_len} chars, min {cls.MIN_CONTENT_LENGTH})"
-            )
+            errors.append(f"Content too short ({total_len} chars, min {cls.MIN_CONTENT_LENGTH})")
 
         if total_len > cls.MAX_RECORD_SIZE:
-            errors.append(
-                f"Content too large ({total_len} chars, max {cls.MAX_RECORD_SIZE})"
-            )
+            errors.append(f"Content too large ({total_len} chars, max {cls.MAX_RECORD_SIZE})")
 
         # Quality score range
         if record.quality_score is not None:
@@ -293,10 +288,7 @@ class RecordValidator:
                 errors.append(f"quality_score out of range: {record.quality_score}")
 
         # Structured data must have a payload
-        if (
-            record.data_format == DataFormat.STRUCTURED
-            and not record.structured_payload
-        ):
+        if record.data_format == DataFormat.STRUCTURED and not record.structured_payload:
             errors.append("data_format is STRUCTURED but structured_payload is empty")
 
         return errors
@@ -306,18 +298,14 @@ class RecordValidator:
 # Data transformations
 # ---------------------------------------------------------------------------
 
-
 class DataTransformer:
     """Applies cleaning and enrichment transformations to records"""
 
     # Patterns to strip from training data
     _PII_PATTERNS = [
-        (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[SSN_REDACTED]"),  # SSN
-        (re.compile(r"\b\d{16}\b"), "[CARD_REDACTED]"),  # credit cards
-        (
-            re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
-            "[EMAIL_REDACTED]",
-        ),
+        (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), '[SSN_REDACTED]'),        # SSN
+        (re.compile(r'\b\d{16}\b'), '[CARD_REDACTED]'),                    # credit cards
+        (re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'), '[EMAIL_REDACTED]'),
     ]
 
     @classmethod
@@ -336,11 +324,11 @@ class DataTransformer:
             text = getattr(record, attr, "")
             if text:
                 # Collapse excessive whitespace
-                text = re.sub(r"[ \t]+", " ", text)
+                text = re.sub(r'[ \t]+', ' ', text)
                 # Remove null bytes
-                text = text.replace("\x00", "")
+                text = text.replace('\x00', '')
                 # Strip leading/trailing whitespace per line
-                text = "\n".join(line.strip() for line in text.splitlines())
+                text = '\n'.join(line.strip() for line in text.splitlines())
                 setattr(record, attr, text.strip())
         return record
 
@@ -358,8 +346,8 @@ class DataTransformer:
     @classmethod
     def _enrich_metadata(cls, record: PipelineRecord) -> PipelineRecord:
         """Add derived metadata fields"""
-        record.metadata["content_length"] = len(record.input_text) + len(
-            record.output_text
+        record.metadata["content_length"] = (
+            len(record.input_text) + len(record.output_text)
         )
         record.metadata["content_hash"] = record.content_hash()
         record.metadata["has_structured_data"] = (
@@ -368,9 +356,9 @@ class DataTransformer:
         )
         if record.execution_time_ms is not None:
             record.metadata["execution_time_bucket"] = (
-                "fast"
-                if record.execution_time_ms < 500
-                else "medium" if record.execution_time_ms < 5000 else "slow"
+                "fast" if record.execution_time_ms < 500
+                else "medium" if record.execution_time_ms < 5000
+                else "slow"
             )
         return record
 
@@ -378,7 +366,6 @@ class DataTransformer:
 # ---------------------------------------------------------------------------
 # Pipeline processor
 # ---------------------------------------------------------------------------
-
 
 class RealtimeDataPipeline:
     """
@@ -412,6 +399,7 @@ class RealtimeDataPipeline:
     def __init__(self):
         self._redis = None
         self._redis_broker = None
+        self._postgres = None
         self._memory_manager = None
         self._synapse = None
         self._training_store = None
@@ -440,10 +428,13 @@ class RealtimeDataPipeline:
             "total_processed": 0,
             "helox_raw_sent": 0,
             "helox_structured_sent": 0,
+            "helox_postgres_persisted": 0,
+            "helox_postgres_errors": 0,
             "cyrex_stored": 0,
             "validation_failures": 0,
             "duplicates_skipped": 0,
             "quality_filtered": 0,
+            "document_records_deferred": 0,
             "dlq_count": 0,
             "dlq_retried": 0,
             "errors": 0,
@@ -462,7 +453,6 @@ class RealtimeDataPipeline:
         # Redis Streams (for Helox route)
         try:
             from .redis_streams_broker import RedisStreamsBroker
-
             self._redis_broker = RedisStreamsBroker()
             connected = await self._redis_broker.connect()
             if connected:
@@ -474,6 +464,24 @@ class RealtimeDataPipeline:
                 )
         except Exception as e:
             self.logger.warning(f"Redis not available for pipeline: {e}")
+
+        # PostgreSQL (durable training history for Helox)
+        try:
+            from ..database.postgres import get_postgres_manager
+
+            postgres = await get_postgres_manager()
+            if postgres and getattr(postgres, "_pool", None) is not None:
+                self._postgres = postgres
+                await self._ensure_helox_postgres_table()
+                self.logger.info(
+                    "Pipeline connected to PostgreSQL for Helox durable training records"
+                )
+            else:
+                self.logger.warning(
+                    "PostgreSQL unavailable for pipeline durable training records"
+                )
+        except Exception as e:
+            self.logger.warning(f"PostgreSQL not available for pipeline: {e}")
 
         # Memory manager (for Cyrex route)
         try:
@@ -487,7 +495,6 @@ class RealtimeDataPipeline:
         # Synapse broker (for Cyrex live pub/sub)
         try:
             from ..integrations.synapse_broker import get_synapse_broker
-
             self._synapse = await get_synapse_broker()
             self.logger.info("Pipeline connected to Synapse broker")
         except Exception as e:
@@ -496,7 +503,6 @@ class RealtimeDataPipeline:
         # Training data store (local CSV/JSONL fallback)
         try:
             from .training_data_store import get_training_data_store
-
             self._training_store = get_training_data_store()
             self.logger.info("Pipeline connected to TrainingDataStore")
         except Exception as e:
@@ -546,11 +552,7 @@ class RealtimeDataPipeline:
         # Run pre-ingestion hooks
         for hook in self._pre_hooks:
             try:
-                record = (
-                    await hook(record)
-                    if asyncio.iscoroutinefunction(hook)
-                    else hook(record)
-                )
+                record = await hook(record) if asyncio.iscoroutinefunction(hook) else hook(record)
             except Exception as e:
                 self.logger.warning(f"Pre-hook error: {e}")
 
@@ -587,11 +589,7 @@ class RealtimeDataPipeline:
         Convenience method – accepts raw fields without requiring a PipelineRecord.
         Used by agent tool calls and auto-capture.
         """
-        fmt = (
-            DataFormat(data_format)
-            if data_format in DataFormat.__members__.values()
-            else DataFormat.RAW
-        )
+        fmt = DataFormat(data_format) if data_format in DataFormat.__members__.values() else DataFormat.RAW
         if structured_payload and fmt == DataFormat.RAW:
             fmt = DataFormat.STRUCTURED
 
@@ -634,6 +632,7 @@ class RealtimeDataPipeline:
         user_id: Optional[str] = None,
         quality_score: Optional[float] = None,
         tags: Optional[List[str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
         schema_version: str = "1.0",
     ) -> str:
         """
@@ -655,6 +654,7 @@ class RealtimeDataPipeline:
             user_id=user_id,
             quality_score=quality_score,
             tags=tags or [],
+            metadata=metadata or {},
         )
         return await self.ingest(record)
 
@@ -675,6 +675,7 @@ class RealtimeDataPipeline:
             "dedup_window_size": len(self._recent_hashes),
             "initialized": self._initialized,
             "redis_connected": self._redis is not None,
+            "postgres_connected": self._postgres is not None,
             "memory_manager_connected": self._memory_manager is not None,
             "synapse_connected": self._synapse is not None,
         }
@@ -686,6 +687,7 @@ class RealtimeDataPipeline:
             "stats": self.get_stats(),
             "connections": {
                 "redis": self._redis is not None,
+                "postgres": self._postgres is not None,
                 "memory_manager": self._memory_manager is not None,
                 "synapse": self._synapse is not None,
                 "training_store": self._training_store is not None,
@@ -698,6 +700,21 @@ class RealtimeDataPipeline:
                 health["connections"]["redis_healthy"] = True
             except Exception:
                 health["connections"]["redis_healthy"] = False
+                health["healthy"] = False
+
+        # Test PostgreSQL connectivity (non-fatal if unavailable)
+        if self._postgres:
+            try:
+                pg_health = await self._postgres.health_check()
+                health["connections"]["postgres_healthy"] = bool(
+                    pg_health.get("healthy", False)
+                )
+                health["postgres"] = pg_health
+                if not pg_health.get("healthy", False):
+                    health["healthy"] = False
+            except Exception as e:
+                health["connections"]["postgres_healthy"] = False
+                health["connections"]["postgres_error"] = str(e)
                 health["healthy"] = False
         return health
 
@@ -742,26 +759,26 @@ class RealtimeDataPipeline:
                 self.logger.error(f"DLQ retry error: {e}")
 
     async def _metrics_publish_loop(self):
-        """Publish pipeline metrics periodically"""
+        """Publish pipeline metrics periodically via Sugar Glider bus."""
         while True:
             try:
                 await asyncio.sleep(30)  # every 30 seconds
-                if self._redis:
-                    metrics = {
-                        k: (
-                            json.dumps(v)
-                            if not isinstance(v, (str, int, float))
-                            else str(v)
-                        )
-                        for k, v in self._stats.items()
-                    }
-                    metrics["timestamp"] = datetime.utcnow().isoformat()
-                    await self._redis.xadd(
-                        self.METRICS_STREAM,
-                        metrics,
-                        maxlen=5_000,
-                        approximate=True,
-                    )
+                from app.integrations.streaming.bus_publisher import get_bus_publisher
+
+                metrics = {
+                    k: v
+                    for k, v in self._stats.items()
+                }
+                metrics["timestamp"] = datetime.now(timezone.utc).isoformat()
+                metrics["event"] = "pipeline.metrics"
+                metrics["source"] = "cyrex.realtime_data_pipeline"
+                bus = get_bus_publisher(redis_client=self._redis)
+                await bus.publish(
+                    self.METRICS_STREAM,
+                    "pipeline.metrics",
+                    metrics,
+                    maxlen=5_000,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -846,15 +863,32 @@ class RealtimeDataPipeline:
         Send record to Helox for training.
         - Quality gate: records below MIN_HELOX_QUALITY are skipped for training
           (they still go to Cyrex if route=BOTH)
+        - Source documents are not persisted through this generic pipeline.
+          LIS owns document ingestion and publishes document.training when a
+          document-derived artifact is explicitly eligible for training.
         - Raw data  → HELOX_RAW_STREAM
         - Structured → HELOX_STRUCTURED_STREAM
+        - Durable history → cyrex.helox_training_samples (Postgres)
         Fallback: local TrainingDataStore (CSV/JSONL)
         """
-        # Quality gate
+        # Connor's document-routing plan keeps source document ingestion under
+        # LIS ownership. Cyrex should consume document.* streams and produce
+        # artifacts; it should not write arbitrary source documents into the
+        # generic agent-interaction training table.
         if (
-            record.quality_score is not None
-            and record.quality_score < self.MIN_HELOX_QUALITY
+            record.category == DataCategory.DOCUMENT_PROCESSING
+            and not record.metadata.get("training_signal", False)
         ):
+            self._stats["document_records_deferred"] += 1
+            self.logger.info(
+                "Deferred document_processing record from generic Helox route; "
+                "use document.training for eligible document-derived training data",
+                record_id=record.record_id,
+            )
+            return
+
+        # Quality gate
+        if record.quality_score is not None and record.quality_score < self.MIN_HELOX_QUALITY:
             self._stats["quality_filtered"] += 1
             self.logger.debug(
                 f"Helox quality filter: {record.record_id} "
@@ -867,34 +901,41 @@ class RealtimeDataPipeline:
             stream = self.HELOX_STRUCTURED_STREAM
             payload = record.to_helox_training_format()
             stat_key = "helox_structured_sent"
+            stream_type = "structured"
         else:
             stream = self.HELOX_RAW_STREAM
             payload = record.to_helox_raw_format()
             stat_key = "helox_raw_sent"
+            stream_type = "raw"
 
         sent = False
 
-        # Primary: Redis Streams
-        if self._redis:
-            try:
-                redis_payload = {
-                    k: json.dumps(v) if not isinstance(v, str) else v
-                    for k, v in payload.items()
-                    if v is not None
-                }
-                await self._redis.xadd(
-                    stream,
-                    redis_payload,
-                    maxlen=50_000,
-                    approximate=True,
-                )
+        # Durable history in Postgres (side-effect for replay/historical training).
+        if self._postgres:
+            await self._persist_helox_record_to_postgres(
+                record=record,
+                payload=payload,
+                stream_type=stream_type,
+            )
+
+        # Primary: Sugar Glider bus (falls back to Redis XADD)
+        try:
+            from app.integrations.streaming.bus_publisher import get_bus_publisher
+
+            bus = get_bus_publisher(redis_client=self._redis)
+            entry_id = await bus.publish(
+                stream,
+                f"helox.training.{stream_type}",
+                payload,
+            )
+            if entry_id:
                 sent = True
                 self.logger.debug(
                     f"Helox route ({record.data_format.value}): "
-                    f"sent {record.record_id} via Redis Streams"
+                    f"sent {record.record_id} via bus publisher ({entry_id})"
                 )
-            except Exception as e:
-                self.logger.warning(f"Helox Redis push failed: {e}")
+        except Exception as e:
+            self.logger.warning(f"Helox bus publish failed: {e}")
 
         # Fallback: local file
         if not sent and self._training_store:
@@ -933,10 +974,7 @@ class RealtimeDataPipeline:
         if self._memory_manager:
             try:
                 from .types import MemoryType
-
-                importance = (
-                    record.quality_score if record.quality_score is not None else 0.6
-                )
+                importance = record.quality_score if record.quality_score is not None else 0.6
                 await self._memory_manager.store_memory(
                     content=payload["content"],
                     memory_type=MemoryType.SEMANTIC,
@@ -996,25 +1034,29 @@ class RealtimeDataPipeline:
                 f"Record {record.record_id} exhausted retries ({record.max_retries}), "
                 f"errors: {record.errors}"
             )
-            # Persist to Redis DLQ stream if available
-            if self._redis:
-                try:
-                    dlq_payload = {
-                        "record_id": record.record_id,
-                        "category": record.category.value,
-                        "errors": json.dumps(record.errors),
-                        "retry_count": str(record.retry_count),
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "input_text": record.input_text[:500],  # truncate
-                    }
-                    await self._redis.xadd(
-                        self.DLQ_STREAM,
-                        dlq_payload,
-                        maxlen=10_000,
-                        approximate=True,
-                    )
-                except Exception:
-                    pass
+            # Persist to DLQ stream via Sugar Glider bus when available
+            try:
+                from app.integrations.streaming.bus_publisher import get_bus_publisher
+
+                dlq_payload = {
+                    "event": "pipeline.dead_letter",
+                    "source": "cyrex.realtime_data_pipeline",
+                    "record_id": record.record_id,
+                    "category": record.category.value,
+                    "errors": record.errors,
+                    "retry_count": record.retry_count,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "input_text": record.input_text[:500],  # truncate
+                }
+                bus = get_bus_publisher(redis_client=self._redis)
+                await bus.publish(
+                    self.DLQ_STREAM,
+                    "pipeline.dead_letter",
+                    dlq_payload,
+                    maxlen=10_000,
+                )
+            except Exception:
+                pass
             return
 
         try:
@@ -1030,7 +1072,7 @@ class RealtimeDataPipeline:
     def _is_duplicate(self, content_hash: str) -> bool:
         """Check if we've seen this content recently"""
         if content_hash in self._recent_hashes:
-            if self._recent_hashes[content_hash] > datetime.utcnow():
+            if self._recent_hashes[content_hash] > datetime.now(timezone.utc):
                 return True
             else:
                 del self._recent_hashes[content_hash]
@@ -1038,16 +1080,145 @@ class RealtimeDataPipeline:
 
     def _mark_seen(self, content_hash: str):
         """Mark content as seen within the dedup window"""
-        self._recent_hashes[content_hash] = datetime.utcnow() + timedelta(
+        self._recent_hashes[content_hash] = datetime.now(timezone.utc) + timedelta(
             seconds=self._dedup_window_seconds
         )
 
     def _prune_dedup_window(self):
         """Remove expired entries from the dedup window"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired = [h for h, exp in self._recent_hashes.items() if exp <= now]
         for h in expired:
             del self._recent_hashes[h]
+
+    # ------------------------------------------------------------------
+    # Helox durable Postgres
+    # ------------------------------------------------------------------
+
+    async def _ensure_helox_postgres_table(self):
+        """
+        Ensure durable table for Helox training records exists.
+
+        DDL is centralized in `app.pipeline.helox_training_schema` so
+        TrainingEmitter and this pipeline cannot drift.
+        """
+        if not self._postgres:
+            return
+
+        from app.pipeline.helox_training_schema import HELOX_TRAINING_SAMPLES_DDL
+
+        await self._postgres.execute(HELOX_TRAINING_SAMPLES_DDL)
+
+    @staticmethod
+    def _build_training_text(record: PipelineRecord, payload: Dict[str, Any]) -> str:
+        """Normalize a single training text field used by Helox PostgresDataSource."""
+        parts: List[str] = []
+        for value in [
+            record.instruction or payload.get("instruction"),
+            record.input_text or payload.get("input"),
+            record.output_text or payload.get("output"),
+            payload.get("text"),
+        ]:
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text and text not in parts:
+                parts.append(text)
+
+        if parts:
+            return "\n\n".join(parts)
+
+        return json.dumps(payload, default=str)
+
+    @staticmethod
+    def _quality_score_for_postgres(
+        record: PipelineRecord,
+        payload: Dict[str, Any],
+    ) -> Optional[float]:
+        """Return the first valid quality score from payload or record metadata."""
+        for value in (payload.get("quality_score"), record.quality_score):
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    async def _persist_helox_record_to_postgres(
+        self,
+        record: PipelineRecord,
+        payload: Dict[str, Any],
+        stream_type: str,
+    ):
+        """Persist Helox-bound training payload to durable Postgres history."""
+        if not self._postgres:
+            return
+
+        try:
+            text = self._build_training_text(record, payload)
+            category = payload.get("category") or record.category.value
+            quality_score = self._quality_score_for_postgres(record, payload)
+            producer = str(payload.get("producer") or record.producer_name())
+
+            await self._postgres.execute(
+                """
+                INSERT INTO cyrex.helox_training_samples (
+                    record_id, stream_type, category, text, instruction,
+                    input_text, output_text, context, quality_score, producer,
+                    agent_id, session_id, user_id, tool_name, model_name,
+                    schema_version, payload
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5,
+                    $6, $7, $8, $9, $10,
+                    $11, $12, $13, $14, $15,
+                    $16, $17::jsonb
+                )
+                ON CONFLICT (record_id) DO UPDATE SET
+                    stream_type = EXCLUDED.stream_type,
+                    category = EXCLUDED.category,
+                    text = EXCLUDED.text,
+                    instruction = EXCLUDED.instruction,
+                    input_text = EXCLUDED.input_text,
+                    output_text = EXCLUDED.output_text,
+                    context = EXCLUDED.context,
+                    quality_score = EXCLUDED.quality_score,
+                    producer = EXCLUDED.producer,
+                    agent_id = EXCLUDED.agent_id,
+                    session_id = EXCLUDED.session_id,
+                    user_id = EXCLUDED.user_id,
+                    tool_name = EXCLUDED.tool_name,
+                    model_name = EXCLUDED.model_name,
+                    schema_version = EXCLUDED.schema_version,
+                    payload = EXCLUDED.payload,
+                    updated_at = NOW()
+                """,
+                record.record_id,
+                stream_type,
+                category,
+                text,
+                record.instruction or payload.get("instruction"),
+                record.input_text or payload.get("input"),
+                record.output_text or payload.get("output"),
+                record.context,
+                quality_score,
+                producer,
+                record.agent_id,
+                record.session_id,
+                record.user_id,
+                record.tool_name,
+                record.model_name,
+                record.schema_version,
+                json.dumps(payload, default=str),
+            )
+            self._stats["helox_postgres_persisted"] += 1
+        except Exception as e:
+            self._stats["helox_postgres_errors"] += 1
+            self.logger.warning(
+                f"Failed to persist Helox training record {record.record_id} to Postgres: {e}",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Helpers

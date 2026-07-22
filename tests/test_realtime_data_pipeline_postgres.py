@@ -1,0 +1,286 @@
+import importlib.util
+import json
+import pathlib
+import sys
+import types
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+# Load realtime_data_pipeline directly without importing app.core.__init__,
+# which pulls heavyweight optional runtime integrations.
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+APP_DIR = REPO_ROOT / "app"
+CORE_DIR = APP_DIR / "core"
+MODULE_PATH = CORE_DIR / "realtime_data_pipeline.py"
+
+if "app" not in sys.modules:
+    app_pkg = types.ModuleType("app")
+    app_pkg.__path__ = [str(APP_DIR)]
+    sys.modules["app"] = app_pkg
+
+if "app.core" not in sys.modules:
+    core_pkg = types.ModuleType("app.core")
+    core_pkg.__path__ = [str(CORE_DIR)]
+    sys.modules["app.core"] = core_pkg
+
+module_spec = importlib.util.spec_from_file_location(
+    "app.core.realtime_data_pipeline",
+    MODULE_PATH,
+)
+if module_spec is None or module_spec.loader is None:
+    raise RuntimeError("Unable to load realtime_data_pipeline module for tests")
+
+realtime_module = importlib.util.module_from_spec(module_spec)
+sys.modules["app.core.realtime_data_pipeline"] = realtime_module
+module_spec.loader.exec_module(realtime_module)
+
+DataCategory = realtime_module.DataCategory
+DataFormat = realtime_module.DataFormat
+PipelineRecord = realtime_module.PipelineRecord
+RealtimeDataPipeline = realtime_module.RealtimeDataPipeline
+RouteTarget = realtime_module.RouteTarget
+
+
+class DummyPostgres:
+    def __init__(self, healthy: bool = True, fail_execute: bool = False):
+        self.healthy = healthy
+        self.fail_execute = fail_execute
+        self.calls = []
+
+    async def execute(self, query, *args):
+        self.calls.append((query, args))
+        if self.fail_execute:
+            raise RuntimeError("postgres write failed")
+        return "OK"
+
+    async def health_check(self):
+        return {"healthy": self.healthy, "version": "test"}
+
+
+def build_record(
+    *, data_format: DataFormat = DataFormat.RAW, quality_score: float = 0.9
+):
+    return PipelineRecord(
+        category=DataCategory.AGENT_INTERACTION,
+        route=RouteTarget.HELOX,
+        data_format=data_format,
+        instruction="Respond to this",
+        input_text="hello",
+        output_text="world",
+        quality_score=quality_score,
+        agent_id="agent-1",
+        session_id="session-1",
+        user_id="user-1",
+        model_name="model-1",
+    )
+
+
+def build_document_record(*, training_signal: bool = False):
+    record = PipelineRecord(
+        category=DataCategory.DOCUMENT_PROCESSING,
+        route=RouteTarget.HELOX,
+        data_format=DataFormat.STRUCTURED,
+        input_text="source document text for routing",
+        output_text="document extraction output",
+        structured_payload={"clauses": ["A", "B"]},
+        quality_score=0.9,
+    )
+    if training_signal:
+        record.metadata["training_signal"] = True
+    return record
+
+
+@pytest.mark.asyncio
+async def test_ensure_helox_postgres_table_creates_real_table():
+    pipeline = RealtimeDataPipeline()
+    pg = DummyPostgres()
+    pipeline._postgres = pg
+
+    await pipeline._ensure_helox_postgres_table()
+
+    statements = [call[0] for call in pg.calls]
+    assert any("CREATE SCHEMA IF NOT EXISTS cyrex" in stmt for stmt in statements)
+    assert any(
+        "CREATE TABLE IF NOT EXISTS cyrex.helox_training_samples" in stmt
+        for stmt in statements
+    )
+
+
+@pytest.mark.asyncio
+async def test_persist_to_postgres_upserts_payload():
+    pipeline = RealtimeDataPipeline()
+    pg = DummyPostgres()
+    pipeline._postgres = pg
+
+    record = build_record()
+    payload = record.to_helox_raw_format()
+
+    await pipeline._persist_helox_record_to_postgres(record, payload, "raw")
+
+    assert pipeline._stats["helox_postgres_persisted"] == 1
+    assert pipeline._stats["helox_postgres_errors"] == 0
+    assert len(pg.calls) == 1
+
+    query, args = pg.calls[0]
+    assert "INSERT INTO cyrex.helox_training_samples" in query
+    assert args[0] == record.record_id
+    assert args[1] == "raw"
+    assert args[2] == DataCategory.AGENT_INTERACTION.value
+    parsed_payload = json.loads(args[-1])
+    assert parsed_payload["id"] == record.record_id
+    assert parsed_payload["producer"] == "cyrex.realtime_data_pipeline"
+    assert args[9] == "cyrex.realtime_data_pipeline"
+
+
+@pytest.mark.asyncio
+async def test_persist_to_postgres_keeps_concrete_sample_producer():
+    pipeline = RealtimeDataPipeline()
+    pg = DummyPostgres()
+    pipeline._postgres = pg
+
+    record = build_record()
+    record.metadata["producer"] = "cyrex.agent_tool.submit_training_data"
+    payload = record.to_helox_raw_format()
+
+    await pipeline._persist_helox_record_to_postgres(record, payload, "raw")
+
+    query, args = pg.calls[0]
+    parsed_payload = json.loads(args[-1])
+
+    assert "producer = EXCLUDED.producer" in query
+    assert args[9] == "cyrex.agent_tool.submit_training_data"
+    assert parsed_payload["producer"] == "cyrex.agent_tool.submit_training_data"
+
+
+def test_build_training_text_prefers_full_interaction_context_over_payload_summary():
+    record = build_record()
+    payload = {
+        "text": "short summary",
+        "instruction": "payload instruction",
+        "input": "payload input",
+        "output": "payload output",
+    }
+
+    text = RealtimeDataPipeline._build_training_text(record, payload)
+
+    assert "Respond to this" in text
+    assert "hello" in text
+    assert "world" in text
+    assert "short summary" in text
+    assert text.index("Respond to this") < text.index("short summary")
+
+
+def test_quality_score_for_postgres_falls_back_to_record_value():
+    record = build_record(quality_score=0.87)
+    payload = {"quality_score": "not-a-number"}
+
+    assert RealtimeDataPipeline._quality_score_for_postgres(record, payload) == 0.87
+
+
+@pytest.mark.asyncio
+async def test_ingest_structured_preserves_metadata_for_producer_lineage():
+    pipeline = RealtimeDataPipeline()
+    captured = []
+
+    async def fake_ingest(record):
+        captured.append(record)
+        return record.record_id
+
+    pipeline.ingest = fake_ingest
+
+    await pipeline.ingest_structured(
+        {"intent": "qa"},
+        metadata={"producer": "cyrex.agent_tool.submit_structured_data"},
+    )
+
+    assert captured[0].metadata["producer"] == "cyrex.agent_tool.submit_structured_data"
+
+
+@pytest.mark.asyncio
+async def test_route_to_helox_persists_postgres_and_streams_redis():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres()
+    pipeline._redis = AsyncMock()
+
+    record = build_record(data_format=DataFormat.RAW)
+    await pipeline._route_to_helox(record)
+
+    pipeline._redis.xadd.assert_called_once()
+    assert pipeline._stats["helox_raw_sent"] == 1
+    assert pipeline._stats["helox_postgres_persisted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_route_to_helox_postgres_failure_does_not_block_redis_send():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres(fail_execute=True)
+    pipeline._redis = AsyncMock()
+    pipeline.logger = MagicMock()
+
+    record = build_record(data_format=DataFormat.STRUCTURED)
+    record.structured_payload = {"intent": "qa", "confidence": 0.95}
+    await pipeline._route_to_helox(record)
+
+    pipeline._redis.xadd.assert_called_once()
+    assert pipeline._stats["helox_structured_sent"] == 1
+    assert pipeline._stats["helox_postgres_errors"] == 1
+    postgres_warning = next(
+        call
+        for call in pipeline.logger.warning.call_args_list
+        if "Failed to persist Helox training record" in call.args[0]
+    )
+    assert postgres_warning.kwargs["exc_info"] is True
+
+
+@pytest.mark.asyncio
+async def test_quality_filter_skips_training_routes():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres()
+    pipeline._redis = AsyncMock()
+
+    record = build_record(quality_score=0.1)
+    await pipeline._route_to_helox(record)
+
+    pipeline._redis.xadd.assert_not_called()
+    assert len(pipeline._postgres.calls) == 0
+    assert pipeline._stats["quality_filtered"] == 1
+
+
+@pytest.mark.asyncio
+async def test_source_documents_are_deferred_from_generic_helox_route():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres()
+    pipeline._redis = AsyncMock()
+
+    await pipeline._route_to_helox(build_document_record(training_signal=False))
+
+    pipeline._redis.xadd.assert_not_called()
+    assert len(pipeline._postgres.calls) == 0
+    assert pipeline._stats["document_records_deferred"] == 1
+
+
+@pytest.mark.asyncio
+async def test_document_training_signal_can_use_generic_training_route():
+    pipeline = RealtimeDataPipeline()
+    pipeline._postgres = DummyPostgres()
+    pipeline._redis = AsyncMock()
+
+    await pipeline._route_to_helox(build_document_record(training_signal=True))
+
+    pipeline._redis.xadd.assert_called_once()
+    assert pipeline._stats["helox_structured_sent"] == 1
+    assert pipeline._stats["helox_postgres_persisted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_health_check_includes_postgres_status():
+    pipeline = RealtimeDataPipeline()
+    pipeline._initialized = True
+    pipeline._postgres = DummyPostgres(healthy=True)
+
+    health = await pipeline.health_check()
+
+    assert health["connections"]["postgres"] is True
+    assert health["connections"]["postgres_healthy"] is True
+    assert health["postgres"]["healthy"] is True

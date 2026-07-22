@@ -119,6 +119,7 @@ class PipelineAutoCapture:
                 execution_time_ms=duration_ms,
                 tags=self._build_interaction_tags(context_sources, intermediate_steps),
                 metadata={
+                    "producer": "cyrex.orchestrator.auto_capture",
                     "context_sources": context_sources,
                     "safety_scores": safety_scores or {},
                     "tool_calls_count": len(intermediate_steps) if intermediate_steps else 0,
@@ -175,6 +176,7 @@ class PipelineAutoCapture:
                 execution_time_ms=execution_time_ms,
                 tags=["tool_execution", tool_name, "success" if success else "failure"],
                 metadata={
+                    "producer": "cyrex.auto_capture.tool_execution",
                     "tool_name": tool_name,
                     "success": success,
                     "error": error,
@@ -224,7 +226,10 @@ class PipelineAutoCapture:
                 user_id=user_id,
                 quality_score=0.6,  # error recovery is valuable but uncertain quality
                 tags=["error_recovery"],
-                metadata={"original_input": original_input},
+                metadata={
+                    "producer": "cyrex.orchestrator.error_recovery_auto_capture",
+                    "original_input": original_input,
+                },
             )
         except Exception as e:
             self.logger.warning(f"Auto-capture error recovery failed: {e}")
@@ -270,6 +275,11 @@ class PipelineAutoCapture:
                 session_id=session_id,
                 quality_score=quality,
                 tags=["workflow", workflow_type],
+                metadata={
+                    "producer": "cyrex.auto_capture.workflow_result",
+                    "workflow_id": workflow_id,
+                    "workflow_type": workflow_type,
+                },
             )
         except Exception as e:
             self.logger.warning(f"Auto-capture workflow result failed: {e}")
@@ -308,6 +318,7 @@ class PipelineAutoCapture:
                 quality_score=quality,
                 tags=["user_feedback", "correction" if rating and rating < 0.5 else "positive"],
                 metadata={
+                    "producer": "cyrex.auto_capture.user_feedback",
                     "feedback_text": feedback,
                     "rating": rating,
                 },
@@ -347,9 +358,13 @@ class PipelineAutoCapture:
                 user_id=user_id,
                 quality_score=quality_score,
                 tags=["document_processing", document_type],
+                metadata={
+                    "producer": "cyrex.auto_capture.document_processing",
+                    "document_type": document_type,
+                },
             )
 
-            # Also send raw text pair for training
+            # Also send an explicit document-derived extraction signal for training.
             await self._pipeline.ingest_raw(
                 input_text=document_text[:10000],  # truncate very large docs
                 output_text=json.dumps(extracted_data, default=str),
@@ -360,6 +375,11 @@ class PipelineAutoCapture:
                 agent_id=agent_id,
                 quality_score=quality_score,
                 tags=["document_processing", document_type, "extraction"],
+                metadata={
+                    "producer": "cyrex.auto_capture.document_extraction_training_signal",
+                    "training_signal": True,
+                    "document_type": document_type,
+                },
             )
         except Exception as e:
             self.logger.warning(f"Auto-capture document processing failed: {e}")
@@ -400,6 +420,10 @@ class PipelineAutoCapture:
                 model_name=model_name,
                 quality_score=0.7,
                 tags=["tool_execution", tool_name, "intermediate_step"],
+                metadata={
+                    "producer": "cyrex.orchestrator.intermediate_step_auto_capture",
+                    "tool_name": tool_name,
+                },
             )
         except Exception as e:
             self.logger.debug(f"Failed to capture intermediate step: {e}")
