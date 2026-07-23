@@ -46,5 +46,8 @@ jobs:
       - name: Ruff
         run: poetry run ruff check app/pipeline app/training tests/contract tests/pipeline tests/training tests/fakes
 
+      - name: Cross-track import gate
+        run: poetry run python scripts/ci/check_cross_track_imports.py
+
       - name: Unit tests
         run: poetry run pytest tests/contract -q
