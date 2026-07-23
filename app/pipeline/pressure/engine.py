@@ -4,26 +4,35 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from app.database.postgres import get_postgres_manager
 from app.pipeline.contracts.models import PressureCell
 from app.pipeline.contracts.pressure_events import PressureEvent
+from app.settings import settings
 
 
 class PressureEngine:
     """Project pressure events into PostgreSQL read-model rows."""
 
-    _WEIGHTS = {
-        "pass_discrepancy": 0.35,
-        "reflect_failure": 0.25,
-        "low_confidence_field": 0.15,
-        "duel_disagreement": 0.25,
-    }
-
-    def __init__(self, postgres: Any = None, *, fault_zone_threshold: float = 0.5) -> None:
+    def __init__(
+        self,
+        postgres: Any = None,
+        *,
+        fault_zone_threshold: float = 0.5,
+        weights: Mapping[str, float] | None = None,
+    ) -> None:
         self._postgres = postgres
         self.fault_zone_threshold = fault_zone_threshold
+        self._weights = dict(
+            weights
+            or {
+                "pass_discrepancy": settings.PRESSURE_PASS_DISCREPANCY_WEIGHT,
+                "reflect_failure": settings.PRESSURE_REFLECT_FAILURE_WEIGHT,
+                "low_confidence_field": settings.PRESSURE_LOW_CONFIDENCE_WEIGHT,
+                "duel_disagreement": settings.PRESSURE_DUEL_DISAGREEMENT_WEIGHT,
+            }
+        )
 
     async def _db(self) -> Any:
         return self._postgres or await get_postgres_manager()
@@ -41,7 +50,7 @@ class PressureEngine:
         document_id, section_id, page = key
         score = min(
             1.0,
-            sum(counts[name] * weight for name, weight in self._WEIGHTS.items()),
+            sum(counts[name] * weight for name, weight in self._weights.items()),
         )
         return PressureCell(
             document_id=document_id,
@@ -152,9 +161,3 @@ class PressureEngine:
                 )
             cells.append(cell)
         return cells
-
-    async def process_events(self, events: Iterable[PressureEvent]) -> list[PressureCell]:
-        return await self.accept_many(events)
-
-    async def process(self, events: Iterable[PressureEvent]) -> list[PressureCell]:
-        return await self.accept_many(events)

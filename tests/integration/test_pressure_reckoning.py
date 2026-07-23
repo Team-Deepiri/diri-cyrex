@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -17,11 +17,12 @@ from app.pipeline.registry.reckoning_store import PostgresReckoningStore
 from app.routes.pressure import get_document_pressure
 
 
-class DatabaseShape:
-    """Minimal asyncpg-compatible store for the integration workflow."""
+class ReckoningDatabase:
+    """Async database double exposing only the read interface under test."""
 
     def __init__(self) -> None:
-        self.reckoning_rows = [
+        self.fetch = AsyncMock(
+            return_value=[
             {
                 "field_name": "base_rent",
                 "record_json": {"predicted_mean": 4500},
@@ -32,59 +33,55 @@ class DatabaseShape:
                 "last_prior_update": None,
                 "corpus_doc_count": 12,
             }
-        ]
-        self.cells: dict[tuple[str, str, int], dict] = {}
-        self.metrics: dict[tuple[str, str, int], dict] = {}
-        self.artifacts: dict[tuple[str, str, int], set[str]] = {}
+            ]
+        )
 
-    async def execute(self, query: str, *args):
-        if "INSERT INTO cyrex.pressure_cells" in query:
-            key = (args[0], args[1], args[2])
-            self.cells[key] = {
-                "document_id": args[0],
-                "section_id": args[1],
-                "page": args[2],
-                "score": args[3],
-                "is_fault_zone": args[4],
-                "cell_json": json.loads(args[5]),
-            }
-        elif "INSERT INTO cyrex.pressure_cell_metrics" in query:
-            key = (args[0], args[1], args[2])
-            self.metrics[key] = {
-                "discrepancy_count": args[3],
-                "reflect_failures": args[4],
-                "low_confidence_count": args[5],
-                "duel_disagreements": args[6],
-            }
-        elif "INSERT INTO cyrex.pressure_cell_artifacts" in query:
-            key = (args[0], args[1], args[2])
-            self.artifacts.setdefault(key, set()).add(args[3])
 
-    async def fetch(self, query: str, *args):
-        if "FROM cyrex.reckoning_records" in query:
-            return self.reckoning_rows
-        if "FROM cyrex.pressure_cells" in query:
-            document_id = args[0] if args else None
-            rows = []
-            for key, cell in self.cells.items():
-                if document_id is not None and key[0] != document_id:
-                    continue
-                rows.append(
-                    {
-                        **cell,
-                        **self.metrics[key],
-                        "artifact_ids": sorted(self.artifacts.get(key, set())),
-                    }
-                )
-            return rows
-        raise AssertionError(f"Unexpected query: {query}")
+class PressureDatabase:
+    """Async database double for pressure persistence and read operations."""
+
+    def __init__(self) -> None:
+        self.execute = AsyncMock()
+        self.fetch = AsyncMock(
+            return_value=[
+                {
+                    "document_id": "lease_001",
+                    "section_id": "financial_terms",
+                    "page": 1,
+                    "score": 0.75,
+                    "is_fault_zone": True,
+                    "cell_json": {
+                        "document_id": "lease_001",
+                        "section_id": "financial_terms",
+                        "page": 1,
+                        "score": 0.75,
+                        "is_fault_zone": True,
+                        "discrepancy_count": 1,
+                        "reflect_failures": 0,
+                        "low_confidence_count": 1,
+                        "duel_disagreements": 1,
+                        "drill_down_artifact_ids": [
+                            "art_001",
+                            "art_003",
+                            "art_duel_001",
+                        ],
+                    },
+                    "discrepancy_count": 1,
+                    "reflect_failures": 0,
+                    "low_confidence_count": 1,
+                    "duel_disagreements": 1,
+                    "artifact_ids": ["art_001", "art_003", "art_duel_001"],
+                }
+            ]
+        )
 
 
 @pytest.mark.asyncio
 async def test_reckoning_and_pressure_database_read_models():
-    db = DatabaseShape()
+    reckoning_db = ReckoningDatabase()
+    pressure_db = PressureDatabase()
 
-    reckoning = await PostgresReckoningStore(db).get_reckoning("lease_001")
+    reckoning = await PostgresReckoningStore(reckoning_db).get_reckoning("lease_001")
     assert reckoning[0].field_name == "base_rent"
     assert reckoning[0].actual_value == 4600
     assert reckoning[0].sigma_delta == 1.4
@@ -113,9 +110,10 @@ async def test_reckoning_and_pressure_database_read_models():
             confidence=0.52,
         ),
     ]
-    await PressureEngine(db).accept_many(events)
+    await PressureEngine(pressure_db).accept_many(events)
+    assert pressure_db.execute.await_count == 8
 
-    pressure = PostgresPressureStore(db)
+    pressure = PostgresPressureStore(pressure_db)
     cells = await pressure.get_pressure("lease_001")
     assert len(cells) == 1
     assert cells[0].score == pytest.approx(0.75)

@@ -2,22 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from app.database.postgres import get_postgres_manager
 from app.pipeline.contracts.models import PredictionRecord
 from app.pipeline.contracts.ports import ReckoningReadPort
-
-
-def _json_value(value: Any, default: Any) -> Any:
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, str):
-        return json.loads(value)
-    return value
+from app.utils.json_utils import _json_value
 
 
 class PostgresReckoningStore(ReckoningReadPort):

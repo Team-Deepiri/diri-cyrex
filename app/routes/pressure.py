@@ -7,10 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.database.postgres import get_postgres_manager
 from app.pipeline.contracts.models import PressureCell
 from app.pipeline.contracts.ports import PressureReadModelPort
-from app.pipeline.registry.pressure_store import PostgresPressureStore
 
 
 class PressureMapResponse(BaseModel):
@@ -21,7 +19,8 @@ class PressureMapResponse(BaseModel):
 
 
 async def get_pressure_read_model() -> PressureReadModelPort:
-    return PostgresPressureStore(await get_postgres_manager())
+    """Application-composition hook for the pressure read-model adapter."""
+    raise RuntimeError("Pressure read model dependency is not configured")
 
 
 router = APIRouter(prefix="/api/v1/pressure", tags=["pressure"])

@@ -2,7 +2,10 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from .routes.artifacts import router as artifacts_router
-from .routes.pressure import router as pressure_router
+from .routes.pressure import (
+    get_pressure_read_model,
+    router as pressure_router,
+)
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from collections import defaultdict
@@ -49,6 +52,8 @@ from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.documents import router as documents_router
 from .routes.training_api import router as training_router
+from .database.postgres import get_postgres_manager
+from .pipeline.registry.pressure_store import PostgresPressureStore
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -407,6 +412,13 @@ app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
 app.include_router(pressure_router)
+
+
+async def _get_postgres_pressure_read_model():
+    return PostgresPressureStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
 
 if __name__ == "__main__":
     import uvicorn
