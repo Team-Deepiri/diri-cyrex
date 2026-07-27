@@ -16,6 +16,12 @@ from app.pipeline.registry.pressure_store import PostgresPressureStore
 from app.pipeline.registry.reckoning_store import PostgresReckoningStore
 from app.routes.pressure import get_document_pressure
 
+# UUID strings aligned with platform cyrex migrations (document_id / artifact_id).
+DOC_ID = "11111111-1111-4111-8111-111111111111"
+ART_001 = "22222222-2222-4222-8222-222222222221"
+ART_003 = "22222222-2222-4222-8222-222222222223"
+ART_DUEL = "22222222-2222-4222-8222-222222222224"
+
 
 class ReckoningDatabase:
     """Async database double exposing only the read interface under test."""
@@ -45,13 +51,13 @@ class PressureDatabase:
         self.fetch = AsyncMock(
             return_value=[
                 {
-                    "document_id": "lease_001",
+                    "document_id": DOC_ID,
                     "section_id": "financial_terms",
                     "page": 1,
                     "score": 0.75,
                     "is_fault_zone": True,
                     "cell_json": {
-                        "document_id": "lease_001",
+                        "document_id": DOC_ID,
                         "section_id": "financial_terms",
                         "page": 1,
                         "score": 0.75,
@@ -60,17 +66,13 @@ class PressureDatabase:
                         "reflect_failures": 0,
                         "low_confidence_count": 1,
                         "duel_disagreements": 1,
-                        "drill_down_artifact_ids": [
-                            "art_001",
-                            "art_003",
-                            "art_duel_001",
-                        ],
+                        "drill_down_artifact_ids": [ART_001, ART_003, ART_DUEL],
                     },
                     "discrepancy_count": 1,
                     "reflect_failures": 0,
                     "low_confidence_count": 1,
                     "duel_disagreements": 1,
-                    "artifact_ids": ["art_001", "art_003", "art_duel_001"],
+                    "artifact_ids": [ART_001, ART_003, ART_DUEL],
                 }
             ]
         )
@@ -81,31 +83,31 @@ async def test_reckoning_and_pressure_database_read_models():
     reckoning_db = ReckoningDatabase()
     pressure_db = PressureDatabase()
 
-    reckoning = await PostgresReckoningStore(reckoning_db).get_reckoning("lease_001")
+    reckoning = await PostgresReckoningStore(reckoning_db).get_reckoning(DOC_ID)
     assert reckoning[0].field_name == "base_rent"
     assert reckoning[0].actual_value == 4600
     assert reckoning[0].sigma_delta == 1.4
 
     events = [
         PassDiscrepancy(
-            document_id="lease_001",
+            document_id=DOC_ID,
             section_id="financial_terms",
             page=1,
-            artifact_id="art_001",
+            artifact_id=ART_001,
             field_name="base_rent",
         ),
         DuelDisagreement(
-            document_id="lease_001",
+            document_id=DOC_ID,
             section_id="financial_terms",
             page=1,
-            artifact_id="art_duel_001",
+            artifact_id=ART_DUEL,
             field_name="notice_period",
         ),
         LowConfidenceField(
-            document_id="lease_001",
+            document_id=DOC_ID,
             section_id="financial_terms",
             page=1,
-            artifact_id="art_003",
+            artifact_id=ART_003,
             field_name="maintenance_obligation",
             confidence=0.52,
         ),
@@ -114,13 +116,13 @@ async def test_reckoning_and_pressure_database_read_models():
     assert pressure_db.execute.await_count == 8
 
     pressure = PostgresPressureStore(pressure_db)
-    cells = await pressure.get_pressure("lease_001")
+    cells = await pressure.get_pressure(DOC_ID)
     assert len(cells) == 1
     assert cells[0].score == pytest.approx(0.75)
     assert cells[0].is_fault_zone is True
     assert cells[0].low_confidence_count == 1
-    assert cells[0].drill_down_artifact_ids == ["art_001", "art_003", "art_duel_001"]
+    assert cells[0].drill_down_artifact_ids == [ART_001, ART_003, ART_DUEL]
 
-    response = await get_document_pressure("lease_001", store=pressure)
+    response = await get_document_pressure(DOC_ID, store=pressure)
     assert response.fault_zone_count == 1
     assert response.max_score == pytest.approx(0.75)
