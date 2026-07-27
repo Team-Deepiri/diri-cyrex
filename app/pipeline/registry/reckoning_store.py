@@ -11,7 +11,10 @@ from app.utils.json_utils import _json_value
 
 
 class PostgresReckoningStore(ReckoningReadPort):
-    """Read-only adapter over the reckoning PostgreSQL tables."""
+    """Read-only adapter over the reckoning PostgreSQL tables.
+
+    ``document_id`` must be a UUID string matching ``cyrex.documents``.
+    """
 
     def __init__(self, postgres: Any = None) -> None:
         self._postgres = postgres
@@ -36,7 +39,7 @@ class PostgresReckoningStore(ReckoningReadPort):
               ON p.field_name = r.field_name
             LEFT JOIN cyrex.reckoning_corpus_stats s
               ON s.field_name = r.field_name
-            WHERE r.document_id = $1
+            WHERE r.document_id = $1::uuid
             ORDER BY r.field_name
             """,
             document_id,

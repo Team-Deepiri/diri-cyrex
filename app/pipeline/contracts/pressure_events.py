@@ -18,7 +18,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class PressureEventBase(BaseModel):
-    """Base shape for all pressure events."""
+    """Base shape for all pressure events.
+
+    Persistence note: Postgres stores ``document_id`` / ``artifact_id`` as UUID
+    and ``section_id`` as TEXT. Contract fields stay ``str``; callers should
+    pass UUID strings for document/artifact ids when writing to Postgres.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
