@@ -11,6 +11,9 @@ ARG DEVICE_TYPE=auto
 ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 ARG POETRY_VERSION=1.8.5
 ARG POETRY_EXTRAS=gpu
+ARG BEDD_IMAGE=ghcr.io/team-deepiri/bedd:0.8
+
+FROM ${BEDD_IMAGE} AS bedd
 
 FROM ${BASE_IMAGE} AS base
 
@@ -57,7 +60,10 @@ RUN ln -sf /deepiri-modelkit ../deepiri-modelkit && \
       IFS=, read -ra xs <<< "$extras"; \
       for x in "${xs[@]}"; do x="${x// /}"; [ -n "$x" ] && args+=(--extras "$x"); done; \
       poetry "${args[@]}"; \
-    '
+    ' && \
+    # Monorepo COPY wins over the git tag Poetry resolved — keeps sidecar_utils in sync with platform.
+    pip install --no-cache-dir --force-reinstall --no-deps /deepiri-modelkit && \
+    python -c "from deepiri_modelkit.streaming.sidecar_utils import env_float, sidecar_payload_from_fields; print('✓ modelkit sidecar_utils OK')"
 
 RUN python -c "import numpy; import fastapi; import redis; print('✓ core deps OK')" && \
     python -c "import torch; print('✓ torch', torch.__version__)" && \
@@ -78,11 +84,9 @@ COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
 COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
 
-
 # Bedd runtime (Bun-style) — glibc binary
-ARG BEDD_IMAGE=ghcr.io/team-deepiri/bedd:0.6
-COPY --from=${BEDD_IMAGE} /usr/local/bin/bedd /usr/local/bin/bedd
-COPY --from=${BEDD_IMAGE} /opt/bedd/skills /opt/bedd/skills
+COPY --from=bedd /usr/local/bin/bedd /usr/local/bin/bedd
+COPY --from=bedd /opt/bedd/skills /opt/bedd/skills
 ENV BEDD_SKILLS_DIR=/opt/bedd/skills
 
 USER appuser

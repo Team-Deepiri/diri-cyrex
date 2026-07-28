@@ -62,7 +62,7 @@ class CyrexEventPublisher:
             self.streaming: Optional[StreamingClient] = None
             self.sidecar = SynapseSidecarClient(
                 base_url=os.getenv("SYNAPSE_SIDECAR_URL", "http://synapse-sidecar:8081"),
-                timeout_sec=_env_float("SYNAPSE_SIDECAR_TIMEOUT_SEC", 5.0),
+                timeout_sec=env_float("SYNAPSE_SIDECAR_TIMEOUT_SEC", 5.0),
                 default_sender=os.getenv("SYNAPSE_SIDECAR_SENDER", "cyrex"),
                 grpc_addr=os.getenv("SYNAPSE_GRPC_ADDR"),
             )
