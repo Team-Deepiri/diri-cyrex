@@ -43,8 +43,45 @@ jobs:
           poetry install --with dev
           poetry run pip install ./diri-agent-testing-utils
 
+      - name: Verify modelkit pin (sidecar_utils)
+        run: |
+          poetry run python - <<'PY'
+          import importlib.metadata as md
+          from deepiri_modelkit.streaming.sidecar_utils import env_float
+          ver = md.version("deepiri-modelkit")
+          print(f"deepiri-modelkit {ver}")
+          assert tuple(int(x) for x in ver.split(".")[:3]) >= (0, 2, 1), (
+              f"expected deepiri-modelkit>=0.2.1 (sidecar_utils), got {ver}"
+          )
+          assert env_float("MISSING", 1.0) == 1.0
+          PY
+
+      - name: Undefined names on API boot paths
+        run: |
+          poetry run ruff check --select F821 \
+            app/routes/artifacts.py \
+            app/integrations/streaming \
+            app/services/knowledge_retrieval_engine.py \
+            app/services/contextual_ability_engine.py
+
+      - name: App import smoke (uvicorn entrypoint)
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          MILVUS_HOST: localhost
+          MILVUS_PORT: "19530"
+          CYREX_API_KEY: change-me
+        run: |
+          poetry run python -c "from app.main import app; assert app.title"
+
       - name: Ruff
         run: poetry run ruff check app/pipeline app/training tests/contract tests/pipeline tests/training tests/fakes
 
       - name: Unit tests
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          MILVUS_HOST: localhost
+          MILVUS_PORT: "19530"
+          CYREX_API_KEY: change-me
         run: poetry run pytest tests/contract -q
