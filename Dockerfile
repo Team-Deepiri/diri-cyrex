@@ -79,7 +79,8 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 
 COPY diri-cyrex/app /app/app
 
-RUN python -c "from app.integrations.streaming.gen.proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc; print('✓ protobuf sidecar stubs OK')"
+# Import stubs via gen root only — avoid app.integrations __init__ circular imports at build time.
+RUN python -c "import sys; sys.path.insert(0, '/app/app/integrations/streaming/gen'); from proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc; print('✓ protobuf sidecar stubs OK')"
 
 RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
