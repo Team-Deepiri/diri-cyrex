@@ -19,6 +19,7 @@ FROM ${BASE_IMAGE} AS base
 
 ARG PYTORCH_VERSION=2.9.1
 ARG POETRY_VERSION=1.8.5
+ARG PROTOBUF_VERSION=7.34.1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -63,6 +64,8 @@ RUN ln -sf /deepiri-modelkit ../deepiri-modelkit && \
     ' && \
     # Monorepo COPY wins over the git tag Poetry resolved — keeps sidecar_utils in sync with platform.
     pip install --no-cache-dir --force-reinstall --no-deps /deepiri-modelkit && \
+    # Reassert protobuf after Poetry install so generated sidecar stubs and runtime stay aligned.
+    pip install --no-cache-dir --force-reinstall --no-deps "protobuf==${PROTOBUF_VERSION}" && \
     python -c "from deepiri_modelkit.streaming.sidecar_utils import env_float, sidecar_payload_from_fields; print('✓ modelkit sidecar_utils OK')"
 
 RUN python -c "import numpy; import fastapi; import redis; print('✓ core deps OK')" && \
@@ -75,6 +78,8 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app
 
 COPY diri-cyrex/app /app/app
+
+RUN python -c "from app.integrations.streaming.gen.proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc; print('✓ protobuf sidecar stubs OK')"
 
 RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
