@@ -1,14 +1,16 @@
 """
 Artifact Engine API Routes (Prajwala). Stubs backed by FakePipelineRunner for Week 1.
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional, Any, List
 from datetime import datetime
 
 from ..pipeline.contracts.models import (
+    ArtifactBundle,
     Citation,
     PersonaScope,
+    Provenance,
 )
 
 from ..pipeline.contracts.ports import PipelineRunnerPort
@@ -52,6 +54,11 @@ class VoiceQueryResponse(BaseModel):
     confessed: bool
     spans: List[WitnessSpan]
     gaps: Optional[List[ConfessionGap]] = None
+
+
+class VoiceQueryApiResponse(BaseModel):
+    success: bool
+    response: VoiceQueryResponse
 
 
 class CorrectionRequest(BaseModel):
