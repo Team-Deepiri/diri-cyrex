@@ -101,6 +101,7 @@ deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git
 deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.0", extras = ["distributed"] }
 diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "8a34be9e2576b862cab85cd0ca86460064e86ad6", extras = ["redis", "numpy"] }
 deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.0", extras = ["torch"] }
+deepiri-prismpipe = { git = "https://github.com/Team-Deepiri/deepiri-prismpipe.git", tag = "v0.2.1" }
 
 # Platform-specific extras (not installed by default)
 torch = { version = ">=2.0.0", optional = true }
