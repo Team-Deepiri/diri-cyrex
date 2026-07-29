@@ -4,6 +4,7 @@ If nothing grounds the question, the field is confessed instead of fabricated.""
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional
 from uuid import uuid4
@@ -13,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.pipeline.contracts.models import ArtifactType, Citation, CitedField, PersonaScope
 from app.pipeline.contracts.ports import ArtifactStorePort
 
+logger = logging.getLogger("cyrex.pipeline.voice.synthesizer")
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -132,7 +134,12 @@ class VoiceSynthesizer:
         for raw in raw_fields:
             try:
                 fields.append(CitedField.model_validate(raw))
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "Skipping malformed CitedField in artifact %s payload: %s",
+                    getattr(bundle, "artifact_id", "<unknown>"),
+                    e,
+                )
                 continue
         return fields
 
