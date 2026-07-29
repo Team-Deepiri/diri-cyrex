@@ -15,7 +15,14 @@ const MOCK_CELLS: PressureCell[] = [
   { document_id: 'doc-1', section_id: 'financial_terms', page: 2, score: 0.9, is_fault_zone: true, discrepancy_count: 4, reflect_failures: 2, low_confidence_count: 3, duel_disagreements: 3, drill_down_artifact_ids: ['art_002', 'art_003'] },
 ];
 
-export const ArtifactEngineCanvas: React.FC = () => {
+interface ArtifactEngineCanvasProps {
+  // Which document the Canvas is currently surveying.
+  documentId?: string;
+}
+
+export const ArtifactEngineCanvas: React.FC<ArtifactEngineCanvasProps> = ({
+  documentId = 'lease_001',
+}) => {
   const [activePanel] = useState<'terrain' | 'duel' | 'voice' | 'provenance'>('terrain');
   const [selectedFaultCell, setSelectedFaultCell] = useState<PressureCell | null>(null); 
 
@@ -61,17 +68,18 @@ export const ArtifactEngineCanvas: React.FC = () => {
         {/* Duel Arena & Reckoning Compass */}
         <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', minHeight: '300px' }}>
           <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Duel Arena</h3>
+          {/* TODO: swap MOCK_DUEL */}
           <DuelArena duelState={MOCK_DUEL} />
 
           <h3 style={{ color: '#e0e0e0', marginTop: '1.5rem', fontSize: '0.95rem' }}>Reckoning Compass</h3>
-          <ReckoningCompass documentId="lease_001" />
+          <ReckoningCompass documentId={documentId} />
         </div>
       </div>
 
       {/* Voice Query — Witness Stitch & Confusion Gap */}
       <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', marginBottom: '1rem' }}>
         <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Voice Query</h3>
-        <WitnessStitch documentId="lease_001" />
+        <WitnessStitch documentId={documentId} />
       </div>
       
       {/* Provenance River */}
