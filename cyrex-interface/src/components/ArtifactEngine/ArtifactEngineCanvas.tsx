@@ -3,6 +3,9 @@ import { TerrainSurvey } from './TerrainSurvey';
 import { PressureCell } from '../../types/artifactEngine';
 import { FaultDrillDown } from './FaultDrillDown';
 import { ProvenanceRiver } from './ProvenanceRiver';
+import { DuelArena, MOCK_DUEL } from './DuelArena';
+import { ReckoningCompass } from './ReckoningCompass';
+import { WitnessStitch } from './WitnessStitch';
 
 // TODO: replace MOCK_CELLS with usePressureMap(documentId) hook
 const MOCK_CELLS: PressureCell[] = [
@@ -55,36 +58,20 @@ export const ArtifactEngineCanvas: React.FC = () => {
         )}
         </div>
 
-        {/*Duel Arena Placeholder*/}
+        {/* Duel Arena & Reckoning Compass */}
         <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', minHeight: '300px' }}>
-          <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Duel Arena.</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', height: '200px' }}>
-            <div style={{ background: '#1a1a1a', borderRadius: '4px', border: '1px solid #444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <p style={{ color: '#666', fontSize: '0.85rem' }}>Agent A</p>
-            </div>
-            <div style={{ background: '#1a1a1a', borderRadius: '4px', border: '1px solid #444', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <p style={{ color: '#666', fontSize: '0.85rem' }}>Agent B</p>
-            </div>
-          </div>
+          <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Duel Arena</h3>
+          <DuelArena duelState={MOCK_DUEL} />
+
+          <h3 style={{ color: '#e0e0e0', marginTop: '1.5rem', fontSize: '0.95rem' }}>Reckoning Compass</h3>
+          <ReckoningCompass documentId="lease_001" />
         </div>
       </div>
 
-      {/*Voice Query Placeholder*/}
+      {/* Voice Query — Witness Stitch & Confusion Gap */}
       <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', marginBottom: '1rem' }}>
-        <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Voice Query.</h3>
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-          <input
-            type="text"
-            placeholder="Ask a question about the document..."
-            style={{ flex: 1, padding: '0.5rem', background: '#1a1a1a', color: '#e0e0e0', border: '1px solid #444', borderRadius: '4px' }}
-          />
-          <button style={{ padding: '0.5rem 1.5rem', background: '#4a9eff', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
-            Ask
-          </button>
-        </div>
-        <div style={{ background: '#1a1a1a', padding: '1rem', borderRadius: '4px', border: '1px solid #444', minHeight: '80px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <p style={{ color: '#666' }}>Cited answer here</p>
-        </div>
+        <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Voice Query</h3>
+        <WitnessStitch documentId="lease_001" />
       </div>
       
       {/* Provenance River */}
