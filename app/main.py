@@ -395,10 +395,12 @@ app.include_router(reckoning_router)
 async def _get_postgres_pressure_read_model():
     return PostgresPressureStore(await get_postgres_manager())
 
-
 async def _get_postgres_reckoning_read_model():
     return PostgresReckoningStore(await get_postgres_manager())
 
+def _get_sqlite_artifact_store() -> ArtifactStorePort:
+    # TODO: swap for Tyler's PostgresArtifactStore
+    return SqliteArtifactStore()
 
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
     store = PostgresArtifactStore(await get_postgres_manager())
