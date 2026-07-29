@@ -36,8 +36,7 @@ def get_pipeline_runner() -> PipelineRunnerPort:
 
 def get_artifact_store() -> ArtifactStorePort:
     # TODO: swap for PostgresArtifactStore
-    from app.pipeline.registry.sqlite_store import SqliteArtifactStore
-    return SqliteArtifactStore()
+    raise RuntimeError("Artifact store dependency is not configured")
 
 def get_correction_writer() -> CorrectionWriterPort:
     # TODO: replace with real PostgresArtifactStore-backed writer. Current implementation is in-memory
