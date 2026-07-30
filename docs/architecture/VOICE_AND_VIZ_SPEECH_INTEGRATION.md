@@ -12,33 +12,36 @@ Speech stack: platform **deepiri-speech** (Pipecat in-process + LiveKit SFU)
 | STT / TTS / LiveKit / Pipecat | `deepiri-speech` via `app/integrations/speech_client.py` |
 | UI | Witness Stitch — Ask / Mic / Speak |
 
+## Persistence (postgres-cyrex, not SQLite)
+
+Runtime DI wires:
+
+- `PostgresArtifactStore` → `cyrex.artifacts` / `artifact_refs` / `citations`
+- `PostgresCorrectionStore` → `cyrex.learning_artifacts`
+
+**Relation to Track A [#128](https://github.com/Team-Deepiri/diri-cyrex/pull/128):** Tyler’s Weeks 1–2 keep `SqliteArtifactStore` for orchestrator unit tests. Both implement `ArtifactStorePort`. Production (`app.main`) uses Postgres against `postgres-cyrex`. Postgres store accepts the same optional `pressure_sink` hook so #128’s projector plugs in when merged.
+
 ## VoiceSynthesizer
 
-`app/pipeline/voice/synthesizer.py`:
-
-- **Matching** — token overlap on field name / quote / value, lease-field aliases (`rent` → `base_rent`, etc.), multi-span (up to `max_spans`)
-- **`spoken_text()`** — TTS-ready string from verbatim quotes or confession reason (never invents facts)
-- **`speech_payload()`** — structured meta for UI / speech clients
-- **`query_with_speech(...)`** — optional STT → `query` → optional TTS through deepiri-speech
-
-Route `POST /api/v1/artifacts/voice/query` calls `query_with_speech` (not duplicated STT/TTS in the route).
+- Scored matching + aliases + multi-span
+- `spoken_text()` / `speech_payload()` / `query_with_speech()` (STT → ground → TTS)
 
 ## Wired paths
 
-1. `POST /api/v1/artifacts/voice/query`
-   - optional `audio_b64` → speech `/v1/stt`
-   - grounded answer via `VoiceSynthesizer`
-   - `synthesize_audio` → speech `/v1/tts` → `audio_b64` in response
-2. `GET /api/v1/artifacts/voice/speech-health` → speech `/health`
-3. `POST /api/v1/artifacts/voice/session` → speech `/v1/sessions` (LiveKit token)
+1. `POST /api/v1/artifacts/voice/query` — STT/ground/TTS
+2. `GET /api/v1/artifacts/voice/speech-health`
+3. `POST /api/v1/artifacts/voice/session` — deepiri-speech LiveKit + Cyrex `SessionManager` + realtime `CONNECTION` event
 
 ## Env
 
 ```bash
 SPEECH_ENABLED=1
-SPEECH_URL=http://speech:5020          # in-compose
+SPEECH_URL=http://speech:5020
 SPEECH_PUBLIC_URL=http://localhost:5020
 LIVEKIT_PUBLIC_URL=ws://localhost:7880
+POSTGRES_HOST=postgres-cyrex
+POSTGRES_PORT=5432
+POSTGRES_DB=cyrex_db
 ```
 
-Platform PR: https://github.com/Team-Deepiri/deepiri-platform/pull/302
+Platform speech PR: https://github.com/Team-Deepiri/deepiri-platform/pull/302
