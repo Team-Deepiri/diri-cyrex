@@ -101,14 +101,6 @@ class VoiceQueryApiResponse(BaseModel):
     question_used: Optional[str] = None
 
 
-def _spoken_text_from_response(response: SynthesizerVoiceQueryResponse) -> str:
-    if not response.confessed and response.spans:
-        return " ".join(s.quote for s in response.spans if s.quote)
-    if response.gaps:
-        return response.gaps[0].reason or "I could not ground that claim in the document."
-    return "No answer found."
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -177,90 +169,55 @@ async def voice_query(
     store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """
-    Document-grounded Q&A + optional deepiri-speech STT/TTS.
-
-    1. If audio_b64 → STT via speech service
-    2. VoiceSynthesizer → verbatim spans or confession (never fabricates)
-    3. If synthesize_audio → TTS spoken answer via speech service
+    Document-grounded Q&A + deepiri-speech STT/TTS via VoiceSynthesizer.query_with_speech.
     """
     logger.info("Voice query received", document_id=request.document_id)
-    speech_meta: dict[str, Any] = {
-        "engine": "deepiri-speech",
-        "enabled": settings.SPEECH_ENABLED,
-        "stt": None,
-        "tts": None,
-    }
-    question = (request.question or "").strip()
+    if not (request.question or "").strip() and not request.audio_b64:
+        raise HTTPException(status_code=400, detail="question or audio_b64 required")
 
     try:
-        if request.audio_b64:
-            if not settings.SPEECH_ENABLED:
-                raise HTTPException(
-                    status_code=503,
-                    detail="audio_b64 requires SPEECH_ENABLED and deepiri-speech",
-                )
-            raw = base64.b64decode(request.audio_b64)
-            stt = await get_speech_client().transcribe(
-                raw,
-                mime_type=request.audio_mime_type,
-                session_id=request.document_id,
-            )
-            question = (stt.get("text") or "").strip()
-            speech_meta["stt"] = {
-                "provider": stt.get("provider"),
-                "model": stt.get("model"),
-                "chars": len(question),
-            }
-            if not question:
-                raise HTTPException(status_code=400, detail="STT returned empty transcript")
-
-        if not question:
-            raise HTTPException(
-                status_code=400, detail="question or audio_b64 required"
-            )
-
+        audio_bytes = base64.b64decode(request.audio_b64) if request.audio_b64 else None
         synthesizer = VoiceSynthesizer(store=store)
-        response = await synthesizer.query(
+        response, speech_meta = await synthesizer.query_with_speech(
             document_id=request.document_id,
-            question=question,
+            question=request.question,
             persona_scope=request.persona_scope,
+            audio=audio_bytes,
+            audio_mime_type=request.audio_mime_type,
+            synthesize_audio=request.synthesize_audio,
+            speech_client=get_speech_client() if settings.SPEECH_ENABLED else None,
         )
 
-        spoken = _spoken_text_from_response(response)
         audio_b64: Optional[str] = None
-        audio_mime: Optional[str] = None
+        audio_mime = speech_meta.get("audio_mime_type")
+        raw_audio = speech_meta.get("audio")
+        if isinstance(raw_audio, (bytes, bytearray)) and raw_audio:
+            audio_b64 = base64.b64encode(raw_audio).decode("ascii")
 
-        if request.synthesize_audio and spoken and settings.SPEECH_ENABLED:
-            try:
-                audio, mime = await get_speech_client().synthesize(
-                    spoken,
-                    voice=settings.SPEECH_TTS_VOICE,
-                    session_id=request.document_id,
-                )
-                audio_b64 = base64.b64encode(audio).decode("ascii")
-                audio_mime = mime
-                speech_meta["tts"] = {
-                    "voice": settings.SPEECH_TTS_VOICE,
-                    "bytes": len(audio),
-                    "mime": mime,
-                }
-            except Exception as tts_exc:
-                logger.warning("TTS skipped: %s", tts_exc)
-                speech_meta["tts"] = {"error": str(tts_exc)}
+        # Public speech meta (no raw bytes)
+        public_speech = {
+            "engine": speech_meta.get("engine"),
+            "enabled": speech_meta.get("enabled"),
+            "stt": speech_meta.get("stt"),
+            "tts": speech_meta.get("tts"),
+            "payload": response.speech_payload(),
+        }
 
         return VoiceQueryApiResponse(
             success=True,
             response=response,
-            spoken_text=spoken,
+            spoken_text=speech_meta.get("spoken_text") or response.spoken_text(),
             audio_b64=audio_b64,
             audio_mime_type=audio_mime,
-            speech=speech_meta,
-            question_used=question,
+            speech=public_speech,
+            question_used=response.question or request.question,
         )
     except HTTPException:
         raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         logger.error(f"Voice query failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
