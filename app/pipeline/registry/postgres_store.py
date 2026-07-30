@@ -1,8 +1,7 @@
 """PostgreSQL-backed ArtifactStorePort for Cyrex AGI (postgres-cyrex / cyrex_db).
 
-Replaces SqliteArtifactStore for runtime. Schema lives in ``cyrex.*`` and is
-created idempotently on first use (also mirrored in platform
-``scripts/database/postgres-init-cyrex.sql`` for fresh volumes).
+Schema lives in ``cyrex.*`` and is created idempotently on first use
+(also mirrored in platform ``scripts/database/postgres-init-cyrex.sql``).
 """
 from __future__ import annotations
 
@@ -79,10 +78,12 @@ _DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc ON cyrex.artifacts(document_id)",
-    "CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc_type ON cyrex.artifacts(document_id, artifact_type)",
+    ("CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc_type "
+     "ON cyrex.artifacts(document_id, artifact_type)"),
     "CREATE INDEX IF NOT EXISTS idx_cyrex_refs_from ON cyrex.artifact_refs(from_artifact)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_refs_to ON cyrex.artifact_refs(to_artifact)",
-    "CREATE INDEX IF NOT EXISTS idx_cyrex_citations_doc_span ON cyrex.citations(document_id, char_start, char_end)",
+    ("CREATE INDEX IF NOT EXISTS idx_cyrex_citations_doc_span "
+     "ON cyrex.citations(document_id, char_start, char_end)"),
     "CREATE INDEX IF NOT EXISTS idx_cyrex_learning_exported ON cyrex.learning_artifacts(exported)",
 ]
 
@@ -90,9 +91,8 @@ _DDL = [
 class PostgresArtifactStore:
     """asyncpg-backed ``ArtifactStorePort`` using ``postgres-cyrex``.
 
-    Optional ``pressure_sink`` mirrors Track A SqliteArtifactStore (#128): after
-    a successful ``create()``, project and emit pressure events when the sink
-    is wired.
+    Optional ``pressure_sink``: after a successful ``create()``, project and emit
+    pressure events when the sink is wired (Track A / Appendix A).
     """
 
     def __init__(
@@ -250,7 +250,7 @@ class PostgresArtifactStore:
         await self._insert_refs(db, bundle)
         await self._insert_citations(db, bundle)
 
-        # Same seam as Track A SqliteArtifactStore (#128) — optional pressure emit.
+        # Optional pressure emit after persist (Track A Appendix A).
         if self._pressure_sink is not None:
             try:
                 from app.pipeline.projectors.pressure_signals import project_pressure_events
@@ -378,7 +378,8 @@ class PostgresArtifactStore:
 
             if depth < hops:
                 out_rows = await db.fetch(
-                    "SELECT to_artifact, ref_type FROM cyrex.artifact_refs WHERE from_artifact = $1",
+                    ("SELECT to_artifact, ref_type FROM cyrex.artifact_refs "
+                     "WHERE from_artifact = $1"),
                     current_id,
                 )
                 for ref_row in out_rows:
@@ -396,7 +397,8 @@ class PostgresArtifactStore:
 
             if depth < hops:
                 in_rows = await db.fetch(
-                    "SELECT from_artifact, ref_type FROM cyrex.artifact_refs WHERE to_artifact = $1",
+                    ("SELECT from_artifact, ref_type FROM cyrex.artifact_refs "
+                     "WHERE to_artifact = $1"),
                     current_id,
                 )
                 for ref_row in in_rows:
