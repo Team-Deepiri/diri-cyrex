@@ -41,10 +41,12 @@ def get_pipeline_runner() -> PipelineRunnerPort:
 
 
 def get_artifact_store() -> ArtifactStorePort:
+    """DI hook — wired in ``app.main`` to ``SqliteArtifactStore`` (Postgres TBD)."""
     raise RuntimeError("Artifact store dependency is not configured")
 
 
 def get_correction_writer() -> CorrectionWriterPort:
+    """DI hook — wired in ``app.main`` to ``SqliteCorrectionStore``."""
     return CorrectionStage()
 
 

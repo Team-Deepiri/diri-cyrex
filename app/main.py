@@ -1,7 +1,11 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
-from .routes.artifacts import get_artifact_store, router as artifacts_router
+from .routes.artifacts import (
+    get_artifact_store,
+    get_correction_writer,
+    router as artifacts_router,
+)
 from .routes.pressure import (
     get_pressure_read_model,
     router as pressure_router,
@@ -61,7 +65,8 @@ from .database.postgres import get_postgres_manager
 from .pipeline.registry.pressure_store import PostgresPressureStore
 from .pipeline.registry.reckoning_store import PostgresReckoningStore
 from .pipeline.registry.sqlite_store import SqliteArtifactStore
-from .pipeline.contracts.ports import ArtifactStorePort
+from .pipeline.registry.correction_store import SqliteCorrectionStore
+from .pipeline.contracts.ports import ArtifactStorePort, CorrectionWriterPort
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -429,12 +434,18 @@ async def _get_postgres_reckoning_read_model():
     return PostgresReckoningStore(await get_postgres_manager())
 
 def _get_sqlite_artifact_store() -> ArtifactStorePort:
-    # TODO: swap for Tyler's PostgresArtifactStore
+    # TODO: swap for Tyler's PostgresArtifactStore when ready
     return SqliteArtifactStore()
+
+
+def _get_sqlite_correction_writer() -> CorrectionWriterPort:
+    return SqliteCorrectionStore()
+
 
 app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
 app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
 app.dependency_overrides[get_artifact_store] = _get_sqlite_artifact_store
+app.dependency_overrides[get_correction_writer] = _get_sqlite_correction_writer
 
 if __name__ == "__main__":
     import uvicorn
