@@ -3,13 +3,20 @@
 export const CYREX_BASE_URL =
   import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
 
-/** Messaging HTTP — compose maps host 5010. */
+/** Messaging HTTP — compose maps messaging to 5010. */
 export const MESSAGING_SERVICE_URL =
   import.meta.env.VITE_MESSAGING_SERVICE_URL || 'http://localhost:5010';
 
 /** Realtime Gateway Socket.IO — compose maps host 5008. */
 export const REALTIME_GATEWAY_URL =
   import.meta.env.VITE_REALTIME_GATEWAY_URL || 'http://localhost:5008';
+
+/** deepiri-speech (host) — STT/TTS / LiveKit tokens when calling browser-side. */
+export const SPEECH_URL =
+  import.meta.env.VITE_SPEECH_URL || 'http://localhost:5020';
+
+export const LIVEKIT_URL =
+  import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
 
 /** Synthetic user for local interface (messaging requires x-user-id). */
 export const LOCAL_USER_ID =

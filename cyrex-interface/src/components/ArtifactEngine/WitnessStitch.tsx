@@ -1,8 +1,9 @@
 // Voice answers are not generative. When a claim can't be grounded, it renders as a grey void.
+// Audio I/O is deepiri-speech (STT/TTS); grounding stays VoiceSynthesizer.
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { VoiceQueryRequest, PersonaScope } from '../../types/artifactEngine';
-import { voiceQuery } from '../../api/artifactEngine';
+import { speechHealth, voiceQuery } from '../../api/artifactEngine';
 
 interface WitnessStitchProps {
   documentId: string;
@@ -15,6 +16,14 @@ const DEFAULT_PERSONA_SCOPE: PersonaScope = {
   corpus_filter: [],
 };
 
+function playBase64Audio(b64: string, mime: string) {
+  const src = `data:${mime};base64,${b64}`;
+  const audio = new Audio(src);
+  void audio.play().catch(() => {
+    /* autoplay may be blocked until user gesture — Speak button covers that */
+  });
+}
+
 export const WitnessStitch: React.FC<WitnessStitchProps> = ({
   documentId,
   personaScope = DEFAULT_PERSONA_SCOPE,
@@ -23,19 +32,41 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<Awaited<ReturnType<typeof voiceQuery>> | null>(null);
+  const [speechOk, setSpeechOk] = useState<boolean | null>(null);
+  const [recording, setRecording] = useState(false);
+  const mediaRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
 
-  const handleAsk = async () => {
-    if (!question.trim()) return;
+  useEffect(() => {
+    speechHealth()
+      .then((h) => setSpeechOk(Boolean(h.ok)))
+      .catch(() => setSpeechOk(false));
+  }, []);
+
+  const handleAsk = async (opts?: { audio_b64?: string; audio_mime_type?: string }) => {
+    if (!opts?.audio_b64 && !question.trim()) return;
     setLoading(true);
     setError(null);
     try {
-      const request: VoiceQueryRequest = {
+      const request: VoiceQueryRequest & {
+        audio_b64?: string;
+        audio_mime_type?: string;
+        synthesize_audio?: boolean;
+      } = {
         document_id: documentId,
-        question: question.trim(),
+        question: question.trim() || undefined,
         persona_scope: personaScope,
+        synthesize_audio: true,
+        ...opts,
       };
       const response = await voiceQuery(request);
       setResult(response);
+      if (response.question_used && !question.trim()) {
+        setQuestion(response.question_used);
+      }
+      if (response.audio_b64 && response.audio_mime_type) {
+        playBase64Audio(response.audio_b64, response.audio_mime_type);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Voice query failed');
       setResult(null);
@@ -44,10 +75,60 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
     }
   };
 
+  const toggleMic = async () => {
+    if (recording && mediaRef.current) {
+      mediaRef.current.stop();
+      setRecording(false);
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        const buf = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        const b64 = btoa(binary);
+        await handleAsk({ audio_b64: b64, audio_mime_type: blob.type || 'audio/webm' });
+      };
+      mediaRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Microphone unavailable');
+    }
+  };
+
+  const replay = () => {
+    if (result?.audio_b64 && result.audio_mime_type) {
+      playBase64Audio(result.audio_b64, result.audio_mime_type);
+    }
+  };
+
   return (
     <div>
-      {/* Query bar */}
-      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+      <div
+        style={{
+          marginBottom: '0.75rem',
+          fontSize: '0.85rem',
+          color: speechOk === null ? '#888' : speechOk ? '#6d6' : '#c66',
+        }}
+      >
+        Speech engine:{' '}
+        {speechOk === null ? 'checking…' : speechOk ? 'deepiri-speech online' : 'unreachable (TTS/STT offline)'}
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
         <input
           type="text"
           value={question}
@@ -56,6 +137,7 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
           placeholder="Ask a question about the document..."
           style={{
             flex: 1,
+            minWidth: '200px',
             padding: '0.5rem',
             background: '#1a1a1a',
             color: '#e0e0e0',
@@ -64,7 +146,7 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
           }}
         />
         <button
-          onClick={handleAsk}
+          onClick={() => handleAsk()}
           disabled={loading || !question.trim()}
           style={{
             padding: '0.5rem 1.5rem',
@@ -77,9 +159,38 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
         >
           {loading ? 'Asking...' : 'Ask'}
         </button>
+        <button
+          onClick={toggleMic}
+          disabled={loading}
+          title="Record question → STT via deepiri-speech"
+          style={{
+            padding: '0.5rem 1rem',
+            background: recording ? '#a33' : '#333',
+            color: '#fff',
+            border: '1px solid #555',
+            borderRadius: '4px',
+            cursor: 'pointer',
+          }}
+        >
+          {recording ? 'Stop' : 'Mic'}
+        </button>
+        <button
+          onClick={replay}
+          disabled={!result?.audio_b64}
+          style={{
+            padding: '0.5rem 1rem',
+            background: '#333',
+            color: '#fff',
+            border: '1px solid #555',
+            borderRadius: '4px',
+            cursor: result?.audio_b64 ? 'pointer' : 'default',
+            opacity: result?.audio_b64 ? 1 : 0.4,
+          }}
+        >
+          Speak
+        </button>
       </div>
 
-      {/* Answer area */}
       <div
         style={{
           background: '#1a1a1a',
@@ -97,7 +208,11 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
 
         {result && (
           <div>
-            {/* Document-voice styling */}
+            {result.spoken_text && (
+              <p style={{ color: '#aaa', marginTop: 0, marginBottom: '0.75rem', fontSize: '0.9rem' }}>
+                Spoken: {result.spoken_text}
+              </p>
+            )}
             {result.spans.map((span, i) => (
               <span
                 key={span.citation_id + i}
@@ -121,9 +236,8 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
               </span>
             ))}
 
-            {/* Confusion Gap */}
             {result.confessed &&
-              result.gaps.map((gap, i) => (
+              (result.gaps || []).map((gap, i) => (
                 <div
                   key={i}
                   style={{
@@ -141,7 +255,7 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
                 </div>
               ))}
 
-            {result.spans.length === 0 && result.gaps.length === 0 && (
+            {result.spans.length === 0 && (!result.gaps || result.gaps.length === 0) && (
               <p style={{ color: '#666', margin: 0 }}>No answer found.</p>
             )}
           </div>

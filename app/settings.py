@@ -27,6 +27,14 @@ class Settings(BaseSettings):
 
     # Authentication Configuration
     JWT_SECRET: Optional[str] = None
+
+    # Platform deepiri-speech
+    SPEECH_ENABLED: bool = True
+    SPEECH_URL: str = "http://speech:5020"
+    SPEECH_PUBLIC_URL: str = "http://localhost:5020"
+    LIVEKIT_PUBLIC_URL: str = "ws://localhost:7880"
+    SPEECH_TTS_VOICE: str = "af_heart"
+    MESSAGING_SERVICE_URL: str = "http://messaging-service:5010"
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
@@ -195,6 +203,13 @@ class Settings(BaseSettings):
     
     # Messaging Service Configuration (compose maps messaging to 5010)
     MESSAGING_SERVICE_URL: str = "http://messaging-service:5010"
+
+    # Platform deepiri-speech (LiveKit + Pipecat + STT/TTS)
+    SPEECH_ENABLED: bool = True
+    SPEECH_URL: str = "http://speech:5020"
+    SPEECH_PUBLIC_URL: str = "http://localhost:5020"
+    LIVEKIT_PUBLIC_URL: str = "ws://localhost:7880"
+    SPEECH_TTS_VOICE: str = "af_heart"
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
