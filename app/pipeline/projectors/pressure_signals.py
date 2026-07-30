@@ -2,31 +2,12 @@
 
 Per Appendix A of the design plan, this module projects artifact bundles
 into ``PressureEvent`` discriminated unions that Track D's PressureEngine
-consumes. Emission rules:
-
-| Trigger | Event type |
-|---------|-----------|
-| ``SynthesisResult.discrepancies[]`` non-empty | ``PassDiscrepancy`` per field |
-| ``ReflectTool`` error-severity issue | ``ReflectFailure`` |
-| Field confidence < 0.60 | ``LowConfidenceField`` |
-| ``DuelState.disagreements[]`` non-empty | ``DuelDisagreement`` per field |
-
-The projector inspects ``bundle.payload`` for well-known keys that
-stages write.  If a key is absent or empty, no events of that type are
-emitted — the sink receives an empty list and is a no-op.
-
-Usage::
-
-    from app.pipeline.projectors.pressure_signals import project_pressure_events
-
-    events = project_pressure_events(bundle)
-    if events:
-        await pressure_sink.emit_many(events)
+consumes.
 """
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, List, Optional
 
 from app.pipeline.contracts.models import ArtifactBundle
 from app.pipeline.contracts.pressure_events import (
@@ -37,94 +18,112 @@ from app.pipeline.contracts.pressure_events import (
     ReflectFailure,
 )
 
-# Default confidence floor used when not explicitly provided in payload.
 _DEFAULT_CONFIDENCE_FLOOR = 0.60
 
 
+def _get_field_value(obj: Any, key: str, default: Any = None) -> Any:
+    """Read ``key`` from a dict or object attribute."""
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _as_mapping_list(value: Any) -> List[Any]:
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    return list(value)
+
+
 def project_pressure_events(bundle: ArtifactBundle) -> List[PressureEvent]:
-    """Inspect an ``ArtifactBundle`` and yield zero or more ``PressureEvent``\ s.
-
-    Args:
-        bundle: The artifact bundle that was just persisted.
-
-    Returns:
-        A (possibly empty) list of pressure events derived from the
-        bundle's payload and metadata.
-    """
+    """Inspect an ``ArtifactBundle`` and yield zero or more ``PressureEvent``s."""
     events: List[PressureEvent] = []
     payload = bundle.payload or {}
     document_id = bundle.document_id
     section_id = payload.get("section_id", bundle.artifact_id)
     page = payload.get("page")
 
-    # 1. PassDiscrepancy — extraction pass disagreements
-    discrepancies = payload.get("discrepancies") or payload.get("synthesis_result", {}).get("discrepancies")
-    if discrepancies:
-        for disc in discrepancies:
+    synthesis = payload.get("synthesis_result") or {}
+    if not isinstance(synthesis, dict):
+        synthesis = _serialize_payload(synthesis)
+
+    discrepancies = payload.get("discrepancies") or synthesis.get("discrepancies")
+    for disc in _as_mapping_list(discrepancies):
+        events.append(
+            PassDiscrepancy(
+                document_id=document_id,
+                section_id=section_id,
+                page=page,
+                artifact_id=bundle.artifact_id,
+                field_name=_get_field_value(disc, "field_name", "unknown"),
+                pass_a_value=_get_field_value(disc, "pass_a_value"),
+                pass_b_value=_get_field_value(disc, "pass_b_value"),
+                confidence_delta=_get_field_value(disc, "confidence_delta"),
+            )
+        )
+
+    reflection = payload.get("reflection_result") or {}
+    if not isinstance(reflection, dict):
+        reflection = _serialize_payload(reflection)
+    issues = payload.get("issues") or reflection.get("issues")
+    for issue in _as_mapping_list(issues):
+        if _get_field_value(issue, "severity") in ("error", "warning"):
             events.append(
-                PassDiscrepancy(
+                ReflectFailure(
                     document_id=document_id,
                     section_id=section_id,
                     page=page,
                     artifact_id=bundle.artifact_id,
-                    field_name=disc.get("field_name", "unknown"),
-                    pass_a_value=disc.get("pass_a_value"),
-                    pass_b_value=disc.get("pass_b_value"),
-                    confidence_delta=disc.get("confidence_delta"),
+                    field_name=_get_field_value(issue, "field_name"),
+                    issue_code=_get_field_value(issue, "code", "unknown"),
+                    message=_get_field_value(issue, "message", "") or "",
                 )
             )
 
-    # 2. ReflectFailure — reflection/validation issues with error severity
-    issues = payload.get("issues") or payload.get("reflection_result", {}).get("issues")
-    if issues:
-        for issue in issues:
-            if issue.get("severity") in ("error", "warning"):
-                events.append(
-                    ReflectFailure(
-                        document_id=document_id,
-                        section_id=section_id,
-                        page=page,
-                        artifact_id=bundle.artifact_id,
-                        field_name=issue.get("field_name"),
-                        issue_code=issue.get("code", "unknown"),
-                        message=issue.get("message", ""),
-                    )
-                )
-
-    # 3. LowConfidenceField — fields with confidence below floor
-    fields = payload.get("fields") or payload.get("synthesis_result", {}).get("final_fields", [])
+    fields = payload.get("fields") or synthesis.get("final_fields", [])
     confidence_floor = payload.get("confidence_floor", _DEFAULT_CONFIDENCE_FLOOR)
-    for field in fields:
-        cf = field.get("confidence") if isinstance(field, dict) else getattr(field, "confidence", None)
+    for field in _as_mapping_list(fields):
+        cf = _get_field_value(field, "confidence")
         if cf is not None and cf < confidence_floor:
-            field_name = field.get("field_name") if isinstance(field, dict) else getattr(field, "field_name", "unknown")
             events.append(
                 LowConfidenceField(
                     document_id=document_id,
                     section_id=section_id,
                     page=page,
                     artifact_id=bundle.artifact_id,
-                    field_name=field_name,
+                    field_name=_get_field_value(field, "field_name", "unknown"),
                     confidence=cf,
                 )
             )
 
-    # 4. DuelDisagreement — two-agent adversarial disagreements
-    disagreements = payload.get("disagreements") or payload.get("duel_state", {}).get("disagreements")
-    if disagreements:
-        for dd in disagreements:
-            events.append(
-                DuelDisagreement(
-                    document_id=document_id,
-                    section_id=section_id,
-                    page=page,
-                    artifact_id=bundle.artifact_id,
-                    field_name=dd.get("field_name", "unknown"),
-                    agent_a_value=dd.get("agent_a_value"),
-                    agent_b_value=dd.get("agent_b_value"),
-                    agent_a_confidence=dd.get("agent_a_confidence"),
-                    agent_b_confidence=dd.get("agent_b_confidence"),
-                )
+    duel_state = payload.get("duel_state") or {}
+    if not isinstance(duel_state, dict):
+        duel_state = _serialize_payload(duel_state)
+    disagreements = payload.get("disagreements") or duel_state.get("disagreements")
+    for dd in _as_mapping_list(disagreements):
+        events.append(
+            DuelDisagreement(
+                document_id=document_id,
+                section_id=section_id,
+                page=page,
+                artifact_id=bundle.artifact_id,
+                field_name=_get_field_value(dd, "field_name", "unknown"),
+                agent_a_value=_get_field_value(dd, "agent_a_value"),
+                agent_b_value=_get_field_value(dd, "agent_b_value"),
+                agent_a_confidence=_get_field_value(dd, "agent_a_confidence"),
+                agent_b_confidence=_get_field_value(dd, "agent_b_confidence"),
             )
+        )
 
     return events
+
+
+def _serialize_payload(obj: Any) -> dict:
+    if obj is None:
+        return {}
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    return {}

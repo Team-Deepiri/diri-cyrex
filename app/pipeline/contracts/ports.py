@@ -182,6 +182,24 @@ class AnticipatePort(Protocol):
 
 
 # ============================================================================
+# Document Parser (Track A ParseStage)
+# ============================================================================
+
+
+class DocumentParserPort(Protocol):
+    """Minimal parser interface used by ``ParseStage``."""
+
+    async def parse_document(
+        self,
+        file_content: bytes,
+        filename: str,
+        use_ocr: bool = False,
+        extract_tables: bool = False,
+    ) -> Any:
+        """Parse raw bytes into a document object with ``raw_text`` / ``document_type``."""
+
+
+# ============================================================================
 # Extract Port (Track B implements; optional orchestrator dependency)
 # ============================================================================
 

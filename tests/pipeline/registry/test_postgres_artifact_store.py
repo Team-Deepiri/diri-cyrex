@@ -1,20 +1,17 @@
-"""Tests for Task A-1b — SQLite store CRUD and ArtifactStorePort methods.
+"""Tests for Track A — PostgresArtifactStore CRUD and ArtifactStorePort methods.
 
-These tests verify that ``SqliteArtifactStore`` correctly implements
-all methods defined in ``contracts/ports.py``, including ghost filtering,
-graph neighborhood traversal, and inverse citation lookups.
+These tests verify that ``PostgresArtifactStore`` correctly implements
+all methods defined in ``contracts/ports.py`` against live ``postgres-cyrex``,
+including ghost filtering, graph neighborhood traversal, and inverse citation
+lookups.
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
-import sqlite3
-import tempfile
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 from app.pipeline.contracts.models import (
     ArtifactBundle,
@@ -23,20 +20,11 @@ from app.pipeline.contracts.models import (
     CitationLocator,
     Provenance,
 )
-from app.pipeline.registry.sqlite_store import ManagedSqliteStore, SqliteArtifactStore, init_db
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-
-@pytest.fixture()
-def store():
-    """Fresh in-memory database with no pre-loaded artifacts."""
-    db = SqliteArtifactStore(":memory:")
-    yield db
-    db.close()
 
 
 @pytest.fixture()
@@ -82,13 +70,21 @@ def sample_bundle():
     )
 
 
-@pytest.fixture()
-def populated_store(store):
+@pytest_asyncio.fixture()
+async def populated_store(store):
     """Store pre-loaded with a few artifacts for graph/traversal tests."""
-    # Note: created_at is NOT stored in the artifacts DDL per design plan.
-    # We use store.create() for proper insertion, which handles serialization.
+    dep = ArtifactBundle(
+        artifact_id="art_000",
+        document_id="doc_001",
+        version=2,
+        artifact_type=ArtifactType.CANONICAL,
+        source_doc_hash="hash_001",
+        confidence=0.95,
+        payload={},
+        provenance=Provenance(source_doc_hash="hash_001", document_id="doc_001"),
+    )
+    await store.create(dep)
 
-    # Create the root artifact
     root = ArtifactBundle(
         artifact_id="art_001",
         document_id="doc_001",
@@ -115,66 +111,8 @@ def populated_store(store):
             )
         ],
     )
-    store.conn.execute(
-        """INSERT INTO artifacts (
-            artifact_id, document_id, version, artifact_type,
-            source_doc_hash, confidence, payload_json,
-            provenance_json, is_deleted
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, 0)""",
-        (
-            root.artifact_id,
-            root.document_id,
-            root.artifact_type.value,
-            root.source_doc_hash,
-            root.confidence,
-            json.dumps(root.payload),
-            json.dumps(root.provenance.model_dump()),
-        ),
-    )
-    store.conn.execute(
-        "INSERT INTO artifact_refs (from_artifact, to_artifact, ref_type, created_at) "
-        "VALUES (?, ?, 'depends_on', ?)",
-        ("art_001", "art_000", datetime.now(timezone.utc).isoformat()),
-    )
-    store.conn.execute(
-        """INSERT INTO citations (
-            citation_id, artifact_id, document_id, source_doc_hash,
-            locator_type, char_start, char_end, page_start, page_end,
-            element_id, quote, confidence, extraction_pass
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("cit_001", "art_001", "doc_001", "hash_001", "char_range",
-         10, 15, None, None, None, "ten", 0.9, 1),
-    )
+    await store.create(root)
 
-    # Dependency artifact
-    dep = ArtifactBundle(
-        artifact_id="art_000",
-        document_id="doc_001",
-        version=1,
-        artifact_type=ArtifactType.CANONICAL,
-        source_doc_hash="hash_001",
-        confidence=0.95,
-        payload={},
-        provenance=Provenance(source_doc_hash="hash_001", document_id="doc_001"),
-    )
-    store.conn.execute(
-        """INSERT INTO artifacts (
-            artifact_id, document_id, version, artifact_type,
-            source_doc_hash, confidence, payload_json,
-            provenance_json, is_deleted
-        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, 0)""",
-        (
-            dep.artifact_id,
-            dep.document_id,
-            dep.artifact_type.value,
-            dep.source_doc_hash,
-            dep.confidence,
-            json.dumps(dep.payload),
-            json.dumps(dep.provenance.model_dump()),
-        ),
-    )
-
-    # Superseded version (ghost)
     ghost = ArtifactBundle(
         artifact_id="art_001_v0",
         document_id="doc_001",
@@ -186,24 +124,8 @@ def populated_store(store):
         provenance=Provenance(source_doc_hash="hash_001", document_id="doc_001"),
         is_deleted=True,
     )
-    store.conn.execute(
-        """INSERT INTO artifacts (
-            artifact_id, document_id, version, artifact_type,
-            source_doc_hash, confidence, payload_json,
-            provenance_json, is_deleted
-        ) VALUES (?, ?, 0, ?, ?, ?, ?, ?, 1)""",
-        (
-            ghost.artifact_id,
-            ghost.document_id,
-            ghost.artifact_type.value,
-            ghost.source_doc_hash,
-            ghost.confidence,
-            json.dumps(ghost.payload),
-            json.dumps(ghost.provenance.model_dump()),
-        ),
-    )
+    await store.create(ghost)
 
-    store.conn.commit()
     return store
 
 
@@ -215,7 +137,7 @@ def populated_store(store):
 @pytest.mark.asyncio()
 async def test_create_and_get(store, sample_bundle):
     """Creating a bundle and reading it back by ID returns an equivalent bundle."""
-    result = await store.create(sample_bundle)
+    await store.create(sample_bundle)
     retrieved = await store.get(sample_bundle.artifact_id)
     assert retrieved is not None
     assert retrieved.artifact_id == sample_bundle.artifact_id
@@ -236,12 +158,11 @@ async def test_get_nonexistent(store):
 async def test_get_deleted_returns_none(store, sample_bundle):
     """A deleted artifact is not returned by ``get``."""
     await store.create(sample_bundle)
-    # Directly mark it deleted in the database
-    store.conn.execute(
-        "UPDATE artifacts SET is_deleted = 1 WHERE artifact_id = ?",
-        (sample_bundle.artifact_id,),
+    db = await store._db()
+    await db.execute(
+        "UPDATE cyrex.artifacts SET is_deleted = TRUE WHERE artifact_id = $1",
+        sample_bundle.artifact_id,
     )
-    store.conn.commit()
     assert await store.get(sample_bundle.artifact_id) is None
 
 
@@ -373,7 +294,6 @@ async def test_list_by_document(store):
                 created_at=datetime.now(timezone.utc),
             )
         )
-    # Also create an artifact for a different document
     await store.create(
         ArtifactBundle(
             artifact_id="art_other",
@@ -409,7 +329,7 @@ async def test_list_by_document_empty(store):
 async def test_list_versions(store):
     """list_versions returns sorted unique version numbers."""
     versions = [1, 3, 5, 7]
-    for i, v in enumerate(versions):
+    for v in versions:
         await store.create(
             ArtifactBundle(
                 artifact_id=f"art_v{v}",
@@ -514,7 +434,7 @@ async def test_graph_neighborhood_1hop(store, populated_store):
     result = await store.get_graph_neighborhood("art_001", hops=1)
     node_ids = {n.artifact_id for n in result["nodes"]}
     assert "art_001" in node_ids
-    assert "art_000" in node_ids  # depends_on
+    assert "art_000" in node_ids
 
 
 @pytest.mark.asyncio()
@@ -625,46 +545,3 @@ async def test_get_inverse_citations_empty(store):
     """Inverse citations returns [] for a span with no citations."""
     results = await store.get_inverse_citations("doc_001", 0, 0)
     assert results == []
-
-
-# ---------------------------------------------------------------------------
-# ManagedSqliteStore context manager
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio()
-async def test_managed_sqlite_store():
-    """ManagedSqliteStore properly creates and closes connections."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
-
-    try:
-        async with ManagedSqliteStore(db_path) as store:
-            assert store._conn is not None
-            conn_id = id(store._conn)
-
-            bundle = await store.create(
-                ArtifactBundle(
-                    artifact_id="art_ctx",
-                    document_id="doc_ctx",
-                    version=1,
-                    artifact_type=ArtifactType.EXTRACTION,
-                    source_doc_hash="hash_ctx",
-                    confidence=0.9,
-                    payload={},
-                    provenance=Provenance(source_doc_hash="hash_ctx", document_id="doc_ctx"),
-                    created_at=datetime.now(timezone.utc),
-                )
-            )
-            assert bundle.artifact_id == "art_ctx"
-
-        # After context exit, connection should be closed
-        assert store._conn is None
-
-        # Verify data persisted
-        async with ManagedSqliteStore(db_path) as store2:
-            retrieved = await store2.get("art_ctx")
-            assert retrieved is not None
-            assert retrieved.artifact_id == "art_ctx"
-    finally:
-        Path(db_path).unlink(missing_ok=True)

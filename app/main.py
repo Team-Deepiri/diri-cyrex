@@ -1,7 +1,12 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
-from .routes.artifacts import router as artifacts_router
+from .routes.artifacts import get_pipeline_runner, router as artifacts_router
+from .pipeline.registry.postgres_store import PostgresArtifactStore
+from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
+from .database.postgres import get_postgres_manager
+from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.stages.parse import ParseStage
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from collections import defaultdict
@@ -405,6 +410,24 @@ app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
+
+
+async def _get_postgres_artifact_store() -> ArtifactStorePort:
+    store = PostgresArtifactStore(await get_postgres_manager())
+    await store.ensure_schema()
+    return store
+
+
+async def _get_pipeline_runner() -> PipelineRunnerPort:
+    store = await _get_postgres_artifact_store()
+    return ArtifactEngineOrchestrator(
+        store=store,
+        parse_stage=ParseStage(),
+    )
+
+
+# Prefer Postgres orchestrator over the route stub FakePipelineRunner.
+app.dependency_overrides[get_pipeline_runner] = _get_pipeline_runner
 
 if __name__ == "__main__":
     import uvicorn

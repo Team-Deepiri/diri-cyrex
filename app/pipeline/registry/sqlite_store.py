@@ -1,23 +1,13 @@
-"""SQLite-backed implementation of the Cyrex Artifact Store.
+"""SQLite-backed ArtifactStorePort — **deprecated for runtime**.
 
-This module provides:
-- ``init_db(db_path)`` — idempotent schema initialization with pragmas
-- ``SqliteArtifactStore`` — ``ArtifactStorePort`` implementation backed by
-  a three-table SQLite schema (artifacts, artifact_refs, citations)
+Production and Track A tests use ``PostgresArtifactStore`` against
+``postgres-cyrex`` / ``cyrex_db``. This module is retained only as a
+reference for the original three-table schema shape.
 
-The schema is **idempotent**: calling ``init_db()`` on an already-initialised
-database is a safe no-op.  WAL mode and foreign-key enforcement are set on
-every new connection.
+Prefer::
 
-Tracks A–D import ``contracts/models.py`` and ``contracts/ports.py`` — this
-module imports from contracts to re-use model definitions but never
-duplicates them.
-
-Usage::
-
-    from app.pipeline.registry.sqlite_store import SqliteArtifactStore
-
-    store = SqliteArtifactStore("cyrex.db")
+    from app.pipeline.registry.postgres_store import PostgresArtifactStore
+"""
     await store.init_db()  # safe to call at startup every time
     bundle = await store.create(my_bundle)
 """
