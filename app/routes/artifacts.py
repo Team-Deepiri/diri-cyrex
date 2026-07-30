@@ -41,12 +41,12 @@ def get_pipeline_runner() -> PipelineRunnerPort:
 
 
 def get_artifact_store() -> ArtifactStorePort:
-    """DI hook — wired in ``app.main`` to ``SqliteArtifactStore`` (Postgres TBD)."""
+    """DI hook — wired in ``app.main`` to ``PostgresArtifactStore`` (postgres-cyrex)."""
     raise RuntimeError("Artifact store dependency is not configured")
 
 
 def get_correction_writer() -> CorrectionWriterPort:
-    """DI hook — wired in ``app.main`` to ``SqliteCorrectionStore``."""
+    """DI hook — wired in ``app.main`` to ``PostgresCorrectionStore``."""
     return CorrectionStage()
 
 
@@ -129,15 +129,65 @@ async def voice_speech_health():
 
 @router.post("/voice/session")
 async def voice_live_session(user_id: Optional[str] = None, room_name: Optional[str] = None):
-    """Mint a LiveKit + WS session via deepiri-speech for realtime duplex."""
+    """Mint a LiveKit + WS session via deepiri-speech; persist Cyrex session + emit realtime."""
     if not settings.SPEECH_ENABLED:
         raise HTTPException(status_code=503, detail="Speech engine disabled")
     try:
-        return await get_speech_client().create_live_session(
+        speech_session = await get_speech_client().create_live_session(
             user_id=user_id, room_name=room_name
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"speech session failed: {exc}") from exc
+
+    cyrex_session_id: Optional[str] = None
+    try:
+        from app.core.session_manager import get_session_manager
+
+        sm = await get_session_manager()
+        if not getattr(sm, "_cleanup_task", None):
+            await sm.initialize()
+        session = await sm.create_session(
+            user_id=user_id,
+            metadata={
+                "kind": "voice",
+                "speech": speech_session,
+                "room_name": speech_session.get("room_name") or room_name,
+            },
+            context={
+                "livekit_url": speech_session.get("livekit_url")
+                or speech_session.get("url"),
+                "ws_url": speech_session.get("ws_url"),
+            },
+        )
+        cyrex_session_id = session.session_id
+    except Exception as exc:
+        logger.warning("cyrex session persist skipped: %s", exc)
+
+    try:
+        from app.integrations.realtime_streaming import (
+            StreamEventType,
+            get_stream_publisher,
+        )
+
+        publisher = await get_stream_publisher()
+        await publisher.connect()
+        await publisher.publish_event(
+            event_type=StreamEventType.CONNECTION,
+            data={
+                "kind": "voice_session",
+                "speech": speech_session,
+                "cyrex_session_id": cyrex_session_id,
+            },
+            channel=f"voice:{cyrex_session_id or speech_session.get('session_id') or 'anon'}",
+            session_id=cyrex_session_id,
+        )
+    except Exception as exc:
+        logger.warning("voice session realtime publish skipped: %s", exc)
+
+    return {
+        **speech_session,
+        "cyrex_session_id": cyrex_session_id,
+    }
 
 
 @router.post("/upload", response_model=ArtifactResponse)

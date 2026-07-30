@@ -36,10 +36,10 @@ class PostgreSQLManager:
         from ..settings import settings
         # Priority: parameter > environment variable > settings > default
         # For Docker, default to 'postgres' hostname (service name) instead of 'localhost'
-        self.host = host or os.getenv("POSTGRES_HOST") or getattr(settings, 'POSTGRES_HOST', None) or 'postgres'
+        self.host = host or os.getenv("POSTGRES_HOST") or getattr(settings, 'POSTGRES_HOST', None) or 'postgres-cyrex'
         self.port = port or int(os.getenv("POSTGRES_PORT") or getattr(settings, 'POSTGRES_PORT', 5432))
-        self.database = database or os.getenv("POSTGRES_DB") or getattr(settings, 'POSTGRES_DB', 'deepiri')
-        self.user = user or os.getenv("POSTGRES_USER") or getattr(settings, 'POSTGRES_USER', 'deepiri')
+        self.database = database or os.getenv("POSTGRES_DB") or getattr(settings, 'POSTGRES_DB', 'cyrex_db')
+        self.user = user or os.getenv("POSTGRES_USER") or getattr(settings, 'POSTGRES_USER', 'deepiri_cyrex')
         self.password = password or os.getenv("POSTGRES_PASSWORD") or getattr(settings, 'POSTGRES_PASSWORD')
         self.min_size = min_size
         self.max_size = max_size

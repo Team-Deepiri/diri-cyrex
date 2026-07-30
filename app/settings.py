@@ -79,12 +79,12 @@ class Settings(BaseSettings):
     # env var. Defaults to an app-relative persistent directory (./agent_sandbox).
     AGENT_FILE_SANDBOX_ROOT: str = "./agent_sandbox"
 
-    # PostgreSQL Configuration
-    # Default to 'postgres' (Docker service name) instead of 'localhost' for containerized deployments
-    POSTGRES_HOST: str = "postgres"
+    # PostgreSQL — defaults match compose ``postgres-cyrex`` / ``cyrex_db``
+    # (in-network port is 5432; host-mapped 5434 is for laptop clients only)
+    POSTGRES_HOST: str = "postgres-cyrex"
     POSTGRES_PORT: int = 5432
-    POSTGRES_DB: str = "deepiri"
-    POSTGRES_USER: str = "deepiri"
+    POSTGRES_DB: str = "cyrex_db"
+    POSTGRES_USER: str = "deepiri_cyrex"
     POSTGRES_PASSWORD: str = "deepiripassword"
 
     # Epistemic pressure scoring

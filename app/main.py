@@ -64,8 +64,8 @@ from .routes.training_api import router as training_router
 from .database.postgres import get_postgres_manager
 from .pipeline.registry.pressure_store import PostgresPressureStore
 from .pipeline.registry.reckoning_store import PostgresReckoningStore
-from .pipeline.registry.sqlite_store import SqliteArtifactStore
-from .pipeline.registry.correction_store import SqliteCorrectionStore
+from .pipeline.registry.postgres_store import PostgresArtifactStore
+from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
 from .pipeline.contracts.ports import ArtifactStorePort, CorrectionWriterPort
 
 # Logging
@@ -433,19 +433,22 @@ async def _get_postgres_pressure_read_model():
 async def _get_postgres_reckoning_read_model():
     return PostgresReckoningStore(await get_postgres_manager())
 
-def _get_sqlite_artifact_store() -> ArtifactStorePort:
-    # TODO: swap for Tyler's PostgresArtifactStore when ready
-    return SqliteArtifactStore()
+async def _get_postgres_artifact_store() -> ArtifactStorePort:
+    store = PostgresArtifactStore(await get_postgres_manager())
+    await store.ensure_schema()
+    return store
 
 
-def _get_sqlite_correction_writer() -> CorrectionWriterPort:
-    return SqliteCorrectionStore()
+async def _get_postgres_correction_writer() -> CorrectionWriterPort:
+    store = PostgresCorrectionStore(await get_postgres_manager())
+    await store.ensure_schema()
+    return store
 
 
 app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
 app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
-app.dependency_overrides[get_artifact_store] = _get_sqlite_artifact_store
-app.dependency_overrides[get_correction_writer] = _get_sqlite_correction_writer
+app.dependency_overrides[get_artifact_store] = _get_postgres_artifact_store
+app.dependency_overrides[get_correction_writer] = _get_postgres_correction_writer
 
 if __name__ == "__main__":
     import uvicorn
