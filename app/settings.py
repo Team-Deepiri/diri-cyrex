@@ -193,8 +193,8 @@ class Settings(BaseSettings):
     NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
     
-    # Messaging Service Configuration
-    MESSAGING_SERVICE_URL: str = "http://messaging-service:5009"
+    # Messaging Service Configuration (compose maps messaging to 5010)
+    MESSAGING_SERVICE_URL: str = "http://messaging-service:5010"
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
