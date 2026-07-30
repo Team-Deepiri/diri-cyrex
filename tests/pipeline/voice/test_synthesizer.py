@@ -140,3 +140,62 @@ async def test_speech_payload_shape(store_with_lease):
     assert payload["document_id"] == "lease_001"
     assert "spoken_text" in payload
     assert payload["confessed"] is False
+
+
+def test_tokenize_drops_stopwords_and_underscores():
+    tokens = VoiceSynthesizer._tokenize("What is the base_rent on the lease?")
+    assert "base" in tokens
+    assert "rent" in tokens
+    assert "what" not in tokens
+    assert "the" not in tokens
+    assert "is" not in tokens
+
+
+def test_score_field_alias_boosts_rent():
+    from app.pipeline.contracts.models import Citation, CitationLocator, CitedField
+
+    cit = Citation(
+        citation_id="c1",
+        document_id="d1",
+        source_doc_hash="h",
+        locator=CitationLocator(locator_type="char_range", char_start=0, char_end=10),
+        quote="The base rent is $4500 per month",
+        confidence=0.9,
+    )
+    field = CitedField(
+        field_name="base_rent",
+        value=4500,
+        value_type="number",
+        citations=[cit],
+        confidence=0.9,
+    )
+    synth = VoiceSynthesizer.__new__(VoiceSynthesizer)
+    q = "how much is monthly rent"
+    q_tokens = VoiceSynthesizer._tokenize(q)
+    score = synth._score_field(q_tokens, q.lower(), field)
+    assert score >= 0.12
+
+
+def test_score_field_unrelated_is_low():
+    from app.pipeline.contracts.models import Citation, CitationLocator, CitedField
+
+    cit = Citation(
+        citation_id="c1",
+        document_id="d1",
+        source_doc_hash="h",
+        locator=CitationLocator(locator_type="char_range", char_start=0, char_end=10),
+        quote="The base rent is $4500 per month",
+        confidence=0.9,
+    )
+    field = CitedField(
+        field_name="base_rent",
+        value=4500,
+        value_type="number",
+        citations=[cit],
+        confidence=0.9,
+    )
+    synth = VoiceSynthesizer.__new__(VoiceSynthesizer)
+    q = "what color is the lobby carpet"
+    q_tokens = VoiceSynthesizer._tokenize(q)
+    score = synth._score_field(q_tokens, q.lower(), field)
+    assert score < 0.12

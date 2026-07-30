@@ -21,6 +21,7 @@ from .middleware.rate_limiter import RateLimitMiddleware
 from .middleware.request_timing import RequestTimingMiddleware
 from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
 from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
 from .pipeline.registry.postgres_store import PostgresArtifactStore
 from .pipeline.registry.pressure_store import PostgresPressureStore
 from .pipeline.registry.reckoning_store import PostgresReckoningStore
@@ -29,7 +30,12 @@ from .pipeline.stages.parse import ParseStage
 # Core routers
 from .routes.agent import router as agent_router
 from .routes.agent_playground_api import router as agent_playground_router
-from .routes.artifacts import get_artifact_store, get_pipeline_runner, router as artifacts_router
+from .routes.artifacts import (
+    get_artifact_store,
+    get_correction_writer,
+    get_pipeline_runner,
+    router as artifacts_router,
+)
 from .routes.bandit import router as bandit_router
 from .routes.challenge import router as challenge_router
 from .routes.collection_management_api import router as collection_management_router
@@ -412,11 +418,15 @@ async def _get_pipeline_runner() -> PipelineRunnerPort:
     )
 
 
+async def _get_postgres_correction_writer() -> CorrectionWriterPort:
+    store = PostgresCorrectionStore(postgres=await get_postgres_manager())
+    await store.ensure_schema()
+    return store
+
 app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
 app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
 app.dependency_overrides[get_artifact_store] = _get_postgres_artifact_store
-# Prefer Postgres orchestrator over the route stub FakePipelineRunner.
-app.dependency_overrides[get_pipeline_runner] = _get_pipeline_runner
+app.dependency_overrides[get_correction_writer] = _get_postgres_correction_writer
 
 if __name__ == "__main__":
     import uvicorn

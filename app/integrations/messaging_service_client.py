@@ -83,12 +83,9 @@ class MessagingServiceClient:
                 'metadata': metadata or {},
             }
             
+            # Service API expects agentInstanceId at the top level only.
             if agent_instance_id:
                 payload['agentInstanceId'] = agent_instance_id
-                payload['metadata'] = {
-                    **(payload.get('metadata') or {}),
-                    'agentInstanceId': agent_instance_id,
-                }
             # Use service-to-service endpoint for cyrex
             # This endpoint uses API key authentication instead of user auth
             response = await client.post(
