@@ -1,58 +1,58 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, JSONResponse
-from .routes.artifacts import get_pipeline_runner, router as artifacts_router
-from .pipeline.registry.postgres_store import PostgresArtifactStore
-from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
-from .database.postgres import get_postgres_manager
-from .pipeline.orchestrator import ArtifactEngineOrchestrator
-from .pipeline.stages.parse import ParseStage
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
-from collections import defaultdict
-from threading import Lock
-
+import asyncio
+import logging
+import os
 import time
 import uuid
-import logging
-import asyncio
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from threading import Lock
+from typing import AsyncGenerator, Optional
+
 import numpy as np
-import os
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-
-from .settings import settings
-from .logging_config import get_logger, RequestLogger, ErrorLogger
-from .middleware.request_timing import RequestTimingMiddleware
+from .database.postgres import get_postgres_manager
+from .logging_config import ErrorLogger, RequestLogger, get_logger
 from .middleware.rate_limiter import RateLimitMiddleware
+from .middleware.request_timing import RequestTimingMiddleware
+from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
+from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.registry.postgres_store import PostgresArtifactStore
+from .pipeline.stages.parse import ParseStage
 
 # Core routers
 from .routes.agent import router as agent_router
-from .routes.challenge import router as challenge_router
-from .routes.task import router as task_router
-from .routes.personalization import router as personalization_router
-from .routes.rag import router as rag_router
-from .routes.inference import router as inference_router
+from .routes.agent_playground_api import router as agent_playground_router
+from .routes.artifacts import get_pipeline_runner
+from .routes.artifacts import router as artifacts_router
 from .routes.bandit import router as bandit_router
-from .routes.session import router as session_router
-from .routes.monitoring import router as monitoring_router
-from .routes.intelligence_api import router as intelligence_api_router
-from .routes.orchestration_api import router as orchestration_router
+from .routes.challenge import router as challenge_router
+from .routes.collection_management_api import router as collection_management_router
 
 # Extended routers
 from .routes.company_automation_api import router as company_automation_router
-from .routes.universal_rag_api import router as universal_rag_router
-from .routes.document_indexing_api import router as document_indexing_router
-from .routes.collection_management_api import router as collection_management_router
-from .routes.language_intelligence_api import router as language_intelligence_router
-from .routes.document_extraction_api import router as document_extraction_router
-from .routes.testing_api import router as testing_router
-from .routes.vendor_fraud_api import router as vendor_fraud_router
-from .routes.agent_playground_api import router as agent_playground_router
-from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
+from .routes.document_extraction_api import router as document_extraction_router
+from .routes.document_indexing_api import router as document_indexing_router
 from .routes.documents import router as documents_router
+from .routes.inference import router as inference_router
+from .routes.intelligence_api import router as intelligence_api_router
+from .routes.language_intelligence_api import router as language_intelligence_router
+from .routes.monitoring import router as monitoring_router
+from .routes.orchestration_api import router as orchestration_router
+from .routes.personalization import router as personalization_router
+from .routes.rag import router as rag_router
+from .routes.session import router as session_router
+from .routes.task import router as task_router
+from .routes.testing_api import router as testing_router
 from .routes.training_api import router as training_router
+from .routes.universal_rag_api import router as universal_rag_router
+from .routes.vendor_fraud_api import router as vendor_fraud_router
+from .routes.workflow_api import router as workflow_router
+from .settings import settings
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -113,6 +113,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize Redis tool rate limiter
     try:
         from redis import asyncio as aioredis
+
         from .core.rate_limit_tools import RedisTokenBucketLimiter
         from .core.tool_registry import get_tool_registry
 
@@ -330,6 +331,7 @@ def root():
 
 # Direct AI endpoints
 from pydantic import BaseModel
+
 
 class EmbeddingRequest(BaseModel):
     text: str

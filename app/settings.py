@@ -1,14 +1,14 @@
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict, field_validator
-from pydantic import ValidationInfo
-from typing import Optional
 import logging
+from typing import Optional
+
+from pydantic import ConfigDict, ValidationInfo, field_validator
+from pydantic_settings import BaseSettings
 
 from .utils.security_validators import (
-    PasswordValidator,
     ApiKeyValidator,
+    PasswordValidator,
     UrlValidator,
-    detect_environment
+    detect_environment,
 )
 
 logger = logging.getLogger("cyrex.settings")
@@ -176,6 +176,7 @@ settings = Settings()
 
 # Configure logging on import
 from .logging_config import configure_logging
+
 configure_logging(
     log_level=settings.LOG_LEVEL,
     log_file=settings.LOG_FILE

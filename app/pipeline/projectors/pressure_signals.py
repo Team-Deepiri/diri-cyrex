@@ -7,7 +7,7 @@ consumes.
 
 from __future__ import annotations
 
-from typing import Any, List, Optional
+from typing import Any, List
 
 from app.pipeline.contracts.models import ArtifactBundle
 from app.pipeline.contracts.pressure_events import (

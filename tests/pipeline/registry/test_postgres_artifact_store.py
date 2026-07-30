@@ -21,7 +21,6 @@ from app.pipeline.contracts.models import (
     Provenance,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -477,7 +476,11 @@ async def test_get_inverse_citations(store):
                     citation_id="cit_inv_1",
                     document_id="doc_001",
                     source_doc_hash="hash_001",
-                    locator=CitationLocator(locator_type="char_range", char_start=100, char_end=110),
+                    locator=CitationLocator(
+                        locator_type="char_range",
+                        char_start=100,
+                        char_end=110,
+                    ),
                     quote="target span",
                     confidence=0.9,
                 )
@@ -500,7 +503,11 @@ async def test_get_inverse_citations(store):
                     citation_id="cit_inv_2",
                     document_id="doc_001",
                     source_doc_hash="hash_001",
-                    locator=CitationLocator(locator_type="char_range", char_start=100, char_end=110),
+                    locator=CitationLocator(
+                        locator_type="char_range",
+                        char_start=100,
+                        char_end=110,
+                    ),
                     quote="target span",
                     confidence=0.85,
                 )
@@ -523,7 +530,11 @@ async def test_get_inverse_citations(store):
                     citation_id="cit_inv_3",
                     document_id="doc_001",
                     source_doc_hash="hash_001",
-                    locator=CitationLocator(locator_type="char_range", char_start=500, char_end=510),
+                    locator=CitationLocator(
+                        locator_type="char_range",
+                        char_start=500,
+                        char_end=510,
+                    ),
                     quote="different span",
                     confidence=0.9,
                 )

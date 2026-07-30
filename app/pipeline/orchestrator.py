@@ -39,7 +39,7 @@ from app.pipeline.contracts.ports import (
     PipelineRunnerPort,
     PressureSignalSink,
 )
-from app.pipeline.stages.parse import ParseError, ParseResult, ParseStage
+from app.pipeline.stages.parse import ParseResult, ParseStage
 from app.pipeline.tools.reflect import ReflectTool
 
 logger = logging.getLogger(__name__)

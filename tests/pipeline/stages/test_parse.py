@@ -13,7 +13,6 @@ import pytest
 
 from app.pipeline.stages.parse import ParseError, ParseResult, ParseStage
 
-
 # ---------------------------------------------------------------------------
 # Fake parser
 # ---------------------------------------------------------------------------
@@ -24,7 +23,6 @@ class FakeDocumentParser:
     without triggering the ``app.services`` eager import chain."""
 
     async def parse_document(self, file_content: bytes, filename: str, **kwargs) -> Any:
-        from types import SimpleNamespace
         return SimpleNamespace(
             raw_text=file_content.decode("utf-8", errors="replace"),
             document_type=SimpleNamespace(value="txt"),
