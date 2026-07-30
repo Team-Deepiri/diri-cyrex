@@ -11,6 +11,7 @@ from app.pipeline.contracts.models import (
     Provenance,
     SynthesisResult,
 )
+from app.pipeline.contracts.ports import ExtractPort
 from app.pipeline.stages.duel import DuelStage, to_arena_rows
 from tests.fakes.duel import NoOpDuelRunner
 from tests.fakes.extract import FixedExtract
@@ -32,6 +33,14 @@ def _extract_stub(fields: list[CitedField]) -> FixedExtract:
     return FixedExtract(
         _synthesis("lease_001", "sha256:a1b2c3d4e5f6", fields)
     )
+
+
+class _RaisingExtract(ExtractPort):
+    """Simulates an agent that throws instead of returning a SynthesisResult."""
+
+    async def run(self, parsed_doc: object, document_id: str, source_doc_hash: str):
+        del parsed_doc, document_id, source_doc_hash
+        raise RuntimeError("agent backend unavailable")
 
 
 class TestDuelStageAgreement:
@@ -167,6 +176,50 @@ class TestDuelStateAssembly:
         )
         assert stage_result != fake_result
         assert len(stage_result.disagreements) > len(fake_result.disagreements)
+
+
+class TestDuelStageAgentFailure:
+    @pytest.mark.asyncio
+    async def test_agent_a_exception_degrades_instead_of_raising(self):
+        fields_b = [CitedField(field_name="notice_period", value=60, confidence=0.80)]
+        stage = DuelStage(agent_a=_RaisingExtract(), agent_b=_extract_stub(fields_b))
+        result = await stage.run(
+            parsed_doc={"raw_text": "irrelevant"},
+            document_id="lease_001",
+            source_doc_hash="sha256:a1b2c3d4e5f6",
+        )
+        assert isinstance(result, DuelState)
+        assert result.agent_a_fields == []
+        assert result.agent_b_fields == fields_b
+        assert len(result.disagreements) == 1
+        assert result.disagreements[0].agent_a_value is None
+        assert result.disagreements[0].agent_b_value == 60
+
+    @pytest.mark.asyncio
+    async def test_agent_b_exception_degrades_instead_of_raising(self):
+        fields_a = [CitedField(field_name="notice_period", value=90, confidence=0.88)]
+        stage = DuelStage(agent_a=_extract_stub(fields_a), agent_b=_RaisingExtract())
+        result = await stage.run(
+            parsed_doc={"raw_text": "irrelevant"},
+            document_id="lease_001",
+            source_doc_hash="sha256:a1b2c3d4e5f6",
+        )
+        assert isinstance(result, DuelState)
+        assert result.agent_a_fields == fields_a
+        assert result.agent_b_fields == []
+
+    @pytest.mark.asyncio
+    async def test_both_agents_raise_returns_empty_duel_state(self):
+        stage = DuelStage(agent_a=_RaisingExtract(), agent_b=_RaisingExtract())
+        result = await stage.run(
+            parsed_doc={"raw_text": "irrelevant"},
+            document_id="lease_001",
+            source_doc_hash="sha256:a1b2c3d4e5f6",
+        )
+        assert result.agent_a_fields == []
+        assert result.agent_b_fields == []
+        assert result.disagreements == []
+        assert result.resolution_status == DuelResolutionStatus.UNRESOLVED
 
 
 class TestArenaRowsHelper:

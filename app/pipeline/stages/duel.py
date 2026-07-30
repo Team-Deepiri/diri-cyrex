@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
 from app.pipeline.contracts.models import (
@@ -9,11 +10,44 @@ from app.pipeline.contracts.models import (
     DuelResolutionStatus,
     DuelState,
     FieldDiscrepancy,
+    Provenance,
+    SynthesisResult,
 )
 from app.pipeline.contracts.ports import DuelRunnerPort, ExtractPort
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_AGENT_A_ID = "agent_a"
 DEFAULT_AGENT_B_ID = "agent_b"
+
+
+def _empty_synthesis_result(document_id: str, source_doc_hash: str) -> SynthesisResult:
+    return SynthesisResult(
+        document_id=document_id,
+        source_doc_hash=source_doc_hash,
+        final_fields=[],
+        confidence=0.0,
+        provenance=Provenance(source_doc_hash=source_doc_hash, document_id=document_id),
+    )
+
+
+async def _run_agent_safely(
+    agent: ExtractPort,
+    agent_label: str,
+    parsed_doc: Any,
+    document_id: str,
+    source_doc_hash: str,
+) -> SynthesisResult:
+    """Run a single agent, degrading to an empty result on failure.
+
+    Mirrors extract.py's per-pass error handling: one agent failing should
+    not crash the whole duel, it should just contribute no fields.
+    """
+    try:
+        return await agent.run(parsed_doc, document_id, source_doc_hash)
+    except Exception as exc:
+        logger.error("Duel %s failed for document %s: %s", agent_label, document_id, exc)
+        return _empty_synthesis_result(document_id, source_doc_hash)
 
 
 def _values_equal(a: Any, b: Any) -> bool:
@@ -103,9 +137,12 @@ def to_arena_rows(state: DuelState) -> List[Dict[str, Any]]:
 class DuelStage(DuelRunnerPort):
     """Runs two independent ExtractPort agents and returns their DuelState.
 
-    v1 runs agents sequentially and compares only ``final_fields`` — real
-    per-pass provenance from each agent's SynthesisResult is discarded here;
-    downstream reckoning/pressure consumes ``DuelState`` only.
+    v1 runs agents sequentially (simplicity over throughput; parallelizing
+    with ``asyncio.gather`` is a documented v1.1 micro-opt) and compares
+    only ``final_fields`` — real per-pass provenance from each agent's
+    SynthesisResult is discarded here; downstream reckoning/pressure
+    consumes ``DuelState`` only. Each agent call is isolated: if one agent
+    raises, it degrades to an empty result rather than failing the duel.
     """
 
     def __init__(
@@ -126,8 +163,12 @@ class DuelStage(DuelRunnerPort):
         document_id: str,
         source_doc_hash: str,
     ) -> DuelState:
-        result_a = await self._agent_a.run(parsed_doc, document_id, source_doc_hash)
-        result_b = await self._agent_b.run(parsed_doc, document_id, source_doc_hash)
+        result_a = await _run_agent_safely(
+            self._agent_a, self._agent_a_id, parsed_doc, document_id, source_doc_hash
+        )
+        result_b = await _run_agent_safely(
+            self._agent_b, self._agent_b_id, parsed_doc, document_id, source_doc_hash
+        )
 
         disagreements = _compare_agent_fields(
             result_a.final_fields, result_b.final_fields
