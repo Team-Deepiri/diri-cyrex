@@ -120,9 +120,9 @@ async def voice_speech_health():
             "livekit_url": settings.LIVEKIT_PUBLIC_URL,
             "speech": health,
         }
-    except Exception as exc:
-        logger.warning("speech health failed: %s", exc)
-        return {"ok": False, "enabled": True, "error": str(exc)}
+    except Exception:
+        logger.exception("speech health failed")
+        return {"ok": False, "enabled": True, "error": "Speech health check failed"}
 
 
 @router.post("/voice/session")
