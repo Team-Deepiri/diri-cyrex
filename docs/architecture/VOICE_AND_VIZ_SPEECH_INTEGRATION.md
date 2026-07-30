@@ -2,21 +2,32 @@
 
 Working branch: `joe_black/feature/voice-and-viz-impl`  
 Target: `prajwala-immareddy/feature/voice-and-viz` (PR #139)  
-Speech stack: platform `deepiri-speech` + LiveKit + Pipecat (in-process)
+Speech stack: platform **deepiri-speech** (Pipecat in-process + LiveKit SFU)
 
-## From PR #139 (present on this branch)
+## Division of labor
 
-- `app/pipeline/voice/synthesizer.py` — document-grounded VoiceSynthesizer
-- Artifact Engine UI: Duel Arena, Reckoning Compass, Witness Stitch, Terrain Survey, Fault Drill-Down
-- Routes: artifacts, reckoning, voice query path via main
+| Piece | Owner |
+|-------|--------|
+| Document grounding (verbatim quotes / confession) | `VoiceSynthesizer` (Track C — keep) |
+| STT / TTS / LiveKit / Pipecat | `deepiri-speech` via `app/integrations/speech_client.py` |
+| UI | Witness Stitch — Ask / Mic / Speak |
 
-## Platform speech (from joe_black/feature/speech)
+## Wired paths
 
-- `setup.sh --run` brings up messaging + RTG + **livekit** + **speech**
-- cyrex-interface messaging / realtime delivery clients
+1. `POST /api/v1/artifacts/voice/query`
+   - optional `audio_b64` → speech `/v1/stt`
+   - `VoiceSynthesizer.query(...)` (never fabricates)
+   - `synthesize_audio` → speech `/v1/tts` → `audio_b64` in response
+2. `GET /api/v1/artifacts/voice/speech-health` → speech `/health`
+3. `POST /api/v1/artifacts/voice/session` → speech `/v1/sessions` (LiveKit token)
 
-## Implementation next
+## Env
 
-1. Wire Voice Query UI → `deepiri-speech` `/v1/stt` + `/v1/tts` (and/or LiveKit room) instead of mock-only confession
-2. Keep synthesizer grounding rules; use speech engines for audio I/O
-3. Optional: Pipecat WS `/v1/session/ws?protocol=json` for duplex agent turns that call Cyrex + synthesizer
+```bash
+SPEECH_ENABLED=1
+SPEECH_URL=http://speech:5020          # in-compose
+SPEECH_PUBLIC_URL=http://localhost:5020
+LIVEKIT_PUBLIC_URL=ws://localhost:7880
+```
+
+Platform PR: https://github.com/Team-Deepiri/deepiri-platform/pull/302
