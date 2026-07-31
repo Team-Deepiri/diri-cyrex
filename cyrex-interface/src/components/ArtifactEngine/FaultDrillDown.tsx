@@ -1,7 +1,8 @@
 // Click a fault zone on the Terrain Survey to show show which duel/reflect artifacts caused pressure.
 
-import React from 'react';
-import { PressureCell } from '../../types/artifactEngine';
+import React, { useEffect, useState } from 'react';
+import { PressureCell, ArtifactType } from '../../types/artifactEngine';
+import { getArtifact } from '../../api/artifactEngine';
 
 interface FaultDrillDownProps {
   cell: PressureCell | null;
@@ -9,11 +10,44 @@ interface FaultDrillDownProps {
   onClose?: () => void;
 }
 
+function badgeColor(type: ArtifactType | 'loading' | 'error'): string {
+  switch (type) {
+    case ArtifactType.EXTRACTION:
+      return '#4a9eff';
+    case ArtifactType.SYSTEM:
+      return '#cc44ff';
+    case ArtifactType.LEARNING:
+      return '#50c878';
+    case 'error':
+      return '#ff5050';
+    default:
+      return '#888';
+  }
+}
+
 export const FaultDrillDown: React.FC<FaultDrillDownProps> = ({
   cell,
   onArtifactClick,
   onClose,
 }) => {
+  const [artifactTypes, setArtifactTypes] = useState<Record<string, ArtifactType | 'loading' | 'error'>>({});
+
+  useEffect(() => {
+    if (!cell || cell.drill_down_artifact_ids.length === 0) return;
+
+    // Fetch each artifact's type
+    cell.drill_down_artifact_ids.forEach((artifactId) => {
+      if (artifactTypes[artifactId]) return;
+      setArtifactTypes((prev) => ({ ...prev, [artifactId]: 'loading' }));
+      getArtifact(artifactId)
+        .then((bundle) => {
+          setArtifactTypes((prev) => ({ ...prev, [artifactId]: bundle.artifact_type }));
+        })
+        .catch(() => {
+          setArtifactTypes((prev) => ({ ...prev, [artifactId]: 'error' }));
+        });
+    });
+  }, [cell]);
 
   // Show nothing if no fault zone is selected
   if (!cell) {
@@ -122,34 +156,60 @@ export const FaultDrillDown: React.FC<FaultDrillDownProps> = ({
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            {cell.drill_down_artifact_ids.map(artifactId => (
-              <button
-                key={artifactId}
-                onClick={() => onArtifactClick?.(artifactId)}
-                style={{
-                  background: '#2a2a2a',
-                  border: '1px solid #444',
-                  borderRadius: '6px',
-                  color: '#4a9eff',
-                  cursor: 'pointer',
-                  padding: '0.5rem 0.75rem',
-                  textAlign: 'left',
-                  fontSize: '0.85rem',
-                  fontFamily: 'monospace',
-                  transition: 'background 0.15s, border-color 0.15s',
-                }}
-                onMouseEnter={e => {
-                  (e.target as HTMLButtonElement).style.background = '#333';
-                  (e.target as HTMLButtonElement).style.borderColor = '#4a9eff';
-                }}
-                onMouseLeave={e => {
-                  (e.target as HTMLButtonElement).style.background = '#2a2a2a';
-                  (e.target as HTMLButtonElement).style.borderColor = '#444';
-                }}
-              >
-                → {artifactId}
-              </button>
-            ))}
+            {cell.drill_down_artifact_ids.map(artifactId => {
+              const artifactType = artifactTypes[artifactId];
+              return (
+                <button
+                  key={artifactId}
+                  onClick={() => onArtifactClick?.(artifactId)}
+                  style={{
+                    background: '#2a2a2a',
+                    border: '1px solid #444',
+                    borderRadius: '6px',
+                    color: '#4a9eff',
+                    cursor: 'pointer',
+                    padding: '0.5rem 0.75rem',
+                    textAlign: 'left',
+                    fontSize: '0.85rem',
+                    fontFamily: 'monospace',
+                    transition: 'background 0.15s, border-color 0.15s',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                  onMouseEnter={e => {
+                    (e.target as HTMLButtonElement).style.background = '#333';
+                    (e.target as HTMLButtonElement).style.borderColor = '#4a9eff';
+                  }}
+                  onMouseLeave={e => {
+                    (e.target as HTMLButtonElement).style.background = '#2a2a2a';
+                    (e.target as HTMLButtonElement).style.borderColor = '#444';
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: '0.65rem',
+                      fontFamily: 'sans-serif',
+                      fontWeight: 700,
+                      padding: '0.1rem 0.4rem',
+                      borderRadius: '4px',
+                      color: badgeColor(artifactType ?? 'loading'),
+                      background: `${badgeColor(artifactType ?? 'loading')}22`,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.03em',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {!artifactType || artifactType === 'loading'
+                      ? '···'
+                      : artifactType === 'error'
+                      ? 'unknown'
+                      : artifactType}
+                  </span>
+                  <span>→ {artifactId}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1,11 +1,16 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
-from .routes.artifacts import router as artifacts_router
+from .routes.artifacts import get_artifact_store, router as artifacts_router
 from .routes.pressure import (
     get_pressure_read_model,
     router as pressure_router,
 )
+from .routes.reckoning import (
+    get_reckoning_read_model,
+    router as reckoning_router,
+)
+
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Optional
 from collections import defaultdict
@@ -54,6 +59,9 @@ from .routes.documents import router as documents_router
 from .routes.training_api import router as training_router
 from .database.postgres import get_postgres_manager
 from .pipeline.registry.pressure_store import PostgresPressureStore
+from .pipeline.registry.reckoning_store import PostgresReckoningStore
+from .pipeline.registry.sqlite_store import SqliteArtifactStore
+from .pipeline.contracts.ports import ArtifactStorePort
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -412,13 +420,21 @@ app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
 app.include_router(pressure_router)
-
+app.include_router(reckoning_router)
 
 async def _get_postgres_pressure_read_model():
     return PostgresPressureStore(await get_postgres_manager())
 
+async def _get_postgres_reckoning_read_model():
+    return PostgresReckoningStore(await get_postgres_manager())
+
+def _get_sqlite_artifact_store() -> ArtifactStorePort:
+    # TODO: swap for Tyler's PostgresArtifactStore
+    return SqliteArtifactStore()
 
 app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
+app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
+app.dependency_overrides[get_artifact_store] = _get_sqlite_artifact_store
 
 if __name__ == "__main__":
     import uvicorn
