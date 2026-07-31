@@ -10,7 +10,7 @@ These tests verify that the orchestrator correctly:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import pytest
 
@@ -26,11 +26,9 @@ from app.pipeline.contracts.ports import (
     ExtractPort,
 )
 from app.pipeline.orchestrator import ArtifactEngineOrchestrator
-from app.pipeline.stages.parse import ParseError, ParseResult, ParseStage
-from app.pipeline.tools.reflect import ReflectTool
+from app.pipeline.stages.parse import ParseError, ParseResult
 from tests.fakes.artifact_store import InMemoryArtifactStore
 from tests.fakes.pressure import FakePressureSignalSink
-
 
 # ---------------------------------------------------------------------------
 # Fakes for optional stages

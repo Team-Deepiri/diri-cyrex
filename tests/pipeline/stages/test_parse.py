@@ -13,7 +13,6 @@ import pytest
 
 from app.pipeline.stages.parse import ParseError, ParseResult, ParseStage
 
-
 # ---------------------------------------------------------------------------
 # Fake parser
 # ---------------------------------------------------------------------------
@@ -24,7 +23,6 @@ class FakeDocumentParser:
     without triggering the ``app.services`` eager import chain."""
 
     async def parse_document(self, file_content: bytes, filename: str, **kwargs) -> Any:
-        from types import SimpleNamespace
         return SimpleNamespace(
             raw_text=file_content.decode("utf-8", errors="replace"),
             document_type=SimpleNamespace(value="txt"),
@@ -60,12 +58,13 @@ async def test_parse_txt(stage: ParseStage):
 
 @pytest.mark.asyncio()
 async def test_parse_markdown(stage: ParseStage):
-    """A markdown file is parsed correctly."""
+    """Markdown bytes parse; FakeDocumentParser returns type from extension-agnostic txt."""
     content = b"# Heading\n\nSome *markdown* content."
     result = await stage.parse(content, "readme.md")
     assert isinstance(result, ParseResult)
     assert result.raw_text
-    assert result.document_type in ("md", "txt", "unknown")
+    # FakeDocumentParser always yields document_type=txt (not a full mime sniffer).
+    assert result.document_type == "txt"
 
 
 @pytest.mark.asyncio()
