@@ -26,7 +26,7 @@ class MessagingServiceClient:
             base_url: Base URL of the messaging service (defaults to MESSAGING_SERVICE_URL from settings)
             api_key: API key for authentication (defaults to CYREX_API_KEY from settings)
         """
-        self.base_url = base_url or getattr(settings, 'MESSAGING_SERVICE_URL', 'http://messaging-service:5009')
+        self.base_url = base_url or getattr(settings, 'MESSAGING_SERVICE_URL', 'http://messaging-service:5010')
         self.api_key = api_key or settings.CYREX_API_KEY
         self._client: Optional[httpx.AsyncClient] = None
         self.logger = logger
@@ -77,16 +77,15 @@ class MessagingServiceClient:
         try:
             client = await self._get_client()
             
-            payload = {
+            payload: Dict[str, Any] = {
                 'content': content,
                 'messageType': message_type,
                 'metadata': metadata or {},
             }
             
+            # Service API expects agentInstanceId at the top level only.
             if agent_instance_id:
-                payload['metadata'] = payload.get('metadata', {})
-                payload['metadata']['agentInstanceId'] = agent_instance_id
-            
+                payload['agentInstanceId'] = agent_instance_id
             # Use service-to-service endpoint for cyrex
             # This endpoint uses API key authentication instead of user auth
             response = await client.post(

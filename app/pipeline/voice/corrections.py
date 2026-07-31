@@ -35,7 +35,7 @@ class CorrectionStage(CorrectionWriterPort):
         learning = LearningArtifact(
             document_id=corrected_citation.document_id,
             field_name=field_name,
-            original_value=None,  # TODO: implement Tyler's PostgresArtifactStore later
+            original_value=None,  # filled when PostgresArtifactStore look-up is wired into corrections UI
             corrected_value=corrected_value,
             corrected_citation=corrected_citation,
             actor_id=actor_id,
