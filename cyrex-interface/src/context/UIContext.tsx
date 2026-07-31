@@ -20,7 +20,8 @@ export type TabId =
   | 'history'
   | 'vendor-fraud'
   | 'agent-playground'
-  | 'document-indexing';
+  | 'document-indexing'
+  | 'artifact-engine';
 
 interface UIState {
   activeTab: TabId;

@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "deepiri"
     POSTGRES_PASSWORD: str = "deepiripassword"
 
+    # Epistemic pressure scoring
+    PRESSURE_PASS_DISCREPANCY_WEIGHT: float = 0.35
+    PRESSURE_REFLECT_FAILURE_WEIGHT: float = 0.25
+    PRESSURE_LOW_CONFIDENCE_WEIGHT: float = 0.15
+    PRESSURE_DUEL_DISAGREEMENT_WEIGHT: float = 0.25
+
     # MinIO/S3 Configuration
     MINIO_ROOT_USER: str = "minioadmin"
     MINIO_ROOT_PASSWORD: str = "minioadmin"
@@ -243,7 +249,13 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "deepiri"
     POSTGRES_USER: str = "deepiri"
     POSTGRES_PASSWORD: str = "deepiripassword"
-    
+
+    # Epistemic pressure scoring
+    PRESSURE_PASS_DISCREPANCY_WEIGHT: float = 0.35
+    PRESSURE_REFLECT_FAILURE_WEIGHT: float = 0.25
+    PRESSURE_LOW_CONFIDENCE_WEIGHT: float = 0.15
+    PRESSURE_DUEL_DISAGREEMENT_WEIGHT: float = 0.25
+
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 

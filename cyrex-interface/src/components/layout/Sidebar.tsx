@@ -21,7 +21,8 @@ import {
   FaSearchDollar,
   FaRobot,
   FaSitemap,
-  FaFileAlt
+  FaFileAlt,
+  FaLayerGroup
 } from 'react-icons/fa';
 import { useUI, type TabId } from '../../context/UIContext';
 import styles from './Sidebar.module.css';
@@ -46,7 +47,8 @@ const navigationItems: NavigationItem[] = [
   { id: 'safety', label: 'Safety / Guardrails', icon: <FaShieldAlt /> },
   { id: 'chat', label: 'Chat', icon: <FaComments /> },
   { id: 'vendor-fraud', label: 'Vendor Fraud Detection', icon: <FaSearchDollar /> },
-  { id: 'document-indexing', label: 'Document Indexing', icon: <FaFileAlt /> }, 
+  { id: 'document-indexing', label: 'Document Indexing', icon: <FaFileAlt /> },
+  { id: 'artifact-engine', label: 'Artifact Engine', icon: <FaLayerGroup /> },
   { id: 'health', label: 'Health', icon: <FaHeartbeat /> },
   { id: 'history', label: 'History', icon: <FaHistory /> }
 ];
