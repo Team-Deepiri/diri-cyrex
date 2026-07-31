@@ -13,6 +13,12 @@ __all__ = [
     "get_openai_provider",
 ]
 
+LocalLLMProvider: Any
+MilvusVectorStore: Any
+RAGBridge: Any
+OpenAIProvider: Any
+get_openai_provider: Any
+
 
 def __getattr__(name: str) -> Any:
     """Load optional integration providers lazily to avoid package import cycles."""

@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "diri-cyrex"
-version = "0.2.0"
+version = "0.2.1"
 description = "AI agent orchestration platform with Ollama, LangGraph, and deep learning capabilities"
 readme = "README.md"
 license = "Apache-2.0"
@@ -99,7 +99,7 @@ deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dat
 deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.0" }
 deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.0", extras = ["modelkit", "distributed"] }
 diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "8a34be9e2576b862cab85cd0ca86460064e86ad6", extras = ["redis", "numpy"] }
-deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.1.1", extras = ["torch"] }
+deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.0", extras = ["torch"] }
 
 # Platform-specific extras (not installed by default)
 torch = { version = ">=2.0.0", optional = true }

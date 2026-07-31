@@ -5,6 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional, Any, List
 from datetime import datetime
+from app.pipeline.voice.corrections import CorrectionStage
+from app.pipeline.contracts.ports import CorrectionWriterPort
 
 from ..pipeline.contracts.models import (
     ArtifactBundle,
@@ -21,12 +23,16 @@ logger = get_logger("cyrex.api.artifacts")
 router = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
 
 # ----------------------------------------------------------------------------
-# TODO: swap for real in bootstrap.py (Week 5)
+# TODO: swap for real in bootstrap.py and PostgresArtifactStore
 # ----------------------------------------------------------------------------
 
 def get_pipeline_runner() -> PipelineRunnerPort:
     from tests.fakes.pipeline_runner import FakePipelineRunner
     return FakePipelineRunner()
+
+def get_correction_writer() -> CorrectionWriterPort:
+    # TODO: replace with real PostgresArtifactStore-backed writer. Current implementation is in-memory
+    return CorrectionStage()
 
 # ----------------------------------------------------------------------------
 # Request / Response Models
@@ -164,18 +170,25 @@ async def get_provenance(
 async def submit_correction(
     artifact_id: str,
     request: CorrectionRequest,
-    runner: PipelineRunnerPort = Depends(get_pipeline_runner)
+    runner: PipelineRunnerPort = Depends(get_pipeline_runner),
+    correction_writer: CorrectionWriterPort = Depends(get_correction_writer),
 ):
     """Submit a human correction. Returns a LearningArtifact bundle."""
     logger.info("Correction submitted", artifact_id=artifact_id, field=request.field_name)
     try:
-        # TODO: swap for real CorrectionWriterPort later
+        bundle = await correction_writer.submit_correction(
+            artifact_id=artifact_id,
+            field_name=request.field_name,
+            corrected_value=request.corrected_value,
+            corrected_citation=request.corrected_citation,
+            actor_id=request.actor_id,
+        )
         return CorrectionResponse(
             success=True,
             artifact_id=artifact_id,
             field_name=request.field_name,
             corrected_value=request.corrected_value,
-            submitted_at=datetime.utcnow().isoformat(),
+            submitted_at=bundle.created_at.isoformat(),
         )
     except Exception as e:
         logger.error(f"Correction submission failed: {e}", exc_info=True)

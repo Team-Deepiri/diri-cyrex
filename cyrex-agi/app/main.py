@@ -48,7 +48,8 @@ def _parse_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
                 out[key] = json.loads(value)
                 continue
             except json.JSONDecodeError:
-                pass
+                # Best-effort parsing: keep the original value when JSON is malformed.
+                _state["errors"] += 1
         out[key] = value
     # Sugar Glider often wraps JSON under "payload"
     inner = out.get("payload")
@@ -58,7 +59,8 @@ def _parse_fields(fields: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(parsed, dict):
                 return {**out, **parsed}
         except json.JSONDecodeError:
-            pass
+            # Payload is not valid JSON; preserve existing parsed fields.
+            _state["errors"] += 1
     if isinstance(inner, dict):
         return {**out, **inner}
     return out
@@ -71,8 +73,12 @@ async def _consume_via_redis(stream: str, counter_key: str, last_key: str) -> No
     client = redis.from_url(redis_url, decode_responses=True)
     try:
         await client.xgroup_create(stream, CONSUMER_GROUP, id="0", mkstream=True)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Idempotent startup: ignore "group already exists", surface anything else.
+        if "BUSYGROUP" in str(exc):
+            pass
+        else:
+            raise
 
     while True:
         try:
