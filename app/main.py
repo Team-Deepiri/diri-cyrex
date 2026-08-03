@@ -3,14 +3,6 @@ import logging
 import os
 import time
 import uuid
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response, JSONResponse
-from .routes.artifacts import router as artifacts_router
-from .routes.pressure import (
-    get_pressure_read_model,
-    router as pressure_router,
-)
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from threading import Lock
@@ -34,11 +26,14 @@ from .pipeline.stages.parse import ParseStage
 # Core routers
 from .routes.agent import router as agent_router
 from .routes.agent_playground_api import router as agent_playground_router
-from .routes.artifacts import get_pipeline_runner
-from .routes.artifacts import router as artifacts_router
+from .routes.artifacts import get_pipeline_runner, router as artifacts_router
 from .routes.bandit import router as bandit_router
 from .routes.challenge import router as challenge_router
 from .routes.collection_management_api import router as collection_management_router
+from .routes.pressure import (
+    get_pressure_read_model,
+    router as pressure_router,
+)
 
 # Extended routers
 from .routes.company_automation_api import router as company_automation_router
@@ -60,12 +55,8 @@ from .routes.training_api import router as training_router
 from .routes.universal_rag_api import router as universal_rag_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.workflow_api import router as workflow_router
-from .settings import settings
-from .routes.cyrex_guard_api import router as cyrex_guard_router
-from .routes.documents import router as documents_router
-from .routes.training_api import router as training_router
-from .database.postgres import get_postgres_manager
 from .pipeline.registry.pressure_store import PostgresPressureStore
+from .settings import settings
 
 # Logging
 logger = get_logger("cyrex.main")
