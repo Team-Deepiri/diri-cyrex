@@ -161,8 +161,14 @@ class PipelineRunnerPort(Protocol):
         file_content: bytes,
         filename: str,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
     ) -> ArtifactBundle:
-        """Run the full extraction pipeline on a document."""
+        """Run the full extraction pipeline on a document.
+
+        ``timeout`` is an optional overall deadline in seconds; when exceeded
+        the run is cancelled and ``asyncio.TimeoutError`` propagates.
+        """
 
 
 # ============================================================================

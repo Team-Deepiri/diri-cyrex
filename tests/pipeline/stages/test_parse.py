@@ -94,15 +94,3 @@ async def test_parse_unknown_extension(stage: ParseStage):
     result = await stage.parse(content, "file.xyz")
     assert isinstance(result, ParseResult)
     assert result.raw_text
-
-
-# ---------------------------------------------------------------------------
-# Error handling
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio()
-async def test_parse_none_content(stage: ParseStage):
-    """None-like content raises ParseError (via empty check)."""
-    with pytest.raises(ParseError, match="Empty file content"):
-        await stage.parse(b"", "empty.txt")

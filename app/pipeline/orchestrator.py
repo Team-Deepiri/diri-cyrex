@@ -1,7 +1,7 @@
 """Artifact Engine Orchestrator — implements PipelineRunnerPort.
 
 Wires parse → optional anticipate/extract/duel → reflect → Postgres store
-(+ optional pressure emit via store sink).
+(optional pressure emit happens inside the store via its ``PressureSignalSink``).
 
 Usage::
 
@@ -18,6 +18,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from datetime import datetime, timezone
@@ -37,9 +38,9 @@ from app.pipeline.contracts.ports import (
     DuelRunnerPort,
     ExtractPort,
     PipelineRunnerPort,
-    PressureSignalSink,
 )
 from app.pipeline.stages.parse import ParseResult, ParseStage
+from app.pipeline.tools.confidence import ConfidenceCalculator
 from app.pipeline.tools.reflect import ReflectTool
 
 logger = logging.getLogger(__name__)
@@ -62,24 +63,48 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         anticipate: Optional[AnticipatePort] = None,
         extract: Optional[ExtractPort] = None,
         duel: Optional[DuelRunnerPort] = None,
-        pressure_sink: Optional[PressureSignalSink] = None,
         reflect_tool: Optional[ReflectTool] = None,
+        confidence_calculator: Optional[ConfidenceCalculator] = None,
     ) -> None:
         self._store = store
         self._parse_stage = parse_stage
         self._anticipate = anticipate
         self._extract = extract
         self._duel = duel
-        self._pressure_sink = pressure_sink
         self._reflect_tool = reflect_tool or ReflectTool()
+        self._confidence_calculator = confidence_calculator or ConfidenceCalculator()
 
     async def run_document(
         self,
         file_content: bytes,
         filename: str,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
     ) -> ArtifactBundle:
-        meta = metadata or {}
+        """Run the full extraction pipeline on a document.
+
+        Args:
+            file_content: Raw document bytes.
+            filename: Source filename (extension drives parse behavior).
+            metadata: Optional run context (``document_id``, ``document_class``,
+                ``model_id``).
+            timeout: Optional overall pipeline timeout in seconds. When exceeded,
+                ``asyncio.TimeoutError`` propagates and the run is cancelled.
+        """
+        if timeout is not None:
+            return await asyncio.wait_for(
+                self._run_pipeline(file_content, filename, metadata or {}),
+                timeout=timeout,
+            )
+        return await self._run_pipeline(file_content, filename, metadata or {})
+
+    async def _run_pipeline(
+        self,
+        file_content: bytes,
+        filename: str,
+        meta: Dict[str, Any],
+    ) -> ArtifactBundle:
         document_id = meta.get("document_id", f"doc_{uuid4().hex}")
         source_doc_hash = hashlib.sha256(file_content).hexdigest()
         now = datetime.now(timezone.utc)
@@ -170,7 +195,7 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
             version=1,
             artifact_type=ArtifactType.EXTRACTION,
             source_doc_hash=source_doc_hash,
-            confidence=self._compute_confidence(
+            confidence=self._confidence_calculator.compute(
                 synthesis_result, reflection_result, parse_result
             ),
             payload=payload,
@@ -205,28 +230,3 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
             bundle.artifact_id,
         )
         return bundle
-
-    @staticmethod
-    def _compute_confidence(
-        synthesis_result: Optional[SynthesisResult],
-        reflection_result: Optional[ReflectionResult],
-        parse_result: ParseResult,
-    ) -> float:
-        """Overall confidence from synthesis, reduced for reflection error issues.
-
-        Each reflection issue with severity ``error`` knocks 5% off (floor 0.10).
-        Warnings are recorded in the payload but do not reduce this score.
-        """
-        confidence = 0.5
-
-        if synthesis_result is not None:
-            confidence = float(synthesis_result.confidence)
-
-        if reflection_result is not None and reflection_result.issues:
-            error_count = sum(
-                1 for i in reflection_result.issues if getattr(i, "severity", None) == "error"
-            )
-            confidence -= error_count * 0.05
-            confidence = max(confidence, 0.10)
-
-        return round(confidence, 4)

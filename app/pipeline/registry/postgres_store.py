@@ -148,6 +148,16 @@ class PostgresArtifactStore:
             created_at=created,
         )
 
+    async def _bundle_from_row(self, db: Any, row: Any) -> ArtifactBundle:
+        """Materialize a bundle from a row and load its citations.
+
+        Keeps retrieval paths consistent: every method that returns
+        ``ArtifactBundle`` includes citations (same as ``get()``).
+        """
+        bundle = self._row_to_bundle(row)
+        bundle.citations = await self._load_citations(db, bundle.artifact_id)
+        return bundle
+
     async def _insert_refs(self, db: Any, bundle: ArtifactBundle) -> None:
         now = datetime.now(timezone.utc)
         edges: list[tuple[str, str, str]] = []
@@ -279,9 +289,7 @@ class PostgresArtifactStore:
         )
         if row is None:
             return None
-        bundle = self._row_to_bundle(row)
-        bundle.citations = await self._load_citations(db, bundle.artifact_id)
-        return bundle
+        return await self._bundle_from_row(db, row)
 
     async def get_latest(
         self,
@@ -311,7 +319,7 @@ class PostgresArtifactStore:
                 """,
                 document_id,
             )
-        return self._row_to_bundle(row) if row else None
+        return await self._bundle_from_row(db, row) if row else None
 
     async def list_by_document(self, document_id: str) -> List[ArtifactBundle]:
         await self.ensure_schema()
@@ -324,7 +332,7 @@ class PostgresArtifactStore:
             """,
             document_id,
         )
-        return [self._row_to_bundle(r) for r in rows]
+        return [await self._bundle_from_row(db, r) for r in rows]
 
     async def list_versions(self, document_id: str) -> List[int]:
         await self.ensure_schema()
@@ -355,7 +363,7 @@ class PostgresArtifactStore:
             document_id,
             version,
         )
-        return self._row_to_bundle(row) if row else None
+        return await self._bundle_from_row(db, row) if row else None
 
     async def get_graph_neighborhood(
         self,
@@ -377,40 +385,31 @@ class PostgresArtifactStore:
             nodes.append(bundle)
 
             if depth < hops:
-                out_rows = await db.fetch(
-                    ("SELECT to_artifact, ref_type FROM cyrex.artifact_refs "
-                     "WHERE from_artifact = $1"),
+                # One batched query per node for in+out edges (avoids two
+                # round trips per node in the traversal).
+                ref_rows = await db.fetch(
+                    ("SELECT from_artifact, to_artifact, ref_type "
+                     "FROM cyrex.artifact_refs "
+                     "WHERE from_artifact = $1 OR to_artifact = $1"),
                     current_id,
                 )
-                for ref_row in out_rows:
-                    ref_id = ref_row["to_artifact"]
+                for ref in ref_rows:
+                    if ref["from_artifact"] == current_id:
+                        ref_id = ref["to_artifact"]
+                        edge = {
+                            "from": current_id,
+                            "to": ref_id,
+                            "ref_type": ref["ref_type"],
+                        }
+                    else:
+                        ref_id = ref["from_artifact"]
+                        edge = {
+                            "from": ref_id,
+                            "to": current_id,
+                            "ref_type": ref["ref_type"],
+                        }
                     if ref_id not in visited:
-                        edges.append(
-                            {
-                                "from": current_id,
-                                "to": ref_id,
-                                "ref_type": ref_row["ref_type"],
-                            }
-                        )
-                        visited.add(ref_id)
-                        await _traverse(ref_id, depth + 1)
-
-            if depth < hops:
-                in_rows = await db.fetch(
-                    ("SELECT from_artifact, ref_type FROM cyrex.artifact_refs "
-                     "WHERE to_artifact = $1"),
-                    current_id,
-                )
-                for ref_row in in_rows:
-                    ref_id = ref_row["from_artifact"]
-                    if ref_id not in visited:
-                        edges.append(
-                            {
-                                "from": ref_id,
-                                "to": current_id,
-                                "ref_type": ref_row["ref_type"],
-                            }
-                        )
+                        edges.append(edge)
                         visited.add(ref_id)
                         await _traverse(ref_id, depth + 1)
 
@@ -439,4 +438,4 @@ class PostgresArtifactStore:
             char_start,
             char_end,
         )
-        return [self._row_to_bundle(r) for r in rows]
+        return [await self._bundle_from_row(db, r) for r in rows]

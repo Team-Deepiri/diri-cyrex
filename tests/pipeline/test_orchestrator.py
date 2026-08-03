@@ -28,7 +28,6 @@ from app.pipeline.contracts.ports import (
 from app.pipeline.orchestrator import ArtifactEngineOrchestrator
 from app.pipeline.stages.parse import ParseError, ParseResult
 from tests.fakes.artifact_store import InMemoryArtifactStore
-from tests.fakes.pressure import FakePressureSignalSink
 
 # ---------------------------------------------------------------------------
 # Fakes for optional stages
@@ -114,11 +113,9 @@ def orchestrator():
     """Standard orchestrator with in-memory store and fake parse stage."""
     store = InMemoryArtifactStore()
     parse_stage = FakeParseStage()
-    pressure_sink = FakePressureSignalSink()
     return ArtifactEngineOrchestrator(
         store=store,
         parse_stage=parse_stage,
-        pressure_sink=pressure_sink,
     )
 
 
@@ -184,28 +181,6 @@ class TestPipelineFlow:
 
         await orchestrator.run_document(b"test2", "test2.txt")
         assert parse_stage.call_count == 2
-
-
-# ---------------------------------------------------------------------------
-# Pressure event emission
-# ---------------------------------------------------------------------------
-
-
-class TestPressureEvents:
-    """Verify pressure events are emitted when sink is configured."""
-
-    @pytest.mark.asyncio()
-    async def test_pressure_sink_called_on_create(self, orchestrator):
-        """The pressure sink's emit_many is called during pipeline run."""
-        pressure_sink = orchestrator._pressure_sink
-        assert isinstance(pressure_sink, FakePressureSignalSink)
-        assert len(pressure_sink.events) == 0
-
-        await orchestrator.run_document(b"test", "test.txt")
-        # The store emits pressure events via the projector;
-        # since our payload has no discrepancies/low-confidence fields,
-        # the events list may be empty — but the sink was still called.
-        assert pressure_sink.events is not None
 
 
 # ---------------------------------------------------------------------------
@@ -294,3 +269,38 @@ class TestPayloadShape:
         bundle = await orchestrator.run_document(b"test", "test.txt")
         assert "fields" in bundle.payload
         assert isinstance(bundle.payload["fields"], list)
+
+
+# ---------------------------------------------------------------------------
+# Timeout
+# ---------------------------------------------------------------------------
+
+
+class TestTimeout:
+    """Verify the optional overall pipeline timeout."""
+
+    @pytest.mark.asyncio()
+    async def test_run_document_accepts_timeout(self, orchestrator):
+        """A generous timeout does not alter a successful run."""
+        bundle = await orchestrator.run_document(b"test", "test.txt", timeout=30)
+        assert bundle is not None
+        assert bundle.artifact_type == ArtifactType.EXTRACTION
+
+    @pytest.mark.asyncio()
+    async def test_run_document_times_out(self):
+        """A too-short timeout raises asyncio.TimeoutError."""
+        import asyncio
+
+        class SlowParseStage:
+            async def parse(self, file_content: bytes, filename: str) -> ParseResult:
+                await asyncio.sleep(10)
+                return ParseResult(raw_text="slow", document_type="txt")
+
+        store = InMemoryArtifactStore()
+        orch = ArtifactEngineOrchestrator(
+            store=store,
+            parse_stage=SlowParseStage(),
+        )
+        with pytest.raises(asyncio.TimeoutError):
+            await orch.run_document(b"test", "slow.txt", timeout=0.05)
+

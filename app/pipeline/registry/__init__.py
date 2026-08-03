@@ -1,1 +1,1 @@
-"""Cyrex Artifact Engine — SQLite store package."""
+"""Cyrex Artifact Engine — Postgres artifact store package."""

@@ -36,12 +36,30 @@ def _as_mapping_list(value: Any) -> List[Any]:
     return list(value)
 
 
-def project_pressure_events(bundle: ArtifactBundle) -> List[PressureEvent]:
-    """Inspect an ``ArtifactBundle`` and yield zero or more ``PressureEvent``s."""
+def project_pressure_events(
+    bundle: ArtifactBundle,
+    confidence_floor: float = _DEFAULT_CONFIDENCE_FLOOR,
+) -> List[PressureEvent]:
+    """Inspect an ``ArtifactBundle`` and yield zero or more ``PressureEvent``s.
+
+    Args:
+        bundle: The artifact to project.
+        confidence_floor: Floor below which fields emit ``LowConfidenceField``.
+            A per-bundle ``payload["confidence_floor"]`` value takes precedence
+            when present.
+
+    Note:
+        ``page`` is read from ``payload["page"]`` and stays ``None`` until an
+        upstream stage attributes an issue to a specific page. Today the parse
+        stage only reports ``page_count`` (a document total), which is not the
+        same granularity, so no value is inferred here.
+    """
     events: List[PressureEvent] = []
     payload = bundle.payload or {}
     document_id = bundle.document_id
     section_id = payload.get("section_id", bundle.artifact_id)
+    # Page-level attribution is populated by upstream stages when available;
+    # the projector never fabricates one (see note above).
     page = payload.get("page")
 
     synthesis = payload.get("synthesis_result") or {}
@@ -82,10 +100,10 @@ def project_pressure_events(bundle: ArtifactBundle) -> List[PressureEvent]:
             )
 
     fields = payload.get("fields") or synthesis.get("final_fields", [])
-    confidence_floor = payload.get("confidence_floor", _DEFAULT_CONFIDENCE_FLOOR)
+    effective_floor = payload.get("confidence_floor", confidence_floor)
     for field in _as_mapping_list(fields):
         cf = _get_field_value(field, "confidence")
-        if cf is not None and cf < confidence_floor:
+        if cf is not None and cf < effective_floor:
             events.append(
                 LowConfidenceField(
                     document_id=document_id,
