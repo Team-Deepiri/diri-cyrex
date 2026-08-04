@@ -23,6 +23,7 @@ pydantic-settings = ">=2.2.0"
 python-dotenv = ">=1.0.0"
 httpx = ">=0.27.0"
 python-multipart = ">=0.0.6"
+mcp = ">=1.0.0"
 
 # Observability
 structlog = ">=24.1.0"
