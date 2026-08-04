@@ -28,7 +28,7 @@ def definition(name="cyrex.test.echo"):
 
 
 def test_registry_requires_cyrex_namespace():
-    with pytest.raises(ValueError, match="cyrex\."):
+    with pytest.raises(ValueError, match=r"cyrex\."):
         definition(name="other.echo")
 
 
