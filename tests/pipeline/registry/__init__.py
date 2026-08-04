@@ -1,1 +1,1 @@
-"""Cyrex Artifact Engine — SQLite store tests."""
+"""Cyrex Artifact Engine — Postgres artifact store tests."""
