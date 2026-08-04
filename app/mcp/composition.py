@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from ..pipeline.registry.postgres_store import PostgresArtifactStore
-from ..pipeline.registry.pressure_store import PostgresPressureStore
-from ..pipeline.registry.reckoning_store import PostgresReckoningStore
+from ..pipeline.contracts.ports import (
+    ArtifactStorePort,
+    PressureReadModelPort,
+    ReckoningReadPort,
+)
 from .host import McpToolHost
 from .registry import McpToolRegistry
 from .tools.artifacts import register_artifact_tools
@@ -16,19 +18,25 @@ from .tools.voice import VoiceQueryPort, register_voice_tool
 
 def create_default_host(
     *,
+    artifact_store: ArtifactStorePort | None = None,
+    pressure_store: PressureReadModelPort | None = None,
+    reckoning_store: ReckoningReadPort | None = None,
     voice_service: VoiceQueryPort | None = None,
     rag_service: RagQueryPort | None = None,
 ) -> McpToolHost:
-    """Create a production-backed host with optional AI service adapters.
+    """Create a host from injected ports and optional AI service adapters.
 
-    Voice and RAG are explicitly injected because their current application
-    implementations are not yet stable service ports. This keeps MCP from
-    importing route globals or silently exposing the existing voice stub.
+    Concrete stores are supplied by the application composition root. Keeping
+    them out of Track D prevents MCP from importing another track's
+    implementation; tests can provide in-memory fakes through these ports.
     """
     registry = McpToolRegistry()
-    register_artifact_tools(registry, PostgresArtifactStore())
-    register_pressure_tool(registry, PostgresPressureStore())
-    register_reckoning_tool(registry, PostgresReckoningStore())
+    if artifact_store is not None:
+        register_artifact_tools(registry, artifact_store)
+    if pressure_store is not None:
+        register_pressure_tool(registry, pressure_store)
+    if reckoning_store is not None:
+        register_reckoning_tool(registry, reckoning_store)
     if voice_service is not None:
         register_voice_tool(registry, voice_service)
     if rag_service is not None:
