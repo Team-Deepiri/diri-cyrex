@@ -7,7 +7,7 @@ from ..pipeline.contracts.ports import (
     PressureReadModelPort,
     ReckoningReadPort,
 )
-from .host import McpToolHost
+from .host import InvocationRecorderPort, McpToolHost
 from .registry import McpToolRegistry
 from .tools.artifacts import register_artifact_tools
 from .tools.pressure import register_pressure_tool
@@ -18,6 +18,7 @@ from .tools.voice import VoiceQueryPort, register_voice_tool
 
 def create_default_host(
     *,
+    recorder: InvocationRecorderPort | None = None,
     artifact_store: ArtifactStorePort | None = None,
     pressure_store: PressureReadModelPort | None = None,
     reckoning_store: ReckoningReadPort | None = None,
@@ -41,4 +42,4 @@ def create_default_host(
         register_voice_tool(registry, voice_service)
     if rag_service is not None:
         register_rag_tool(registry, rag_service)
-    return McpToolHost(registry)
+    return McpToolHost(registry, recorder=recorder)

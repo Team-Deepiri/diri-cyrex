@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -35,8 +35,16 @@ class InvocationRecord:
     error_code: str | None = None
 
 
+@runtime_checkable
+class InvocationRecorderPort(Protocol):
+    """Port for recording MCP invocation outcomes."""
+
+    async def record(self, record: InvocationRecord) -> None:
+        """Persist or publish one invocation record."""
+
+
 class InMemoryInvocationRecorder:
-    """Small test/dev recorder; production persistence is a later adapter."""
+    """Small test/dev recorder implementing the invocation recorder port."""
 
     def __init__(self) -> None:
         self.records: list[InvocationRecord] = []
@@ -52,7 +60,7 @@ class McpToolHost:
         self,
         registry: McpToolRegistry,
         *,
-        recorder: InMemoryInvocationRecorder | None = None,
+        recorder: InvocationRecorderPort | None = None,
     ) -> None:
         self.registry = registry
         self.recorder = recorder or InMemoryInvocationRecorder()

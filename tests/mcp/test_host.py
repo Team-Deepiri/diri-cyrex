@@ -5,8 +5,14 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
+from app.mcp.composition import create_default_host
 from app.mcp.errors import McpToolError
-from app.mcp.host import InMemoryInvocationRecorder, McpToolHost
+from app.mcp.host import (
+    InMemoryInvocationRecorder,
+    InvocationRecord,
+    InvocationRecorderPort,
+    McpToolHost,
+)
 from app.mcp.registry import McpToolDefinition, McpToolRegistry
 
 
@@ -32,6 +38,28 @@ def make_host(handler, *, timeout_seconds: float = 1.0):
     )
     recorder = InMemoryInvocationRecorder()
     return McpToolHost(registry, recorder=recorder), recorder
+
+
+class RecordingStub:
+    def __init__(self) -> None:
+        self.records: list[InvocationRecord] = []
+
+    async def record(self, record: InvocationRecord) -> None:
+        self.records.append(record)
+
+
+def test_custom_recorder_matches_invocation_recorder_port() -> None:
+    recorder = RecordingStub()
+
+    assert isinstance(recorder, InvocationRecorderPort)
+
+
+def test_default_host_accepts_injected_recorder() -> None:
+    recorder = RecordingStub()
+
+    host = create_default_host(recorder=recorder)
+
+    assert host.recorder is recorder
 
 
 @pytest.mark.asyncio
