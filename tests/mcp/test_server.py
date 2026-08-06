@@ -28,6 +28,9 @@ def test_fastmcp_server_registers_namespaced_tools() -> None:
         "cyrex.pressure.get_map",
         "cyrex.reckoning.get",
     ]
+    assert "document_id" in server._tool_manager._tools[
+        "cyrex.pressure.get_map"
+    ].parameters["properties"]
 
 
 @pytest.mark.asyncio
