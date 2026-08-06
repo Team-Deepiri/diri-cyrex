@@ -6,6 +6,8 @@ import os
 from functools import wraps
 from typing import Any, Callable, ParamSpec
 
+from mcp.server.fastmcp import FastMCP
+
 from .composition import create_default_host
 from .errors import McpToolError
 from .host import McpToolHost
@@ -45,13 +47,6 @@ async def _invoke_for_mcp(
 
 
 def create_server(host: McpToolHost | None = None) -> Any:
-    try:
-        from mcp.server.fastmcp import FastMCP
-    except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
-            "The MCP host requires the 'mcp' package. Install project dependencies first."
-        ) from exc
-
     tool_host = host or create_default_host()
     server = FastMCP("cyrex")
 
