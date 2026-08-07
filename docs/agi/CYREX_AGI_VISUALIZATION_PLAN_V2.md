@@ -412,8 +412,8 @@ interface DuelFieldRow {
   field_name: string;
   agent_a_value: unknown;
   agent_b_value: unknown;
-  agent_a_confidence: number;
-  agent_b_confidence: number;
+  agent_a_confidence: number | none;
+  agent_b_confidence: number | none;
   is_disagreement: boolean;
 }
 ```

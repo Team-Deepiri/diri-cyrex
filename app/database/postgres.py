@@ -3,13 +3,15 @@ PostgreSQL Database Connection
 Async PostgreSQL connection management with connection pooling
 Integrates with the postgres container from docker-compose
 """
-from typing import Optional, AsyncGenerator, Dict, Any, List
-import asyncpg
-from contextlib import asynccontextmanager
-from ..settings import settings
-from ..logging_config import get_logger
-import os
 import asyncio
+import os
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional
+
+import asyncpg
+
+from ..logging_config import get_logger
+from ..settings import settings
 
 logger = get_logger("cyrex.database.postgres")
 
@@ -26,21 +28,23 @@ class PostgreSQLManager:
     def __init__(
         self,
         host: Optional[str] = None,
-        port: int = 5432,
+        port: Optional[int] = None,
         database: Optional[str] = None,
         user: Optional[str] = None,
         password: Optional[str] = None,
         min_size: int = 5,
         max_size: int = 20,
     ):
-        from ..settings import settings
         # Priority: parameter > environment variable > settings > default
-        # For Docker, default to 'postgres' hostname (service name) instead of 'localhost'
-        self.host = host or os.getenv("POSTGRES_HOST") or getattr(settings, 'POSTGRES_HOST', None) or 'postgres'
-        self.port = port or int(os.getenv("POSTGRES_PORT") or getattr(settings, 'POSTGRES_PORT', 5432))
-        self.database = database or os.getenv("POSTGRES_DB") or getattr(settings, 'POSTGRES_DB', 'deepiri')
-        self.user = user or os.getenv("POSTGRES_USER") or getattr(settings, 'POSTGRES_USER', 'deepiri')
-        self.password = password or os.getenv("POSTGRES_PASSWORD") or getattr(settings, 'POSTGRES_PASSWORD')
+        self.host = host or os.getenv("POSTGRES_HOST") or getattr(settings, 'POSTGRES_HOST', None) or 'postgres-cyrex'
+        self.port = int(
+            port
+            if port is not None
+            else (os.getenv("POSTGRES_PORT") or getattr(settings, "POSTGRES_PORT", 5432))
+        )
+        self.database = database or os.getenv("POSTGRES_DB") or getattr(settings, 'POSTGRES_DB', 'cyrex_db')
+        self.user = user or os.getenv("POSTGRES_USER") or getattr(settings, 'POSTGRES_USER', 'deepiri_cyrex')
+        self.password = password or os.getenv("POSTGRES_PASSWORD") or settings.POSTGRES_PASSWORD
         self.min_size = min_size
         self.max_size = max_size
         self._pool: Optional[asyncpg.Pool] = None

@@ -9,6 +9,7 @@ description = "AI agent orchestration platform with Ollama, LangGraph, and deep 
 readme = "README.md"
 license = "Apache-2.0"
 homepage = "https://github.com/Team-Deepiri/diri-cyrex"
+authors = ["Team Deepiri <dev@team-deepiri.com>"]
 packages = [{ include = "app" }]
 
 [tool.poetry.dependencies]
