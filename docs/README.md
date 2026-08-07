@@ -2,6 +2,17 @@
 
 Welcome to the Cyrex AI platform documentation. This directory contains comprehensive documentation organized by topic.
 
+**Start here, in this order:** [What Is Cyrex?](./WHAT_IS_CYREX.md) (plain-language, no
+jargon) → [AGI Status Ledger](./agi/STATUS.md) (what's actually built vs. planned, live) →
+[Legacy Surface Debrief](./LEGACY_SURFACE_DEBRIEF.md) (the ~58k LOC that isn't the AGI
+pipeline — what works, what's rotting).
+
+**⚠️ Docs-freshness note (2026-08-07):** roughly 22 documents below were last substantively
+edited in January 2026 and have not been checked against the current codebase since. They are
+listed as-is; treat anything not tagged ⚠️ below with normal trust, and anything that *is*
+tagged as a historical snapshot, not current fact. Three in particular claim completeness they
+no longer have and are flagged explicitly.
+
 ## Documentation Structure
 
 ### [Getting Started](./getting-started/)
@@ -17,11 +28,24 @@ System architecture, design patterns, and core system documentation.
 
 - **[Architecture](./architecture/ARCHITECTURE.md)** - Overall system architecture and design
 - **[Core Systems](./architecture/CORE_SYSTEMS.md)** - Core infrastructure components
-- **[Complete Implementation](./architecture/CYREX_COMPLETE_IMPLEMENTATION.md)** - Full implementation details
+- **[Complete Implementation](./architecture/CYREX_COMPLETE_IMPLEMENTATION.md)** ⚠️ *Stale (Jan 2026) — despite the title, not complete; the AGI pipeline it predates is documented in [`docs/agi/STATUS.md`](./agi/STATUS.md)*
 - **[Data Storage Architecture](./architecture/DATA_STORAGE_ARCHITECTURE.md)** - Storage system design
-- **[Final Storage Architecture](./architecture/FINAL_STORAGE_ARCHITECTURE.md)** - Finalized storage design
-- **[Postgres Schema Reorganization](./architecture/POSTGRES_SCHEMA_REORGANIZATION_COMPLETE.md)** - Database schema changes
+- **[Final Storage Architecture](./architecture/FINAL_STORAGE_ARCHITECTURE.md)** ⚠️ *Stale (Jan 2026) — not final; two overlapping storage docs exist, neither reconciled*
+- **[Postgres Schema Reorganization](./architecture/POSTGRES_SCHEMA_REORGANIZATION_COMPLETE.md)** ⚠️ *Stale (Jan 2026) — superseded by [`docs/agi/CYREX_AGI_POSTGRES_SCHEMA.md`](./agi/CYREX_AGI_POSTGRES_SCHEMA.md), which itself is still ~2 of 75 tables implemented*
 - **[Training Data Store](./architecture/TRAINING_DATA_STORE_IMPLEMENTATION.md)** - Training data storage system
+
+### 🧠 [AGI / Artifact Engine](./agi/)
+The in-progress replatform toward a computed knowledge graph. Not yet part of the demoable
+product — see the status ledger before assuming anything here is shipped.
+
+- **[Status Ledger](./agi/STATUS.md)** ⭐ — current build status, component by component. Read this, not the plan docs, for "is X done."
+- **[Onboarding](./agi/ONBOARDING.md)** - the fresh-clone setup path (currently broken without these steps)
+- **[Intake](./agi/INTAKE.md)** - external ideas/sources, triaged into tasks
+- **[Design Plan](./agi/CYREX_AGI_DESIGN_PLAN_V2.md)** - architecture thesis and rationale
+- **[Implementation Plan](./agi/CYREX_AGI_IMPLEMENTATION_PLAN_V2.md)** - wave-based task plan and roster
+- **[Postgres Schema](./agi/CYREX_AGI_POSTGRES_SCHEMA.md)** - full `cyrex.*` table inventory
+- **[Visualization Plan](./agi/CYREX_AGI_VISUALIZATION_PLAN_V2.md)** - Canvas viz primitives
+- **[Producer/Subscriber Map](./agi/CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md)** - event wiring, live vs. planned
 
 ### [Features](./features/)
 Detailed documentation for specific features and capabilities.
@@ -108,8 +132,8 @@ Build, deployment, optimization, and operational documentation.
 ## Additional Resources
 
 - **Root README**: See the [root README](../README.md) for project overview
-- **Algorithm Integration Analysis**: See [ALGORITHM_INTEGRATION_ANALYSIS.md](../ALGORITHM_INTEGRATION_ANALYSIS.md) - Cross-platform algorithm analysis
-- **RTX 5080 Support**: See [RTX_5080_SUPPORT.md](../RTX_5080_SUPPORT.md) - RTX 5080/5090 GPU compatibility guide
+- **Algorithm Integration Analysis**: See [ALGORITHM_INTEGRATION_ANALYSIS.md](./ALGORITHM_INTEGRATION_ANALYSIS.md) - Cross-platform algorithm analysis
+- **RTX 5080 Support**: See [RTX_5080_SUPPORT.md](./RTX_5080_SUPPORT.md) - RTX 5080/5090 GPU compatibility guide
 - **Platform Documentation**: See [deepiri-platform/docs/DOCUMENTATION_INDEX.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/docs/DOCUMENTATION_INDEX.md) for the full platform documentation index (this repo is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform))
 - **API Documentation**: Swagger UI at http://localhost:8000/docs (when running)
 - **Code Comments**: Inline documentation in source files
@@ -117,7 +141,7 @@ Build, deployment, optimization, and operational documentation.
   - [Agents README](../app/agents/README.md) - Agent system details
   - [Tests README](../tests/README.md) - Test suite documentation
   - [Cyrex Interface README](../cyrex-interface/README.md) - Frontend interface guide
-  - [Cyrex-AGI README](../cyrex-agi/README.md) - Autonomous AGI system (Phase 5, placeholder)
+  - [Cyrex-AGI README](../cyrex-agi/README.md) - Autonomous AGI system (V1 pressure observer running on port 8003 — see [`docs/agi/STATUS.md`](./agi/STATUS.md))
 
 ## Documentation Updates
 

@@ -1,13 +1,17 @@
 # Cyrex AGI Visualization Plan v2
 
 **Owner:** DeepIRI  
-**Timeline:** **8 weeks total** (parallel with backend — mocks Week 1, ship Tier 1 by Week 4, live Splicing Week 6–7)  
-**Team:** Prajawala (lead) · Sebastian (live-stream infra) · Tyler (graph APIs) · Evan (viz payload schemas)  
+**Timeline:** ~~8 weeks total~~ — superseded by dependency waves, see
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md). Nothing on the
+Canvas fetches live data as of the 2026-08-07 reconciliation — see [STATUS.md](./STATUS.md).  
+**Team:** Prajwala (lead) · Sebastian (live-stream infra) · Tyler (graph APIs) · Evan (viz payload schemas)  
 **Parent docs:**
+- [STATUS.md](./STATUS.md) — current per-VIZ build status
 - [CYREX_AGI_DESIGN_PLAN_V2.md](./CYREX_AGI_DESIGN_PLAN_V2.md) — architecture & capabilities
 - [CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md) — engineering todos
 - [CYREX_AGI_POSTGRES_SCHEMA.md](./CYREX_AGI_POSTGRES_SCHEMA.md) — viz read-model tables
 - [CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md](./CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md) — SSE / Redis stream sources
+- [INTAKE.md](./INTAKE.md) — where new external ideas get triaged into tasks
 
 ---
 
@@ -79,27 +83,33 @@ These are **DeepIRI-original** viz primitives — not generic chart types.
 
 ### Tier 1 — Ship by Week 4 (integration gate Week 5)
 
-| Viz ID | Name | Novel because | Primary owner |
-|--------|------|---------------|---------------|
-| **VIZ-01** | **Terrain Survey** | Topographic heatmap over `(section_id, page)` — epistemic pressure as elevation, fault zones as red ridges | Prajawala |
-| **VIZ-02** | **Fault Drill-Down** | Click ridge → expand `drill_down_artifact_ids[]` → jump to duel/reflect artifacts that caused pressure | Prajawala |
-| **VIZ-03** | **Duel Arena** | Split-pane: Agent A vs Agent B fields; **disagreements centered**, agreements muted | Prajawala |
-| **VIZ-04** | **Disagreement Ribbon** | Curved ribbon linking disagreeing field pairs across the Arena; width = `confidence_delta` | Prajawala |
-| **VIZ-05** | **Reckoning Compass** | Per-field gauge: predicted range band + actual pin; color = `confirmed \| anomalous \| novel` | Prajawala |
-| **VIZ-06** | **Witness Stitch** | Answer text = concatenated `citation.quote` spans; each span clickable → PDF char offset | Prajawala |
-| **VIZ-07** | **Confession Gap Panel** | When `confessed: true` — grey void blocks where grounding failed; no filler text | Prajawala |
-| **VIZ-08** | **Provenance River** | Directed flow from ANSWER artifact backward through refs to source PDF highlight | Prajawala |
-| **VIZ-09** | **Ghost Graph** | DAG nodes: active = solid, `is_deleted` = grey ghost until human `rebase()` | Prajawala |
+*Status column added 2026-08-07 — see [STATUS.md](./STATUS.md) for the live version of this.*
+
+| Viz ID | Name | Novel because | Primary owner | Status (2026-08-07) |
+|--------|------|---------------|---------------|---|
+| **VIZ-01** | **Terrain Survey** | Topographic heatmap over `(section_id, page)` — epistemic pressure as elevation, fault zones as red ridges | Prajwala | ⚠️ Implemented, mock-fed (`MOCK_CELLS`) |
+| **VIZ-02** | **Fault Drill-Down** | Click ridge → expand `drill_down_artifact_ids[]` → jump to duel/reflect artifacts that caused pressure | Prajwala | ⚠️ Implemented, mock-fed |
+| **VIZ-03** | **Duel Arena** | Split-pane: Agent A vs Agent B fields; **disagreements centered**, agreements muted | Prajwala | ⚠️ Placeholder div on `main`; real version in open PR #139 |
+| **VIZ-04** | **Disagreement Ribbon** | Curved ribbon linking disagreeing field pairs across the Arena; width = `confidence_delta` | Prajwala | ❌ Absent |
+| **VIZ-05** | **Reckoning Compass** | Per-field gauge: predicted range band + actual pin; color = `confirmed \| anomalous \| novel` | Prajwala | ❌ Absent on `main`, in PR #139 |
+| **VIZ-06** | **Witness Stitch** | Answer text = concatenated `citation.quote` spans; each span clickable → PDF char offset | Prajwala | ❌ Absent on `main`, in PR #139/#142 |
+| **VIZ-07** | **Confession Gap Panel** | When `confessed: true` — grey void blocks where grounding failed; no filler text | Prajwala | ❌ Absent — backend model is `class ConfessionGap(BaseModel): pass` |
+| **VIZ-08** | **Provenance River** | Directed flow from ANSWER artifact backward through refs to source PDF highlight | Prajwala | ⚠️ Implemented, mock-fed, `artifact={null}` |
+| **VIZ-09** | **Ghost Graph** | DAG nodes: active = solid, `is_deleted` = grey ghost until human `rebase()` | Prajwala | ❌ Literal placeholder text `<p>Ghost Graph here</p>`. **See VIZ-18 below — proposed replacement.** |
 
 ### Tier 2 — Ship Weeks 6–7 (Splicing MVP)
 
+**Status: 0% implemented, all absent.** Preserved as Wave 3 (unscheduled, claimable) in
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md) — the underlying
+`diri-splicing` primitives these depend on are also 0% built, see [STATUS.md](./STATUS.md).
+
 | Viz ID | Name | Novel because | Primary owner |
 |--------|------|---------------|---------------|
-| **VIZ-10** | **Splice Column Live** | Vertical live stream of column state; all spliced agents see same substrate | Prajawala + Sebastian |
-| **VIZ-11** | **Totem Token** | Animated token on column showing which agent holds write priority | Prajawala |
-| **VIZ-12** | **String Band Arc** | Arc between columns; thickness/opacity = coupling strength (0–1) | Prajawala |
-| **VIZ-13** | **Rotation Wheel** | Ring of columns; active primary highlighted; rotates on schedule/event | Prajawala |
-| **VIZ-14** | **Invalidation Wave** | Ripple animation propagating along `depended_on_by` edges when doc changes | Prajawala |
+| **VIZ-10** | **Splice Column Live** | Vertical live stream of column state; all spliced agents see same substrate | Prajwala + Sebastian |
+| **VIZ-11** | **Totem Token** | Animated token on column showing which agent holds write priority | Prajwala |
+| **VIZ-12** | **String Band Arc** | Arc between columns; thickness/opacity = coupling strength (0–1) | Prajwala |
+| **VIZ-13** | **Rotation Wheel** | Ring of columns; active primary highlighted; rotates on schedule/event | Prajwala |
+| **VIZ-14** | **Invalidation Wave** | Ripple animation propagating along `depended_on_by` edges when doc changes | Prajwala |
 
 ### Tier 3 — Post-launch backlog
 
@@ -108,6 +118,7 @@ These are **DeepIRI-original** viz primitives — not generic chart types.
 | **VIZ-15** | **Corpus Constellation** | Multi-document pressure overlay — fault zones across entire corpus |
 | **VIZ-16** | **Earned Trust Ladder** | cyrex-agi autonomy tiers L1–L7 visualized per action category |
 | **VIZ-17** | **Cognitive Tick Timeline** | LIDA-style 300ms / 5-min cycle timeline for proactive AGI loops |
+| **VIZ-18** | **Artifact City** *(added 2026-08-07)* | Proposed candidate to replace the still-unbuilt VIZ-09 Ghost Graph rather than sit alongside it. Inspired by `diri-persola`'s "Communal City" — a live radial ecosystem map: nodes = artifacts, clustered by artifact type (CANONICAL / EXTRACTION / REASONING / ANSWER) around a central document hub, with a live event stream panel (`pipeline_run_events`, `pressure_events`, `pipeline.artifact.invalidation` — all already specified in [CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md](./CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md)) instead of a static DAG. Unscheduled — claimable. |
 
 ---
 
