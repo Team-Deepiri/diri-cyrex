@@ -78,12 +78,12 @@ _DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc ON cyrex.artifacts(document_id)",
-    ("CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc_type "
-     "ON cyrex.artifacts(document_id, artifact_type)"),
+    "CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc_type ON cyrex.artifacts"
+    "(document_id, artifact_type)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_refs_from ON cyrex.artifact_refs(from_artifact)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_refs_to ON cyrex.artifact_refs(to_artifact)",
-    ("CREATE INDEX IF NOT EXISTS idx_cyrex_citations_doc_span "
-     "ON cyrex.citations(document_id, char_start, char_end)"),
+    "CREATE INDEX IF NOT EXISTS idx_cyrex_citations_doc_span ON cyrex.citations"
+    "(document_id, char_start, char_end)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_learning_exported ON cyrex.learning_artifacts(exported)",
 ]
 
