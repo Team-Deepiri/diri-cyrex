@@ -57,7 +57,7 @@ jobs:
               text=True,
               stderr=subprocess.STDOUT,
           )
-          match = re.search(r"^version\s+:\s+(.+)$", show, re.MULTILINE)
+          match = re.search(r"^\s*version\s*:\s*(\S+)", show, re.MULTILINE)
           if not match:
               raise SystemExit(f"could not parse poetry show output:\n{show}")
           expected = match.group(1).strip()

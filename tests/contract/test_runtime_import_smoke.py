@@ -36,8 +36,7 @@ def test_sugar_glider_protobuf_stubs_compatible_with_runtime():
         Path(__file__).resolve().parents[2] / "app" / "integrations" / "streaming" / "gen"
     )
     sys.path.insert(0, str(gen_root))
-    from proto.synapse.v1 import sugar_glider_pb2  # noqa: F401
-    from proto.synapse.v1 import sugar_glider_pb2_grpc  # noqa: F401
+    from proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc  # noqa: F401
 
 
 def test_artifact_routes_importable():

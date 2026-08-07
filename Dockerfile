@@ -19,7 +19,6 @@ FROM ${BASE_IMAGE} AS base
 
 ARG PYTORCH_VERSION=2.9.1
 ARG POETRY_VERSION=1.8.5
-ARG PROTOBUF_VERSION=7.34.1
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -32,7 +31,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY diri-cyrex/setup.sh /tmp/setup.sh
-RUN chmod +x /tmp/setup.sh && /tmp/setup.sh
+RUN sed -i 's/\r$//' /tmp/setup.sh && chmod +x /tmp/setup.sh && /tmp/setup.sh
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     (python -c "import torch; cuda_ver = torch.version.cuda; exit(0 if cuda_ver and (cuda_ver.startswith('12.8') or float(cuda_ver.split('.')[0] + '.' + cuda_ver.split('.')[1]) >= 12.8) else 1)" 2>/dev/null || \
@@ -51,21 +50,15 @@ RUN python -c "import torch" 2>/dev/null || \
 RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
 COPY diri-cyrex/pyproject.toml diri-cyrex/poetry.lock /app/
-COPY deepiri-modelkit /deepiri-modelkit
 
 ARG POETRY_EXTRAS=gpu
-RUN ln -sf /deepiri-modelkit ../deepiri-modelkit && \
-    bash -ec '\
+RUN bash -ec '\
       extras="${POETRY_EXTRAS}"; \
       args=(install --no-root --no-ansi); \
       IFS=, read -ra xs <<< "$extras"; \
       for x in "${xs[@]}"; do x="${x// /}"; [ -n "$x" ] && args+=(--extras "$x"); done; \
       poetry "${args[@]}"; \
     ' && \
-    # Monorepo COPY wins over the git tag Poetry resolved — keeps sidecar_utils in sync with platform.
-    pip install --no-cache-dir --force-reinstall --no-deps /deepiri-modelkit && \
-    # Reassert protobuf after Poetry install so generated sidecar stubs and runtime stay aligned.
-    pip install --no-cache-dir --force-reinstall --no-deps "protobuf==${PROTOBUF_VERSION}" && \
     python -c "from deepiri_modelkit.streaming.sidecar_utils import env_float, sidecar_payload_from_fields; print('✓ modelkit sidecar_utils OK')"
 
 RUN python -c "import numpy; import fastapi; import redis; print('✓ core deps OK')" && \
@@ -88,7 +81,8 @@ RUN chown -R appuser:appuser /app/tests
 
 COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
 COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
 
 # Bedd runtime (Bun-style) — glibc binary
 COPY --from=bedd /usr/local/bin/bedd /usr/local/bin/bedd
