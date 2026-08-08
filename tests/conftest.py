@@ -76,9 +76,9 @@ def setup_test_env(monkeypatch):
     )
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
     monkeypatch.setenv("LANGSMITH_API_KEY", "")
-    # Disable Milvus by default to prevent connection attempts
+    # Disable Milvus by default to prevent connection attempts (keep port valid for Settings)
     monkeypatch.setenv("MILVUS_HOST", "")
-    monkeypatch.setenv("MILVUS_PORT", "")
+    monkeypatch.setenv("MILVUS_PORT", "19530")
 
 
 # ---------------------------------------------------------------------------
