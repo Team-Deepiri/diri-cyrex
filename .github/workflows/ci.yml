@@ -43,6 +43,52 @@ jobs:
           poetry install --with dev
           poetry run pip install ./diri-agent-testing-utils
 
+      - name: Verify modelkit matches poetry.lock (sidecar_utils)
+        run: |
+          poetry run python - <<'PY'
+          import importlib.metadata as md
+          import re
+          import subprocess
+
+          from deepiri_modelkit.streaming.sidecar_utils import env_float
+
+          show = subprocess.check_output(
+              ["poetry", "show", "deepiri-modelkit"],
+              text=True,
+              stderr=subprocess.STDOUT,
+          )
+          match = re.search(r"^\s*version\s*:\s*(\S+)", show, re.MULTILINE)
+          if not match:
+              raise SystemExit(f"could not parse poetry show output:\n{show}")
+          expected = match.group(1).strip()
+          installed = md.version("deepiri-modelkit")
+          if installed != expected:
+              raise SystemExit(
+                  f"deepiri-modelkit mismatch: poetry.lock resolves to {expected}, "
+                  f"installed {installed}. Run poetry lock && poetry install."
+              )
+          print(f"deepiri-modelkit {installed} matches poetry.lock")
+          assert env_float("MISSING", 1.0) == 1.0
+          PY
+
+      - name: Undefined names on API boot paths
+        run: |
+          poetry run ruff check --select F821 \
+            app/routes/artifacts.py \
+            app/integrations/streaming \
+            app/services/knowledge_retrieval_engine.py \
+            app/services/contextual_ability_engine.py
+
+      - name: App import smoke (uvicorn entrypoint)
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          MILVUS_HOST: localhost
+          MILVUS_PORT: "19530"
+          CYREX_API_KEY: change-me
+        run: |
+          poetry run python -c "from app.main import app; assert app.title"
+
       - name: Ruff
         run: poetry run ruff check app/pipeline app/training tests/contract tests/pipeline tests/training tests/fakes
 
@@ -50,4 +96,10 @@ jobs:
         run: poetry run python scripts/ci/check_cross_track_imports.py
 
       - name: Unit tests
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          MILVUS_HOST: localhost
+          MILVUS_PORT: "19530"
+          CYREX_API_KEY: change-me
         run: poetry run pytest tests/contract -q

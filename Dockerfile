@@ -11,6 +11,9 @@ ARG DEVICE_TYPE=auto
 ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 ARG POETRY_VERSION=1.8.5
 ARG POETRY_EXTRAS=gpu
+ARG BEDD_IMAGE=ghcr.io/team-deepiri/bedd:0.8
+
+FROM ${BEDD_IMAGE} AS bedd
 
 FROM ${BASE_IMAGE} AS base
 
@@ -28,7 +31,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY diri-cyrex/setup.sh /tmp/setup.sh
-RUN chmod +x /tmp/setup.sh && /tmp/setup.sh
+RUN sed -i 's/\r$//' /tmp/setup.sh && chmod +x /tmp/setup.sh && /tmp/setup.sh
 
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     (python -c "import torch; cuda_ver = torch.version.cuda; exit(0 if cuda_ver and (cuda_ver.startswith('12.8') or float(cuda_ver.split('.')[0] + '.' + cuda_ver.split('.')[1]) >= 12.8) else 1)" 2>/dev/null || \
@@ -47,17 +50,16 @@ RUN python -c "import torch" 2>/dev/null || \
 RUN pip install --no-cache-dir "poetry==${POETRY_VERSION}"
 
 COPY diri-cyrex/pyproject.toml diri-cyrex/poetry.lock /app/
-COPY deepiri-modelkit /deepiri-modelkit
 
 ARG POETRY_EXTRAS=gpu
-RUN ln -sf /deepiri-modelkit ../deepiri-modelkit && \
-    bash -ec '\
+RUN bash -ec '\
       extras="${POETRY_EXTRAS}"; \
       args=(install --no-root --no-ansi); \
       IFS=, read -ra xs <<< "$extras"; \
       for x in "${xs[@]}"; do x="${x// /}"; [ -n "$x" ] && args+=(--extras "$x"); done; \
       poetry "${args[@]}"; \
-    '
+    ' && \
+    python -c "from deepiri_modelkit.streaming.sidecar_utils import env_float, sidecar_payload_from_fields; print('✓ modelkit sidecar_utils OK')"
 
 RUN python -c "import numpy; import fastapi; import redis; print('✓ core deps OK')" && \
     python -c "import torch; print('✓ torch', torch.__version__)" && \
@@ -70,13 +72,22 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser && \
 
 COPY diri-cyrex/app /app/app
 
+# Import stubs via gen root only — avoid app.integrations __init__ circular imports at build time.
+RUN python -c "import sys; sys.path.insert(0, '/app/app/integrations/streaming/gen'); from proto.synapse.v1 import sugar_glider_pb2, sugar_glider_pb2_grpc; print('✓ protobuf sidecar stubs OK')"
+
 RUN touch /app/tests/__init__.py
 COPY diri-cyrex/tests /app/tests
 RUN chown -R appuser:appuser /app/tests
 
 COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
 COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh && \
+    chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
+
+# Bedd runtime (Bun-style) — glibc binary
+COPY --from=bedd /usr/local/bin/bedd /usr/local/bin/bedd
+COPY --from=bedd /opt/bedd/skills /opt/bedd/skills
+ENV BEDD_SKILLS_DIR=/opt/bedd/skills
 
 USER appuser
 

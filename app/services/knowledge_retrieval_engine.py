@@ -4,7 +4,8 @@ LangChain-based RAG orchestration for knowledge retrieval
 Integrates with vector stores and LLMs for context-aware generation
 """
 from typing import List, Dict, Optional
-from langchain_community.vectorstores import Chroma, Milvus
+from langchain_community.vectorstores import Chroma
+from langchain_milvus import Milvus
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.retrievers import BaseRetriever

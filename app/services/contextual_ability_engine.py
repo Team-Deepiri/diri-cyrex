@@ -44,10 +44,15 @@ except ImportError:
         RecursiveCharacterTextSplitter = None
 
 try:
-    from langchain_community.vectorstores import Chroma, Milvus
+    from langchain_community.vectorstores import Chroma
 except ImportError:
-    logger.warning("LangChain community vectorstores not available")
+    logger.warning("LangChain Chroma vectorstore not available")
     Chroma = None
+
+try:
+    from langchain_milvus import Milvus
+except ImportError:
+    logger.warning("langchain-milvus not available")
     Milvus = None
 
 try:
