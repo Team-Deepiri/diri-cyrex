@@ -398,10 +398,6 @@ async def _get_postgres_pressure_read_model():
 async def _get_postgres_reckoning_read_model():
     return PostgresReckoningStore(await get_postgres_manager())
 
-def _get_sqlite_artifact_store() -> ArtifactStorePort:
-    # TODO: swap for Tyler's PostgresArtifactStore
-    return SqliteArtifactStore()
-
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
     store = PostgresArtifactStore(await get_postgres_manager())
     await store.ensure_schema()
