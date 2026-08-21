@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
 from app.integrations.speech_client import get_speech_client
-from app.pipeline.contracts.models import Citation, PersonaScope
+from app.pipeline.contracts.models import ArtifactBundle, Citation, PersonaScope, Provenance
 from app.pipeline.contracts.ports import (
     ArtifactStorePort,
     CorrectionWriterPort,
@@ -53,35 +53,6 @@ def get_correction_writer() -> CorrectionWriterPort:
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-
-
-class ArtifactResponse(BaseModel):
-    success: bool
-    artifact: Optional[Any] = None
-    uploaded_at: Optional[str] = None
-
-
-class ProvenanceResponse(BaseModel):
-    success: bool
-    artifact_id: str
-    provenance: Any = None
-    citations: List[Any] = Field(default_factory=list)
-
-
-class CorrectionRequest(BaseModel):
-    field_name: str
-    corrected_value: Any
-    corrected_citation: Optional[Citation] = None
-    actor_id: str = "anonymous"
-
-
-class CorrectionResponse(BaseModel):
-    success: bool
-    artifact_id: str
-    field_name: str
-    corrected_value: Any
-    submitted_at: str
-
 
 class VoiceQueryRequest(BaseModel):
     document_id: str
@@ -129,7 +100,7 @@ class CorrectionResponse(BaseModel):
     field_name: str
     corrected_value: Any
     submitted_at: str
-
+    
 # ----------------------------------------------------------------------------
 def _spoken_text_from_response(response: SynthesizerVoiceQueryResponse) -> str:
     if not response.confessed and response.spans:
