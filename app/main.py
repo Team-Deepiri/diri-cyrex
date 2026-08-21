@@ -19,7 +19,7 @@ from .database.postgres import get_postgres_manager
 from .logging_config import ErrorLogger, RequestLogger, get_logger
 from .middleware.rate_limiter import RateLimitMiddleware
 from .middleware.request_timing import RequestTimingMiddleware
-from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
+from .pipeline.contracts.ports import ArtifactStorePort, CorrectionWriterPort, PipelineRunnerPort
 from .pipeline.orchestrator import ArtifactEngineOrchestrator
 from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
 from .pipeline.registry.postgres_store import PostgresArtifactStore
