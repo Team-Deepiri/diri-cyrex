@@ -56,6 +56,34 @@ class VoiceQueryApiResponse(BaseModel):
     success: bool
     response: SynthesizerVoiceQueryResponse
 
+
+class CorrectionRequest(BaseModel):
+    field_name: str
+    corrected_value: Any
+    corrected_citation: Citation
+    actor_id: str
+
+
+class ArtifactResponse(BaseModel):
+    success: bool
+    artifact: ArtifactBundle
+    uploaded_at: Optional[str] = None
+
+
+class ProvenanceResponse(BaseModel):
+    success: bool
+    artifact_id: str
+    provenance: Provenance
+    citations: List[Citation]
+
+
+class CorrectionResponse(BaseModel):
+    success: bool
+    artifact_id: str
+    field_name: str
+    corrected_value: Any
+    submitted_at: str
+
 # ----------------------------------------------------------------------------
 # Routes
 # ----------------------------------------------------------------------------
