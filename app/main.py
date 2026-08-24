@@ -49,6 +49,7 @@ from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.document_extraction_api import router as document_extraction_router
 from .routes.document_indexing_api import router as document_indexing_router
 from .routes.documents import router as documents_router
+from .routes.duel import router as duel_router
 from .routes.eyes import router as eyes_router
 from .routes.inference import router as inference_router
 from .routes.intelligence_api import router as intelligence_api_router
@@ -465,6 +466,7 @@ app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
 app.include_router(eyes_router)
+app.include_router(duel_router)
 app.include_router(pressure_router)
 app.include_router(reckoning_router)
 

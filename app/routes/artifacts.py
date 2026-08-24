@@ -64,7 +64,8 @@ class WitnessSpan(BaseModel):
 
 
 class ConfessionGap(BaseModel):
-    pass  # TODO: define when building voice/synthesizer.py
+    claim_attempted: str
+    reason: str = "no_citation"
 
 
 class VoiceQueryResponse(BaseModel):
@@ -254,26 +255,40 @@ async def submit_correction(
 @router.post("/voice/query", response_model=VoiceQueryApiResponse)
 async def voice_query(
     request: VoiceQueryRequest,
-    runner: PipelineRunnerPort = Depends(get_pipeline_runner)
+    store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """Voice Q&A — returns only verbatim cited spans or a confession."""
+    from app.pipeline.voice.synthesizer import VoiceSynthesizer
+
     logger.info("Voice query received", document_id=request.document_id)
     try:
-        # TODO: swap for real voice/synthesizer.py later
-        fake_span = WitnessSpan(
-            citation_id="cit_fake_001",
-            quote="The base rent shall be $4,500 per month.",
-            char_start=1042,
-            char_end=1080,
-            page=1,
+        result = await VoiceSynthesizer(store).query(
+            document_id=request.document_id,
+            question=request.question,
+            persona_scope=request.persona_scope,
+        )
+        spans = [
+            WitnessSpan(
+                citation_id=s.citation_id,
+                quote=s.quote,
+                char_start=s.char_start,
+                char_end=s.char_end,
+                page=s.page,
+            )
+            for s in result.spans
+        ]
+        gaps = (
+            [ConfessionGap(**g.model_dump()) for g in result.gaps]
+            if result.gaps
+            else None
         )
         return VoiceQueryApiResponse(
             success=True,
             response=VoiceQueryResponse(
-                confessed=False,
-                spans=[fake_span],
-                gaps=None,
-            )
+                confessed=result.confessed,
+                spans=spans,
+                gaps=gaps,
+            ),
         )
     except Exception as e:
         logger.error(f"Voice query failed: {e}", exc_info=True)

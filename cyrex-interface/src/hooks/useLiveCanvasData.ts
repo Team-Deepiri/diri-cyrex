@@ -3,6 +3,7 @@ import { getDocumentPressure } from '../api/pressure';
 import { getDocumentReckoning } from '../api/reckoning';
 import { getEyesScene, getEyesStatus, EyesSceneIdentity, EyesStatus } from '../api/eyes';
 import { getArtifactGraph } from '../api/artifactEngine';
+import { getDocumentDuel, DuelArenaResponse } from '../api/duel';
 import { ArtifactBundle, PressureCell, PredictionRecord } from '../types/artifactEngine';
 import { ArtifactGraphEdge } from '../api/artifactEngine';
 import { DEFAULT_CANVAS_POLL_MS, ELKEDEL_SCENE_DOCUMENT_ID } from '../constants/agi';
@@ -17,6 +18,7 @@ export interface LiveCanvasData {
   sceneIdentities: EyesSceneIdentity[];
   graphNodes: ArtifactBundle[];
   graphEdges: ArtifactGraphEdge[];
+  duel: DuelArenaResponse | null;
   selectedArtifactId: string | null;
   loading: boolean;
   error: string | null;
@@ -38,6 +40,7 @@ export function useLiveCanvasData(
   const [sceneIdentities, setSceneIdentities] = useState<EyesSceneIdentity[]>([]);
   const [graphNodes, setGraphNodes] = useState<ArtifactBundle[]>([]);
   const [graphEdges, setGraphEdges] = useState<ArtifactGraphEdge[]>([]);
+  const [duel, setDuel] = useState<DuelArenaResponse | null>(null);
   const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +59,7 @@ export function useLiveCanvasData(
   const refresh = useCallback(async () => {
     try {
       setError(null);
-      const [pressure, reckoning, status, scene] = await Promise.all([
+      const [pressure, reckoning, status, scene, duelResp] = await Promise.all([
         getDocumentPressure(documentId),
         getDocumentReckoning(documentId).catch(() => ({
           document_id: documentId,
@@ -66,6 +69,7 @@ export function useLiveCanvasData(
         })),
         getEyesStatus().catch(() => null),
         getEyesScene(30).catch(() => ({ identities: [] })),
+        getDocumentDuel(documentId).catch(() => null),
       ]);
       setPressureCells(pressure.cells);
       setReckoningRecords(reckoning.records);
@@ -73,6 +77,7 @@ export function useLiveCanvasData(
       setNovelCount(reckoning.novel_count);
       setEyesStatus(status);
       setSceneIdentities(scene.identities ?? []);
+      setDuel(duelResp);
 
       const topArtifact = pressure.cells.find(c => c.drill_down_artifact_ids.length > 0)
         ?.drill_down_artifact_ids[0];
@@ -116,6 +121,7 @@ export function useLiveCanvasData(
     sceneIdentities,
     graphNodes,
     graphEdges,
+    duel,
     selectedArtifactId,
     loading,
     error,
