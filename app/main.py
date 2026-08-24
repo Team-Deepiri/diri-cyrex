@@ -20,7 +20,10 @@ from .middleware.rate_limiter import RateLimitMiddleware
 from .middleware.request_timing import RequestTimingMiddleware
 from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
 from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.projectors.pressure_bus_sink import PressureBusSink
 from .pipeline.registry.postgres_store import PostgresArtifactStore
+from .pipeline.stages.anticipate import AnticipateStage
+from .pipeline.stages.extract import ExtractStage
 from .pipeline.stages.parse import ParseStage
 
 # Core routers
@@ -41,6 +44,7 @@ from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.document_extraction_api import router as document_extraction_router
 from .routes.document_indexing_api import router as document_indexing_router
 from .routes.documents import router as documents_router
+from .routes.eyes import router as eyes_router
 from .routes.inference import router as inference_router
 from .routes.intelligence_api import router as intelligence_api_router
 from .routes.language_intelligence_api import router as language_intelligence_router
@@ -135,6 +139,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     document_stream_task: Optional[asyncio.Task] = None
     model_reload_task: Optional[asyncio.Task] = None
+    elkedel_sync_task: Optional[asyncio.Task] = None
     if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
         "1",
         "true",
@@ -165,10 +170,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Model reload listener disabled: {e}")
 
+    if os.getenv("ELKEDEL_EYES_SYNC_ENABLED", "true").lower() in {"1", "true", "yes"}:
+        try:
+            from .integrations.elkedel.artifact_sync import start_elkedel_eyes_sync
+
+            elkedel_sync_task = await start_elkedel_eyes_sync()
+            app.state.elkedel_eyes_sync_task = elkedel_sync_task
+            logger.info("Elkedel eyes → artifact sync enabled")
+        except Exception as e:
+            logger.warning(f"Elkedel eyes sync disabled: {e}")
+
     yield
 
     # Shutdown systems
-    for task in (document_stream_task, model_reload_task):
+    for task in (document_stream_task, model_reload_task, elkedel_sync_task):
         if task:
             task.cancel()
             try:
@@ -416,6 +431,7 @@ app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
+app.include_router(eyes_router)
 app.include_router(pressure_router)
 
 
@@ -427,7 +443,10 @@ app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_
 
 
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
-    store = PostgresArtifactStore(await get_postgres_manager())
+    store = PostgresArtifactStore(
+        await get_postgres_manager(),
+        pressure_sink=PressureBusSink(),
+    )
     await store.ensure_schema()
     return store
 
@@ -437,6 +456,8 @@ async def _get_pipeline_runner() -> PipelineRunnerPort:
     return ArtifactEngineOrchestrator(
         store=store,
         parse_stage=ParseStage(),
+        anticipate=AnticipateStage(),
+        extract=ExtractStage(),
     )
 
 

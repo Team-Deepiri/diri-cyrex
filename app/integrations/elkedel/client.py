@@ -166,6 +166,58 @@ class ElkedelClient:
         r.raise_for_status()
         return r.json()
 
+    # --- Eyes (continuous vision pipeline) ---------------------------------
+
+    async def eyes_status(self) -> Dict[str, Any]:
+        """``elkedel.eyes_status``"""
+        client = await self._get_client()
+        r = await client.get("/v1/eyes/status")
+        r.raise_for_status()
+        return r.json()
+
+    async def eyes_start(self) -> Dict[str, Any]:
+        """``elkedel.eyes_start``"""
+        client = await self._get_client()
+        r = await client.post("/v1/eyes/start")
+        r.raise_for_status()
+        return r.json()
+
+    async def eyes_stop(self) -> Dict[str, Any]:
+        """``elkedel.eyes_stop``"""
+        client = await self._get_client()
+        r = await client.post("/v1/eyes/stop")
+        r.raise_for_status()
+        return r.json()
+
+    async def eyes_scene(self, top_k: int = 20) -> Dict[str, Any]:
+        """``elkedel.eyes_scene``"""
+        client = await self._get_client()
+        r = await client.get("/v1/eyes/scene", params={"top_k": top_k})
+        r.raise_for_status()
+        return r.json()
+
+    async def eyes_events(
+        self, since_ms: int = 0, limit: int = 50
+    ) -> Dict[str, Any]:
+        """``elkedel.eyes_events``"""
+        client = await self._get_client()
+        r = await client.get(
+            "/v1/eyes/events",
+            params={"since_ms": since_ms, "limit": limit},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def eyes_where(self, query: str = "", top_k: int = 5) -> Dict[str, Any]:
+        """``elkedel.eyes_where`` — text query against live scene memory."""
+        client = await self._get_client()
+        r = await client.get(
+            "/v1/eyes/where",
+            params={"q": query, "top_k": top_k},
+        )
+        r.raise_for_status()
+        return r.json()
+
 
 _default_client: Optional[ElkedelClient] = None
 

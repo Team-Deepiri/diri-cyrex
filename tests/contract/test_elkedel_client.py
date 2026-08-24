@@ -24,6 +24,14 @@ def _handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200, json={"assigned": 0, "spawned": 1, "total_traces": 1}
         )
+    if path == "/v1/eyes/status":
+        return httpx.Response(
+            200, json={"running": True, "frames": 3, "active_identities": 1}
+        )
+    if path == "/v1/eyes/scene":
+        return httpx.Response(200, json={"count": 1, "identities": []})
+    if path == "/v1/eyes/start":
+        return httpx.Response(200, json={"running": True})
     return httpx.Response(404, json={"error": "not found"})
 
 
@@ -60,5 +68,25 @@ async def test_elkedel_remember():
     try:
         out = await client.remember(b"\xff\xd8fakejpeg")
         assert out["spawned"] == 1
+    finally:
+        await client.close()
+
+
+@pytest.mark.asyncio
+async def test_elkedel_eyes():
+    transport = httpx.MockTransport(_handler)
+    client = ElkedelClient(base_url="http://elkedel-test:8765")
+    client._client = httpx.AsyncClient(
+        base_url=client.base_url,
+        timeout=5.0,
+        transport=transport,
+    )
+    try:
+        st = await client.eyes_status()
+        assert st["running"] is True
+        scene = await client.eyes_scene()
+        assert scene["count"] == 1
+        started = await client.eyes_start()
+        assert started["running"] is True
     finally:
         await client.close()

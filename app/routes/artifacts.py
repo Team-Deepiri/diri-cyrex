@@ -27,8 +27,10 @@ router = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
 # ----------------------------------------------------------------------------
 
 def get_pipeline_runner() -> PipelineRunnerPort:
-    from tests.fakes.pipeline_runner import FakePipelineRunner
-    return FakePipelineRunner()
+    """Resolved via ``app.dependency_overrides`` in ``main.py`` (Postgres orchestrator)."""
+    raise RuntimeError(
+        "Pipeline runner not wired — ensure app.dependency_overrides[get_pipeline_runner] is set"
+    )
 
 def get_correction_writer() -> CorrectionWriterPort:
     # TODO: replace with real PostgresArtifactStore-backed writer. Current implementation is in-memory
