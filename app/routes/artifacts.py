@@ -258,11 +258,11 @@ async def voice_query(
     store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """Voice Q&A — returns only verbatim cited spans or a confession."""
-    from app.pipeline.voice.synthesizer import VoiceSynthesizer
+    from app.pipeline.voice.guarded_synthesizer import GuardedVoiceSynthesizer
 
     logger.info("Voice query received", document_id=request.document_id)
     try:
-        result = await VoiceSynthesizer(store).query(
+        result = await GuardedVoiceSynthesizer(store).query(
             document_id=request.document_id,
             question=request.question,
             persona_scope=request.persona_scope,

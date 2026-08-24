@@ -230,6 +230,12 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
                     await self._reckoning_writer.persist(document_id, prediction_records)
                 except Exception as exc:
                     logger.warning("reckoning persist failed: %s", exc)
+            try:
+                from app.pipeline.stages.reckoning_updater import ReckoningCorpusUpdater
+
+                await ReckoningCorpusUpdater().update_from_records(prediction_records)
+            except Exception as exc:
+                logger.warning("reckoning corpus update failed: %s", exc)
             if self._training_emitter is not None and emit_reckoning_training:
                 try:
                     await emit_reckoning_training(

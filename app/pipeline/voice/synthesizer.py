@@ -1,13 +1,8 @@
-"""Voice of the Document — citation-gated witness synthesis (v1).
-
-Returns verbatim cited spans when the witness set supports the question,
-otherwise confesses with structured gaps (hard citation gate).
-"""
+"""Voice of the Document — citation-gated witness synthesis (RAG embedding match)."""
 
 from __future__ import annotations
 
-import re
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Protocol, Sequence
 
 from pydantic import BaseModel, Field
 
@@ -19,48 +14,17 @@ from app.pipeline.contracts.models import (
 )
 from app.pipeline.contracts.ports import ArtifactStorePort
 
-_STOP_WORDS = frozenset(
-    {
-        "a",
-        "an",
-        "the",
-        "is",
-        "are",
-        "was",
-        "were",
-        "what",
-        "when",
-        "where",
-        "who",
-        "how",
-        "does",
-        "do",
-        "did",
-        "can",
-        "could",
-        "would",
-        "should",
-        "of",
-        "in",
-        "on",
-        "at",
-        "to",
-        "for",
-        "and",
-        "or",
-        "be",
-        "this",
-        "that",
-        "it",
-    }
-)
+_DEFAULT_MATCH_THRESHOLD = 0.35
 
-_MATCH_THRESHOLD = 0.25
+
+class WitnessScorer(Protocol):
+    def score(self, question: str, quote: str) -> float: ...
+    def rank(
+        self, question: str, quotes: Sequence[str], *, threshold: float = 0.35
+    ) -> List[Any]: ...
 
 
 class ConfessionGap(BaseModel):
-    """Gap recorded when the witness set cannot support a claim."""
-
     claim_attempted: str
     reason: str = "no_citation"
 
@@ -77,20 +41,6 @@ class VoiceQueryResult(BaseModel):
     confessed: bool
     spans: List[WitnessSpan] = Field(default_factory=list)
     gaps: Optional[List[ConfessionGap]] = None
-
-
-def _tokens(text: str) -> set[str]:
-    raw = re.findall(r"[a-z0-9]+", text.lower())
-    return {t for t in raw if t not in _STOP_WORDS and len(t) > 1}
-
-
-def _score_question_against_quote(question: str, quote: str) -> float:
-    q_tokens = _tokens(question)
-    if not q_tokens:
-        return 0.0
-    quote_l = quote.lower()
-    hits = sum(1 for t in q_tokens if t in quote_l)
-    return hits / len(q_tokens)
 
 
 def _locator_page(locator: CitationLocator) -> Optional[int]:
@@ -128,7 +78,6 @@ def _iter_payload_citations(payload: dict[str, Any]) -> Iterable[Citation]:
 
 
 def collect_witness_citations(bundles: Sequence[ArtifactBundle]) -> List[Citation]:
-    """Merge bundle-level and payload-embedded citations (deduped by id)."""
     seen: set[str] = set()
     out: List[Citation] = []
     for bundle in bundles:
@@ -147,8 +96,22 @@ def collect_witness_citations(bundles: Sequence[ArtifactBundle]) -> List[Citatio
 class VoiceSynthesizer:
     """Citation-gated voice query over stored artifact witness sets."""
 
-    def __init__(self, store: ArtifactStorePort) -> None:
+    def __init__(
+        self,
+        store: ArtifactStorePort,
+        scorer: Optional[WitnessScorer] = None,
+        match_threshold: float = _DEFAULT_MATCH_THRESHOLD,
+    ) -> None:
         self._store = store
+        self._scorer = scorer
+        self._match_threshold = match_threshold
+
+    def _get_scorer(self) -> WitnessScorer:
+        if self._scorer is not None:
+            return self._scorer
+        from app.pipeline.voice.witness_scorer import get_witness_scorer
+
+        return get_witness_scorer()
 
     async def query(
         self,
@@ -183,13 +146,12 @@ class VoiceSynthesizer:
                 ],
             )
 
-        scored = [
-            (c, _score_question_against_quote(question, c.quote)) for c in citations
-        ]
+        scorer = self._get_scorer()
+        scored = [(c, scorer.score(question, c.quote)) for c in citations]
         scored.sort(key=lambda pair: pair[1], reverse=True)
         best_citation, best_score = scored[0]
 
-        if scope.hard_citation_gate and best_score < _MATCH_THRESHOLD:
+        if scope.hard_citation_gate and best_score < self._match_threshold:
             return VoiceQueryResult(
                 confessed=True,
                 spans=[],
@@ -204,7 +166,7 @@ class VoiceSynthesizer:
         spans = [_citation_to_witness(best_citation)]
         if not scope.witness_set_only and len(scored) > 1:
             for citation, score in scored[1:4]:
-                if score >= _MATCH_THRESHOLD:
+                if score >= self._match_threshold:
                     spans.append(_citation_to_witness(citation))
 
         return VoiceQueryResult(confessed=False, spans=spans, gaps=None)
