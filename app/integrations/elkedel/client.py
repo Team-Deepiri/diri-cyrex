@@ -208,13 +208,10 @@ class ElkedelClient:
         r.raise_for_status()
         return r.json()
 
-    async def eyes_where(self, query: str = "", top_k: int = 5) -> Dict[str, Any]:
-        """``elkedel.eyes_where`` — text query against live scene memory."""
+    async def eyes_changed(self, since_ms: int = 0) -> Dict[str, Any]:
+        """``elkedel.what_changed`` via eyes pipeline memory."""
         client = await self._get_client()
-        r = await client.get(
-            "/v1/eyes/where",
-            params={"q": query, "top_k": top_k},
-        )
+        r = await client.get("/v1/eyes/changed", params={"since_ms": since_ms})
         r.raise_for_status()
         return r.json()
 

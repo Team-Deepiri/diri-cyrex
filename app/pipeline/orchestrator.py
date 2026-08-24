@@ -43,6 +43,11 @@ from app.pipeline.stages.parse import ParseResult, ParseStage
 from app.pipeline.tools.confidence import ConfidenceCalculator
 from app.pipeline.tools.reflect import ReflectTool
 
+try:
+    from app.pipeline.stages.reckoning import ReckoningStage
+except ImportError:  # pragma: no cover
+    ReckoningStage = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +68,7 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         anticipate: Optional[AnticipatePort] = None,
         extract: Optional[ExtractPort] = None,
         duel: Optional[DuelRunnerPort] = None,
+        reckoning: Any = None,
         reflect_tool: Optional[ReflectTool] = None,
         confidence_calculator: Optional[ConfidenceCalculator] = None,
     ) -> None:
@@ -71,6 +77,7 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         self._anticipate = anticipate
         self._extract = extract
         self._duel = duel
+        self._reckoning = reckoning or (ReckoningStage() if ReckoningStage else None)
         self._reflect_tool = reflect_tool or ReflectTool()
         self._confidence_calculator = confidence_calculator or ConfidenceCalculator()
 
@@ -141,6 +148,12 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
             final_fields = list(synthesis_result.final_fields or [])
             all_citations = list(synthesis_result.all_citations or [])
             all_discrepancies = list(synthesis_result.discrepancies or [])
+
+            if self._reckoning is not None and prediction_records:
+                logger.info("Running reckoning stage for %s", document_id)
+                prediction_records = await self._reckoning.run(
+                    prediction_records, final_fields
+                )
 
             logger.info(
                 "Running reflection on %d fields for %s",

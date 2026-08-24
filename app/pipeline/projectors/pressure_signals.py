@@ -134,6 +134,26 @@ def project_pressure_events(
             )
         )
 
+    # Elkedel VisualObservation — scene identity spawn
+    if payload.get("artifact_type") == "VisualObservation" or payload.get("modality") == "vision":
+        identity = payload.get("identity_id")
+        label = payload.get("label") or "object"
+        strength = float(payload.get("strength") or bundle.confidence or 0.5)
+        if identity:
+            from app.pipeline.contracts.pressure_events import SceneIdentitySpawn
+
+            events.append(
+                SceneIdentitySpawn(
+                    document_id=document_id,
+                    section_id=section_id or "live_scene",
+                    page=page,
+                    artifact_id=bundle.artifact_id,
+                    label=str(label),
+                    identity_id=str(identity),
+                    strength=strength,
+                )
+            )
+
     return events
 
 

@@ -23,8 +23,10 @@ from .pipeline.orchestrator import ArtifactEngineOrchestrator
 from .pipeline.projectors.pressure_bus_sink import PressureBusSink
 from .pipeline.registry.postgres_store import PostgresArtifactStore
 from .pipeline.stages.anticipate import AnticipateStage
+from .pipeline.stages.duel import DuelStage
 from .pipeline.stages.extract import ExtractStage
 from .pipeline.stages.parse import ParseStage
+from .pipeline.bootstrap import bootstrap_artifact_engine
 
 # Core routers
 from .routes.agent import router as agent_router
@@ -136,6 +138,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Tool rate limiter enabled")
     except Exception as e:
         logger.warning(f"Rate limiter disabled: {e}")
+
+    # Artifact Engine AGI schema (pressure, reckoning, elkedel scene doc)
+    try:
+        await bootstrap_artifact_engine()
+    except Exception as e:
+        logger.warning(f"Artifact engine bootstrap skipped: {e}")
+
+    try:
+        from .integrations.elkedel.tools import register_elkedel_tools
+        from .core.tool_registry import get_tool_registry
+
+        n = await register_elkedel_tools(get_tool_registry())
+        logger.info("Elkedel agent tools registered", extra={"count": n})
+    except Exception as e:
+        logger.warning(f"Elkedel agent tools disabled: {e}")
 
     document_stream_task: Optional[asyncio.Task] = None
     model_reload_task: Optional[asyncio.Task] = None
@@ -453,11 +470,13 @@ async def _get_postgres_artifact_store() -> ArtifactStorePort:
 
 async def _get_pipeline_runner() -> PipelineRunnerPort:
     store = await _get_postgres_artifact_store()
+    extract = ExtractStage()
     return ArtifactEngineOrchestrator(
         store=store,
         parse_stage=ParseStage(),
         anticipate=AnticipateStage(),
-        extract=ExtractStage(),
+        extract=extract,
+        duel=DuelStage(extract, ExtractStage()),
     )
 
 
