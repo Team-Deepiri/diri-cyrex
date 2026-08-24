@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 
 from app.integrations.elkedel import get_elkedel_client
 
-router = APIRouter(prefix="/eyes", tags=["eyes"])
+router = APIRouter(prefix="/api/v1/eyes", tags=["eyes"])
 
 
 @router.get("/status")

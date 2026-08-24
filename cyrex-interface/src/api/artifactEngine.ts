@@ -32,6 +32,26 @@ export async function getArtifact(artifactId: string): Promise<ArtifactBundle> {
   return data.artifact;
 }
 
+export interface ArtifactGraphEdge {
+  from: string;
+  to: string;
+  ref_type: string;
+}
+
+export interface ArtifactGraphResponse {
+  success: boolean;
+  artifact_id: string;
+  nodes: ArtifactBundle[];
+  edges: ArtifactGraphEdge[];
+}
+
+export async function getArtifactGraph(
+  artifactId: string,
+  hops = 2,
+): Promise<ArtifactGraphResponse> {
+  return apiRequest<ArtifactGraphResponse>(`${ARTIFACTS}/${artifactId}/graph?hops=${hops}`);
+}
+
 export async function getProvenance(artifactId: string): Promise<ProvenanceResponse> {
   return apiRequest<ProvenanceResponse>(`${ARTIFACTS}/${artifactId}/provenance`);
 }

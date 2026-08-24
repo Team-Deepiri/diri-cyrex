@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   const port = Number(env.VITE_PORT ?? 5175);
   const hmrHost = env.VITE_HMR_HOST || 'localhost';
   const hmrPort = Number(env.VITE_HMR_PORT || port);
+  const cyrexApi = env.VITE_CYREX_API_URL || 'http://localhost:8000';
 
   return {
     plugins: [
@@ -31,7 +32,13 @@ export default defineConfig(({ mode }) => {
         ignored: ['**/node_modules/**', '**/.git/**']
       },
       // Enable CORS for HMR
-      cors: true
+      cors: true,
+      proxy: {
+        '/api/v1': {
+          target: cyrexApi,
+          changeOrigin: true,
+        },
+      },
     },
     define: {
       __BUILD_TIME__: JSON.stringify(new Date().toISOString())

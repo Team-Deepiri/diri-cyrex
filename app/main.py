@@ -33,7 +33,7 @@ from .pipeline.registry.reckoning_writer import PostgresReckoningWriter
 # Core routers
 from .routes.agent import router as agent_router
 from .routes.agent_playground_api import router as agent_playground_router
-from .routes.artifacts import get_pipeline_runner, router as artifacts_router
+from .routes.artifacts import get_pipeline_runner, get_artifact_store, get_correction_writer, router as artifacts_router
 from .routes.bandit import router as bandit_router
 from .routes.challenge import router as challenge_router
 from .routes.collection_management_api import router as collection_management_router
@@ -65,6 +65,7 @@ from .routes.universal_rag_api import router as universal_rag_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.workflow_api import router as workflow_router
 from .pipeline.registry.pressure_store import PostgresPressureStore
+from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
 from .pipeline.registry.reckoning_store import PostgresReckoningStore
 from .settings import settings
 
@@ -480,6 +481,20 @@ async def _get_postgres_reckoning_read_model():
 
 
 app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
+
+
+async def _get_postgres_artifact_store_dep() -> ArtifactStorePort:
+    return await _get_postgres_artifact_store()
+
+
+app.dependency_overrides[get_artifact_store] = _get_postgres_artifact_store_dep
+
+
+async def _get_postgres_correction_writer():
+    return PostgresCorrectionStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_correction_writer] = _get_postgres_correction_writer
 
 
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
