@@ -44,9 +44,10 @@ from app.pipeline.tools.confidence import ConfidenceCalculator
 from app.pipeline.tools.reflect import ReflectTool
 
 try:
-    from app.pipeline.stages.reckoning import ReckoningStage
+    from app.pipeline.stages.reckoning import ReckoningStage, emit_reckoning_training
 except ImportError:  # pragma: no cover
     ReckoningStage = None  # type: ignore
+    emit_reckoning_training = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,8 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         extract: Optional[ExtractPort] = None,
         duel: Optional[DuelRunnerPort] = None,
         reckoning: Any = None,
+        reckoning_writer: Any = None,
+        training_emitter: Any = None,
         reflect_tool: Optional[ReflectTool] = None,
         confidence_calculator: Optional[ConfidenceCalculator] = None,
     ) -> None:
@@ -78,6 +81,8 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         self._extract = extract
         self._duel = duel
         self._reckoning = reckoning or (ReckoningStage() if ReckoningStage else None)
+        self._reckoning_writer = reckoning_writer
+        self._training_emitter = training_emitter
         self._reflect_tool = reflect_tool or ReflectTool()
         self._confidence_calculator = confidence_calculator or ConfidenceCalculator()
 
@@ -218,6 +223,23 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         )
 
         await self._store.create(bundle)
+
+        if prediction_records:
+            if self._reckoning_writer is not None:
+                try:
+                    await self._reckoning_writer.persist(document_id, prediction_records)
+                except Exception as exc:
+                    logger.warning("reckoning persist failed: %s", exc)
+            if self._training_emitter is not None and emit_reckoning_training:
+                try:
+                    await emit_reckoning_training(
+                        prediction_records,
+                        document_id=document_id,
+                        artifact_id=bundle.artifact_id,
+                        emitter=self._training_emitter,
+                    )
+                except Exception as exc:
+                    logger.warning("reckoning training emit failed: %s", exc)
 
         if duel_state is not None:
             duel_bundle = ArtifactBundle(

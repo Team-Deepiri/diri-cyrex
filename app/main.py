@@ -27,6 +27,8 @@ from .pipeline.stages.duel import DuelStage
 from .pipeline.stages.extract import ExtractStage
 from .pipeline.stages.parse import ParseStage
 from .pipeline.bootstrap import bootstrap_artifact_engine
+from .pipeline.emitters.training_emitter import TrainingEmitter
+from .pipeline.registry.reckoning_writer import PostgresReckoningWriter
 
 # Core routers
 from .routes.agent import router as agent_router
@@ -39,6 +41,7 @@ from .routes.pressure import (
     get_pressure_read_model,
     router as pressure_router,
 )
+from .routes.reckoning import router as reckoning_router
 
 # Extended routers
 from .routes.company_automation_api import router as company_automation_router
@@ -450,6 +453,7 @@ app.include_router(training_router)
 app.include_router(artifacts_router)
 app.include_router(eyes_router)
 app.include_router(pressure_router)
+app.include_router(reckoning_router)
 
 
 async def _get_postgres_pressure_read_model():
@@ -469,6 +473,7 @@ async def _get_postgres_artifact_store() -> ArtifactStorePort:
 
 
 async def _get_pipeline_runner() -> PipelineRunnerPort:
+    pg = await get_postgres_manager()
     store = await _get_postgres_artifact_store()
     extract = ExtractStage()
     return ArtifactEngineOrchestrator(
@@ -477,6 +482,8 @@ async def _get_pipeline_runner() -> PipelineRunnerPort:
         anticipate=AnticipateStage(),
         extract=extract,
         duel=DuelStage(extract, ExtractStage()),
+        reckoning_writer=PostgresReckoningWriter(pg),
+        training_emitter=TrainingEmitter(postgres=pg, producer="cyrex.artifact_engine"),
     )
 
 

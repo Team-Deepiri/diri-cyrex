@@ -143,6 +143,46 @@ async def emit_learning_artifacts(
     return record_ids
 
 
+async def emit_reckoning_training(
+    records: List[PredictionRecord],
+    *,
+    document_id: str,
+    artifact_id: str | None,
+    emitter: TrainingEmitter,
+) -> List[str]:
+    """Emit Helox training samples for ANOMALOUS / NOVEL reckoning fields."""
+    emitted: List[str] = []
+    for rec in records:
+        if rec.status not in (PredictionStatus.ANOMALOUS, PredictionStatus.NOVEL):
+            continue
+        if rec.actual_value is None:
+            continue
+        instruction = (
+            f"Document {document_id}: field '{rec.field_name}' reckoning "
+            f"status={rec.status.value}. Prior mean={rec.predicted_mean}, "
+            f"actual={rec.actual_value}."
+        )
+        rid = await emitter.emit_structured(
+            instruction=instruction,
+            output=str(rec.actual_value),
+            input_text=str(rec.predicted_mean or rec.predicted_range or ""),
+            category="reckoning",
+            quality_score=0.85 if rec.status == PredictionStatus.ANOMALOUS else 0.7,
+            document_id=document_id,
+            artifact_id=artifact_id,
+            source_type="reckoning",
+            metadata={
+                "field_name": rec.field_name,
+                "status": rec.status.value,
+                "sigma_delta": rec.sigma_delta,
+            },
+            producer="cyrex.reckoning_stage",
+        )
+        if rid:
+            emitted.append(rid)
+    return emitted
+
+
 class ReckoningStage:
     """Compares anticipated priors against actual extraction results.
 

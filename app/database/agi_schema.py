@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.pipeline.helox_training_schema import HELOX_TRAINING_SAMPLES_DDL
+
 logger = logging.getLogger("cyrex.database.agi_schema")
 
 _DDL: list[str] = [
@@ -83,6 +85,33 @@ _DDL: list[str] = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS cyrex.reckoning_actuals (
+        document_id UUID NOT NULL,
+        field_name TEXT NOT NULL,
+        actual_value JSONB NOT NULL,
+        confirmed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (document_id, field_name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cyrex.reckoning_anomalies (
+        document_id UUID NOT NULL,
+        field_name TEXT NOT NULL,
+        sigma_delta NUMERIC,
+        detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (document_id, field_name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS cyrex.pressure_cell_artifacts (
+        document_id UUID NOT NULL,
+        section_id TEXT NOT NULL DEFAULT '',
+        page INTEGER NOT NULL DEFAULT -1,
+        artifact_id UUID NOT NULL,
+        PRIMARY KEY (document_id, section_id, page, artifact_id)
+    )
+    """,
+    """
     INSERT INTO cyrex.documents (document_id, content_hash, mime_type, status, metadata_json)
     VALUES (
         '00000000-0000-4000-8000-000000000001'::uuid,
@@ -106,4 +135,8 @@ async def ensure_agi_schema(db: Any | None = None) -> None:
             await db.execute(stmt)
         except Exception as exc:
             logger.warning("agi schema stmt skipped: %s", exc)
+    try:
+        await db.execute(HELOX_TRAINING_SAMPLES_DDL)
+    except Exception as exc:
+        logger.warning("helox training schema skipped: %s", exc)
     logger.info("cyrex AGI schema ensured")
