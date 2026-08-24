@@ -1588,7 +1588,7 @@ profile = ["gprof2dot (>=2022.7.29)"]
 
 [[package]]
 name = "diri-agent-testing-utils"
-version = "0.1.0"
+version = "0.1.1"
 description = "Pytest fixtures, mocks, and test harness for AI agent testing"
 optional = false
 python-versions = ">=3.11"
@@ -1606,8 +1606,8 @@ dev = ["black (>=23.0.0)", "mypy (>=1.0.0)", "pytest (>=7.0.0)", "pytest-asyncio
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git"
-reference = "a934468cd142e2cb38bd365e8548b4bdde77bf73"
-resolved_reference = "a934468cd142e2cb38bd365e8548b4bdde77bf73"
+reference = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff"
+resolved_reference = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff"
 
 [[package]]
 name = "diri-agent-toolbox"
@@ -9017,4 +9017,4 @@ rocm = ["torch", "torchaudio", "torchvision"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "f45b2c535668e911385d8e2447d657bd130ae30970e349eccf192ed7219fc639"
+content-hash = "81f82331802367472505049134056136604924c8dffdb37e6d97555fe782a2a1"
