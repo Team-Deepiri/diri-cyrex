@@ -75,6 +75,14 @@ _DDL: list[str] = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS cyrex.reckoning_field_priors (
+        field_name TEXT PRIMARY KEY,
+        predicted_range_json JSONB,
+        last_prior_update TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS cyrex.reckoning_records (
         document_id UUID NOT NULL,
         field_name TEXT NOT NULL,
