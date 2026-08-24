@@ -41,7 +41,7 @@ from .routes.pressure import (
     get_pressure_read_model,
     router as pressure_router,
 )
-from .routes.reckoning import router as reckoning_router
+from .routes.reckoning import get_reckoning_read_model, router as reckoning_router
 
 # Extended routers
 from .routes.company_automation_api import router as company_automation_router
@@ -65,6 +65,7 @@ from .routes.universal_rag_api import router as universal_rag_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.workflow_api import router as workflow_router
 from .pipeline.registry.pressure_store import PostgresPressureStore
+from .pipeline.registry.reckoning_store import PostgresReckoningStore
 from .settings import settings
 
 # Logging
@@ -199,6 +200,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Elkedel eyes → artifact sync enabled")
         except Exception as e:
             logger.warning(f"Elkedel eyes sync disabled: {e}")
+
+    if os.getenv("ELKEDEL_EYES_AUTO_START", "false").lower() in {"1", "true", "yes"}:
+        try:
+            from .integrations.elkedel.client import get_elkedel_client
+
+            status = await get_elkedel_client().eyes_status()
+            if not status.get("running"):
+                await get_elkedel_client().eyes_start()
+                logger.info("Elkedel eyes pipeline auto-started")
+        except Exception as e:
+            logger.warning(f"Elkedel eyes auto-start skipped: {e}")
 
     yield
 
@@ -461,6 +473,13 @@ async def _get_postgres_pressure_read_model():
 
 
 app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
+
+
+async def _get_postgres_reckoning_read_model():
+    return PostgresReckoningStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
 
 
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
