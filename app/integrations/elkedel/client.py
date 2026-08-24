@@ -175,3 +175,22 @@ def get_elkedel_client() -> ElkedelClient:
     if _default_client is None:
         _default_client = ElkedelClient()
     return _default_client
+
+
+def visual_artifact_from_trace(trace: Dict[str, Any], *, query: str | None = None) -> Dict[str, Any]:
+    """Map an Elkedel trace dict into a Cyrex VisualObservation artifact."""
+    return {
+        "artifact_type": "VisualObservation",
+        "modality": "vision",
+        "source": "elkedel",
+        "identity_id": trace.get("trace_id") or trace.get("identity_id"),
+        "label": trace.get("label"),
+        "strength": trace.get("strength"),
+        "n_observations": trace.get("n_observations"),
+        "history": trace.get("history") or [],
+        "citation": {
+            "kind": "frame_timestamp",
+            "ts_ms": trace.get("last_seen_ms") or trace.get("first_seen_ms"),
+            "query": query,
+        },
+    }
