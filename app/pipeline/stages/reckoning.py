@@ -16,6 +16,7 @@ DEFAULT_ANOMALY_SIGMA_THRESHOLD = 0.3
 
 
 def _coerce_float(value: Any) -> Optional[float]:
+    # Exclude bools — bool is a subclass of int, but not numeric for reckoning.
     if value is None:
         return None
     if isinstance(value, bool):

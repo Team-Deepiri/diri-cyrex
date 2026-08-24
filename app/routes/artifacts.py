@@ -13,8 +13,10 @@ from app.database.postgres import get_postgres_manager
 from ..pipeline.contracts.models import (
     ArtifactBundle,
     Citation,
+    ConfessionGap,
     PersonaScope,
     Provenance,
+    WitnessSpan,
 )
 
 from ..pipeline.contracts.ports import PipelineRunnerPort
@@ -53,19 +55,6 @@ class VoiceQueryRequest(BaseModel):
     document_id: str
     question: str  # TODO: confirm field name once VoiceQueryRequest defined
     persona_scope: PersonaScope = Field(default_factory=PersonaScope)
-
-
-class WitnessSpan(BaseModel):
-    citation_id: str
-    quote: str
-    char_start: int
-    char_end: int
-    page: Optional[int] = None
-
-
-class ConfessionGap(BaseModel):
-    claim_attempted: str
-    reason: str = "no_citation"
 
 
 class VoiceQueryResponse(BaseModel):

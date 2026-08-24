@@ -10,7 +10,9 @@ from app.pipeline.contracts.models import (
     ArtifactBundle,
     Citation,
     CitationLocator,
+    ConfessionGap,
     PersonaScope,
+    WitnessSpan,
 )
 from app.pipeline.contracts.ports import ArtifactStorePort
 
@@ -22,19 +24,6 @@ class WitnessScorer(Protocol):
     def rank(
         self, question: str, quotes: Sequence[str], *, threshold: float = 0.35
     ) -> List[Any]: ...
-
-
-class ConfessionGap(BaseModel):
-    claim_attempted: str
-    reason: str = "no_citation"
-
-
-class WitnessSpan(BaseModel):
-    citation_id: str
-    quote: str
-    char_start: int = 0
-    char_end: int = 0
-    page: Optional[int] = None
 
 
 class VoiceQueryResult(BaseModel):

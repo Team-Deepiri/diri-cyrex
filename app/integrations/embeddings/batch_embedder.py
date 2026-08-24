@@ -1,4 +1,4 @@
-"""Batch embedding service — gpu-utils policy + toolbox batch processor."""
+"""Batch embedding service — gpu-utils policy + toolbox batch chunking."""
 
 from __future__ import annotations
 
@@ -49,26 +49,17 @@ class BatchEmbedder:
 
         try:
             from diri_agent_toolbox.agi import batch_embed_items
-            from diri_agent_toolbox.processing import AsyncBatchProcessor, BatchProcessingConfig
 
             chunks = batch_embed_items(texts, batch_size=batch_size)
-            processor = AsyncBatchProcessor(
-                BatchProcessingConfig(batch_size=1, max_concurrent_batches=4)
-            )
-
-            async def _one(batch: List[str]) -> List[Any]:
-                return await self._embed_fn(batch)
-
-            results: List[Any] = []
-            for chunk in chunks:
-                vecs = await _one(chunk)
-                results.extend(vecs)
-            return results
         except ImportError:
-            out: List[Any] = []
-            for i in range(0, len(texts), batch_size):
-                out.extend(await self._embed_fn(texts[i : i + batch_size]))
-            return out
+            chunks = [
+                texts[i : i + batch_size] for i in range(0, len(texts), batch_size)
+            ]
+
+        results: List[Any] = []
+        for chunk in chunks:
+            results.extend(await self._embed_fn(chunk))
+        return results
 
     async def map_batches(
         self,
@@ -76,17 +67,18 @@ class BatchEmbedder:
         fn: Callable[[T], Coroutine[Any, Any, R]],
         *,
         batch_size: Optional[int] = None,
+        max_concurrent: int = 4,
     ) -> List[R]:
-        """Generic async batch map using toolbox processor when available."""
+        """Async map over items with bounded concurrency (primary path)."""
+        if not items:
+            return []
         bs = batch_size or self._resolve_policy()[0]
-        try:
-            from diri_agent_toolbox.processing import AsyncBatchProcessor, BatchProcessingConfig
+        # Prefer direct gather with a semaphore — AsyncBatchProcessor returns
+        # BatchProcessingResult (status object), not mapped values.
+        sem = asyncio.Semaphore(max(1, min(max_concurrent, bs)))
 
-            processor = AsyncBatchProcessor(BatchProcessingConfig(batch_size=bs))
-            result = await processor.process_batch(items, fn)
-            if result.failed_items:
-                logger.warning("batch map failures", extra={"failed": result.failed_items})
-            # process_batch returns BatchProcessingResult not values — fallback
-        except ImportError:
-            pass
-        return await asyncio.gather(*[fn(item) for item in items])
+        async def _one(item: T) -> R:
+            async with sem:
+                return await fn(item)
+
+        return list(await asyncio.gather(*[_one(item) for item in items]))

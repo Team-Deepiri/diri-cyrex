@@ -100,9 +100,11 @@ class PostgresArtifactStore:
         postgres: Any = None,
         *,
         pressure_sink: Optional[PressureSignalSink] = None,
+        pressure_engine: Any = None,
     ) -> None:
         self._postgres = postgres
         self._pressure_sink = pressure_sink
+        self._pressure_engine = pressure_engine
         self._schema_ready = False
 
     async def _db(self) -> Any:
@@ -268,7 +270,9 @@ class PostgresArtifactStore:
             if events:
                 from app.pipeline.pressure.engine import PressureEngine
 
-                await PressureEngine(await self._db()).accept_many(events)
+                if self._pressure_engine is None:
+                    self._pressure_engine = PressureEngine(await self._db())
+                await self._pressure_engine.accept_many(events)
                 if self._pressure_sink is not None:
                     await self._pressure_sink.emit_many(events)
         except ImportError:
