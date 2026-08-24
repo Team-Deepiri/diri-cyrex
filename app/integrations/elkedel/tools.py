@@ -44,6 +44,9 @@ def build_elkedel_agent_tools() -> List[StructuredTool]:
     async def _stats() -> Dict[str, Any]:
         return await get_elkedel_client().stats()
 
+    async def _training_capture() -> Dict[str, Any]:
+        return await get_elkedel_client().eyes_training_capture()
+
     return [
         StructuredTool.from_function(
             coroutine=_eyes_scene,
@@ -76,6 +79,11 @@ def build_elkedel_agent_tools() -> List[StructuredTool]:
             coroutine=_stats,
             name="elkedel.stats",
             description="Memory store stats (traces, observations).",
+        ),
+        StructuredTool.from_function(
+            coroutine=_training_capture,
+            name="elkedel.eyes_training_capture",
+            description="Start eyes and export desk-camera visual grounding training rows.",
         ),
     ]
 

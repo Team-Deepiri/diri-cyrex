@@ -100,6 +100,17 @@ class CorpusExporter:
         ]
         return self._finalize(rows, preset_kind="visual")
 
+    def export_rows(
+        self,
+        rows: List[Dict[str, Any]],
+        *,
+        preset_kind: str = "visual",
+    ) -> List[Dict[str, Any]]:
+        """Run pre-built training rows through dataset-processor quality gates."""
+        if not self.available() or not rows:
+            return rows
+        return self._finalize(rows, preset_kind=preset_kind)
+
     def _finalize(
         self, rows: List[Dict[str, Any]], *, preset_kind: str
     ) -> List[Dict[str, Any]]:

@@ -7,6 +7,8 @@ from typing import Any, Dict
 from fastapi import APIRouter, Query
 
 from app.integrations.elkedel import get_elkedel_client
+from app.integrations.elkedel.constants import ELKEDEL_SCENE_DOCUMENT_ID
+from app.pipeline.emitters.corpus_exporter import CorpusExporter
 
 router = APIRouter(prefix="/api/v1/eyes", tags=["eyes"])
 
@@ -48,3 +50,43 @@ async def eyes_where(
     top_k: int = Query(5, ge=1, le=50),
 ) -> Dict[str, Any]:
     return await get_elkedel_client().eyes_where(query=q, top_k=top_k)
+
+
+@router.get("/training/export")
+async def eyes_training_export(
+    document_id: str = Query(ELKEDEL_SCENE_DOCUMENT_ID),
+    top_k: int = Query(100, ge=1, le=500),
+) -> Dict[str, Any]:
+    """Export Elkedel live-scene identities through dataset-processor gates."""
+    payload = await get_elkedel_client().eyes_training_export(
+        document_id=document_id,
+        top_k=top_k,
+    )
+    exporter = CorpusExporter()
+    raw_rows = payload.get("records") or []
+    gated = exporter.export_rows(raw_rows, preset_kind="visual")
+    return {
+        **payload,
+        "raw_count": len(raw_rows),
+        "gated_count": len(gated),
+        "records": gated or raw_rows,
+    }
+
+
+@router.post("/training/capture")
+async def eyes_training_capture(
+    document_id: str = Query(ELKEDEL_SCENE_DOCUMENT_ID),
+) -> Dict[str, Any]:
+    """Desk session: ensure eyes are running and export gated training snapshot."""
+    payload = await get_elkedel_client().eyes_training_capture(
+        document_id=document_id,
+    )
+    exporter = CorpusExporter()
+    raw_rows = payload.get("records") or []
+    gated = exporter.export_rows(raw_rows, preset_kind="visual")
+    return {
+        **payload,
+        "raw_count": len(raw_rows),
+        "gated_count": len(gated),
+        "records": gated or raw_rows,
+    }

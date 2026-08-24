@@ -225,6 +225,35 @@ class ElkedelClient:
         r.raise_for_status()
         return r.json()
 
+    async def eyes_training_export(
+        self,
+        *,
+        document_id: str = "00000000-0000-4000-8000-000000000001",
+        top_k: int = 100,
+    ) -> Dict[str, Any]:
+        """Export live-scene identities as visual grounding training rows."""
+        client = await self._get_client()
+        r = await client.get(
+            "/v1/eyes/training/export",
+            params={"document_id": document_id, "top_k": top_k},
+        )
+        r.raise_for_status()
+        return r.json()
+
+    async def eyes_training_capture(
+        self,
+        *,
+        document_id: str = "00000000-0000-4000-8000-000000000001",
+    ) -> Dict[str, Any]:
+        """Start eyes if needed and return exportable desk-session snapshot."""
+        client = await self._get_client()
+        r = await client.post(
+            "/v1/eyes/training/capture",
+            params={"document_id": document_id},
+        )
+        r.raise_for_status()
+        return r.json()
+
 
 _default_client: Optional[ElkedelClient] = None
 

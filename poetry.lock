@@ -1588,7 +1588,7 @@ profile = ["gprof2dot (>=2022.7.29)"]
 
 [[package]]
 name = "diri-agent-guardrails"
-version = "0.1.1"
+version = "0.1.2"
 description = "Reusable input/output sanitization, PII detection, prompt-injection checks, and policy-driven guardrails for AI agents."
 optional = false
 python-versions = "^3.10"
@@ -1602,8 +1602,8 @@ opa = ["httpx (>=0.27.0,<0.28.0)"]
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/diri-agent-guardrails.git"
-reference = "v0.1.1"
-resolved_reference = "80893ca7221a44218102ded6790f5d0edb96c0e2"
+reference = "v0.1.2"
+resolved_reference = "23537193f40373ab29799275f912367e0cf6a8c1"
 
 [[package]]
 name = "diri-agent-testing-utils"
@@ -9035,4 +9035,4 @@ rocm = ["torch", "torchaudio", "torchvision"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "fc6f5f029796057c0e796e1a8f90802760400eaa1bef1e666c91665a89937e30"
+content-hash = "93a4505ce99cc2ffc7d035e0c15451de117d07cefbfee7aab3704b7623a820ee"
