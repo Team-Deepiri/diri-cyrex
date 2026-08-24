@@ -109,6 +109,12 @@ class Settings(BaseSettings):
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
 
+    # Elkedel — sensory / episodic visual memory (compose service ``elkedel``)
+    ELKEDEL_BASE_URL: str = "http://elkedel:8765"
+    ELKEDEL_MCP_URL: Optional[str] = "http://elkedel-mcp:8766/mcp"
+    ELKEDEL_API_KEY: Optional[str] = None
+    ELKEDEL_TIMEOUT_SEC: float = 30.0
+
     @field_validator('POSTGRES_PASSWORD')
     @classmethod
     def validate_postgres_password(cls, v: str) -> str:

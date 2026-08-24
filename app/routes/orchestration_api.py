@@ -704,6 +704,68 @@ async def get_comprehensive_health(
         except Exception as e:
             synapse_status["error"] = str(e)
             synapse_status["status"] = "error"
+
+        # Elkedel — sensory / episodic visual memory (optional overlay service)
+        elkedel_status = {
+            "status": "unknown",
+            "healthy": False,
+            "connection": {},
+            "error": None,
+        }
+        try:
+            import httpx
+
+            elkedel_url = getattr(settings, "ELKEDEL_BASE_URL", "http://elkedel:8765")
+            headers = {}
+            elkedel_key = getattr(settings, "ELKEDEL_API_KEY", None)
+            if elkedel_key:
+                headers["x-api-key"] = elkedel_key
+            try:
+                response = httpx.get(
+                    f"{elkedel_url.rstrip('/')}/ready",
+                    headers=headers,
+                    timeout=2.0,
+                )
+                if response.status_code == 200:
+                    body = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                    elkedel_status = {
+                        "status": "healthy",
+                        "healthy": True,
+                        "connection": {
+                            "url": elkedel_url,
+                            "connected": True,
+                            "traces": body.get("traces"),
+                            "version": body.get("version"),
+                        },
+                    }
+                else:
+                    elkedel_status = {
+                        "status": "unhealthy",
+                        "healthy": False,
+                        "connection": {"url": elkedel_url, "connected": False},
+                        "error": f"Elkedel returned status code {response.status_code}",
+                    }
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                elkedel_status = {
+                    "status": "unreachable",
+                    "healthy": False,
+                    "connection": {"url": elkedel_url, "connected": False},
+                    "error": f"Connection failed: {str(e)}",
+                }
+            except Exception as e:
+                elkedel_status = {
+                    "status": "error",
+                    "healthy": False,
+                    "connection": {"url": elkedel_url, "connected": False},
+                    "error": str(e),
+                }
+        except ImportError:
+            elkedel_status = {
+                "status": "not_available",
+                "healthy": False,
+                "connection": {},
+                "error": "httpx not available for Elkedel health check",
+            }
         
         # Compile comprehensive health status
         health_status["services"] = {
@@ -713,6 +775,7 @@ async def get_comprehensive_health(
             "redis": redis_status,
             "mlflow": mlflow_status,
             "synapse": synapse_status,
+            "elkedel": elkedel_status,
             "llm_services": llm_services,
         }
         
