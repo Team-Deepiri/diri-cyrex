@@ -27,6 +27,10 @@ class Settings(BaseSettings):
 
     # Authentication Configuration
     JWT_SECRET: Optional[str] = None
+    # Local development only. Lets requests through while CYREX_API_KEY is unset
+    # or still the placeholder; deployed environments must leave this False so a
+    # missing key fails closed instead of serving unauthenticated traffic.
+    CYREX_ALLOW_INSECURE_AUTH: bool = False
     
     # Logging Configuration
     LOG_LEVEL: str = "INFO"
@@ -192,6 +196,10 @@ class Settings(BaseSettings):
     # Default to api-gateway service name for Docker, fallback to localhost for local dev
     NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
+    # Local development only. Lets requests through while CYREX_API_KEY is unset
+    # or still the placeholder; deployed environments must leave this False so a
+    # missing key fails closed instead of serving unauthenticated traffic.
+    CYREX_ALLOW_INSECURE_AUTH: bool = False
     
     # Messaging Service Configuration
     MESSAGING_SERVICE_URL: str = "http://messaging-service:5009"

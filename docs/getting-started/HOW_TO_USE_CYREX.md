@@ -116,26 +116,28 @@ Cyrex supports Retrieval-Augmented Generation with multiple knowledge bases:
 
 ## API Key Authentication
 
-**IMPORTANT**: Most Cyrex endpoints require an API key. The default key is `change-me` (or set via `CYREX_API_KEY` environment variable).
+**IMPORTANT**: Most Cyrex endpoints require an API key, set via the `CYREX_API_KEY` environment variable. There is no default — if it is unset or still the `change-me` placeholder, authenticated routes return `503` until you configure one.
 
 **Endpoints that DON'T require API key:**
 - `GET /health` — Health check
 - `GET /metrics` — Prometheus metrics
-- `GET /docs` — Interactive API documentation
 
 **All other endpoints require the API key header:**
 ```bash
--H "x-api-key: change-me"
+-H "x-api-key: $CYREX_API_KEY"
 ```
 
-### Finding Your API Key
+### Setting Your API Key
 
 ```bash
-# Check the API key in your .env file
+# Generate a key
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+
+# Check what is currently configured
 cat .env | grep CYREX_API_KEY
 ```
 
-**Default API Key**: `change-me` (if not set in environment)
+For local development where you do not want a key at all, set `CYREX_ALLOW_INSECURE_AUTH=true`. Never set it in a deployed environment.
 
 ---
 
@@ -147,7 +149,7 @@ Route a user command to a predefined ability:
 
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/route-command \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "command": "Can you review this code for security issues?",
@@ -172,7 +174,7 @@ Generate dynamic ability using LLM + RAG:
 
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/generate-ability \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "user123",
@@ -195,7 +197,7 @@ Get RL optimizer recommendation:
 
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/recommend-action \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "user_data": {
@@ -213,7 +215,7 @@ Query knowledge bases:
 
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/knowledge/query \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What are effective focus boost strategies?",
@@ -226,7 +228,7 @@ Index content into a knowledge base:
 
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/knowledge/index \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "User patterns show that focus boosts are most effective in the afternoon...",
@@ -243,7 +245,7 @@ curl -X POST http://localhost:8000/agent/intelligence/knowledge/index \
 **Ability Feedback:**
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/ability/feedback \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"feedback": "very helpful", "ability_id": "..."}'
 ```
@@ -251,7 +253,7 @@ curl -X POST http://localhost:8000/agent/intelligence/ability/feedback \
 **Optimizer Reward:**
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/optimizer/reward \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "outcome": {
@@ -265,7 +267,7 @@ curl -X POST http://localhost:8000/agent/intelligence/optimizer/reward \
 **Optimizer Update:**
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/optimizer/update \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"epochs": 10}'
 ```
@@ -273,7 +275,7 @@ curl -X POST http://localhost:8000/agent/intelligence/optimizer/update \
 **Formatted Knowledge Query:**
 ```bash
 curl -X POST http://localhost:8000/agent/intelligence/knowledge/query-formatted \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "What are our vendor policies?",
@@ -292,7 +294,7 @@ Generate vector embeddings for text:
 ```bash
 curl -X POST http://localhost:8000/api/embeddings \
   -H "Content-Type: application/json" \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -d '{
     "text": "Hello world, this is a test",
     "model": "sentence-transformers/all-MiniLM-L6-v2"
@@ -306,7 +308,7 @@ Get AI-generated text completions:
 ```bash
 curl -X POST http://localhost:8000/api/complete \
   -H "Content-Type: application/json" \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -d '{
     "prompt": "What is artificial intelligence?",
     "max_tokens": 100,
@@ -324,7 +326,7 @@ Index text content:
 
 ```bash
 curl -X POST http://localhost:8000/agent/document-indexing/index/text \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "Document text content...",
@@ -336,7 +338,7 @@ Search indexed documents:
 
 ```bash
 curl -X POST http://localhost:8000/agent/document-indexing/search \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "search terms",
@@ -366,7 +368,7 @@ See [docs/getting-started/CYREX_VENDOR_FRAUD_QUICK_START.md](./CYREX_VENDOR_FRAU
 **Process an invoice:**
 ```bash
 curl -X POST http://localhost:8000/agent/vendor-fraud/invoice/process \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"invoice_data": {...}, "industry": "property_management"}'
 ```
@@ -374,7 +376,7 @@ curl -X POST http://localhost:8000/agent/vendor-fraud/invoice/process \
 **Detect fraud:**
 ```bash
 curl -X POST http://localhost:8000/agent/vendor-fraud/fraud/detect \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"context": {...}}'
 ```
@@ -382,7 +384,7 @@ curl -X POST http://localhost:8000/agent/vendor-fraud/fraud/detect \
 **Pricing benchmark:**
 ```bash
 curl -X POST http://localhost:8000/agent/vendor-fraud/pricing/benchmark \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"service": "plumbing repair", "industry": "property_management"}'
 ```
@@ -401,8 +403,8 @@ Make sure these are set in your `.env` file or Docker environment:
 # Required for AI features
 OPENAI_API_KEY=your-openai-api-key-here
 
-# API Key for Cyrex endpoints (default: "change-me")
-CYREX_API_KEY=change-me
+# API Key for Cyrex endpoints — required, no default
+CYREX_API_KEY=your-generated-key-here
 
 # Optional
 OPENAI_MODEL=gpt-4o-mini
@@ -454,7 +456,7 @@ docker compose -f docker-compose.dev.yml restart cyrex
 **Solution:**
 ```bash
 # Always include the API key header for non-health/metrics endpoints
-curl -H "x-api-key: change-me" http://localhost:8000/agent/intelligence/route-command
+curl -H "x-api-key: $CYREX_API_KEY" http://localhost:8000/agent/intelligence/route-command
 ```
 
 ### Milvus Connection Issues
@@ -488,7 +490,7 @@ The easiest way to test Cyrex is through the interactive documentation:
    - Click on `POST /agent/intelligence/route-command`
    - Click "Try it out"
    - **IMPORTANT**: Click "Authorize" button at the top
-   - Enter API key: `change-me`
+   - Enter API key: the value of `CYREX_API_KEY` from your `.env`
    - Click "Authorize" then "Close"
    - Edit the JSON request body
    - Click "Execute"
@@ -511,7 +513,7 @@ const embeddingResponse = await fetch('http://localhost:8000/api/embeddings', {
   method: 'POST',
   headers: {
     'Content-Type': 'application/json',
-    'x-api-key': 'change-me'  // Required!
+    'x-api-key': process.env.CYREX_API_KEY  // Required!
   },
   body: JSON.stringify({ text: 'Hello world' })
 });
@@ -532,7 +534,7 @@ print(response.json())
 response = requests.post(
     'http://localhost:8000/api/embeddings',
     json={'text': 'Hello world'},
-    headers={'x-api-key': 'change-me'}  # Required!
+    headers={'x-api-key': os.environ['CYREX_API_KEY']}  # Required!
 )
 print(response.json())
 
@@ -543,7 +545,7 @@ response = requests.post(
         'command': 'Review this code',
         'user_role': 'software_engineer'
     },
-    headers={'x-api-key': 'change-me'}
+    headers={'x-api-key': os.environ['CYREX_API_KEY']}
 )
 print(response.json())
 ```
