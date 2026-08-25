@@ -1,14 +1,22 @@
 # Cyrex AGI Design Plan v2
 
 **Owner:** DeepIRI  
-**Timeline:** **8 weeks total** (2-day pre-track · 4-week parallel build · Week 5 integration gate · Weeks 6–8 Splicing ship)  
-**Team:** Prajawala · Sebastian · Evan · Tyler  
+**Timeline:** ~~8 weeks total~~ — **superseded.** This doc's original calendar (2-day pre-track ·
+4-week parallel build · Week 5 integration gate · Weeks 6–8 Splicing ship) is kept below as
+historical rationale for *why* the phases are ordered the way they are, but is no longer the
+plan of record. As of the 2026-08-07 reconciliation, execution is tracked by dependency wave in
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md), and current build
+status by component lives in [STATUS.md](./STATUS.md).  
+**Team:** Prajwala · Sebastian · Evan · Tyler · Keshav — corrected roster, see
+[STATUS.md](./STATUS.md) and the implementation plan's roster table.  
 **Spec:** `cyrex_artifact_engine_spec-3`  
 **Companion docs:**
-- [CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md) — per-engineer todos
+- [STATUS.md](./STATUS.md) — **read this first** — current build status, not aspirational
+- [CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md) — wave-based task plan
 - [CYREX_AGI_VISUALIZATION_PLAN_V2.md](./CYREX_AGI_VISUALIZATION_PLAN_V2.md) — novel viz primitives & canvas layout
 - [CYREX_AGI_POSTGRES_SCHEMA.md](./CYREX_AGI_POSTGRES_SCHEMA.md) — full `cyrex.*` table inventory (~111 tables)
 - [CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md](./CYREX_AGI_PRODUCER_SUBSCRIBER_MAP.md) — live vs planned producer → sink → subscriber wiring
+- [INTAKE.md](./INTAKE.md) — external ideas/sources, triaged
 
 ---
 
@@ -73,12 +81,16 @@ Legal/contract document processing remains in `lease_processor.py` / `contract_p
 
 ### Team roles
 
+*Corrected 2026-08-07 — the original table below misspelled Prajwala throughout and omitted an
+active contributor. Current assignments and in-flight PRs: [STATUS.md](./STATUS.md).*
+
 | Engineer | Primary domain | Constraint |
 |----------|---------------|------------|
 | **Tyler** | Track A — Store & Orchestrator | AI + backend |
 | **Evan** | Track B — Adversarial + Dead Reckoning | AI + libraries |
-| **Prajawala** | Track C — Voice + API + UI | AI + frontend API |
+| **Prajwala** | Track C — Voice + API + UI | AI + frontend API |
 | **Sebastian** | Infra, persistence, CI, MCP hosting, integration shell | **Backend/infra only — no AI model work** |
+| **Keshav** | Reckoning corpus stats, Helox training-emitter bridge | ML/data science, agentic fine-tuning |
 
 ---
 
@@ -283,7 +295,12 @@ Pre-track (Days 1–2, ALL engineers)
 
 **Rule:** Tracks B, C, D **must not import** each other's packages. Only `contracts`, stdlib, and their own code.
 
-**Status:** ~70% done on `tyler_chartrand/feature/artifact_engine_track_a` — needs merge + contract tests.
+**Status (corrected 2026-08-07):** the pre-track contract layer itself is done and merged to
+`main` — the only phase in this plan that fully landed. The "~70% done" estimate above referred
+to `tyler_chartrand/feature/artifact_engine_track_a`, a branch that has since gone stale (last
+commit 2026-05-20, 73 commits behind `main`) and was superseded by
+`tyler_chartrand/feature/track-a-orchestrator` (PR #128, open 14+ days, `CHANGES_REQUESTED` as
+of this correction). See [STATUS.md](./STATUS.md) for current state.
 
 ### Track ownership
 
@@ -512,7 +529,13 @@ git submodule update --init diri-cyrex/diri-agent-testing-utils
 
 ## 13. cyrex-agi Roadmap (V1–V5)
 
-`cyrex-agi/` is currently placeholder stubs. **V1 ships Week 7** inside the 8-week plan; V3–V5 are post-launch.
+**Corrected 2026-08-07:** `cyrex-agi/` is not empty placeholder stubs — `cyrex-agi/app/main.py`
+(~150 LOC) is a real, running Redis Streams consumer on port 8003, subscribed to
+`pipeline.pressure.events` and `pipeline.artifact.invalidation` in consumer group
+`cyrex-agi-pressure`. It observes and counts; it does not yet act or decide anything, and its
+only endpoint is `GET /health`. That's an honest V1, not a stub. `cyrex-agi/README.md` still
+says "Phase 5 — placeholder" and needs the same correction. V2–V5 below remain unscheduled — see
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md) Wave 3.
 
 | Phase | When | Capability | Owner |
 |-------|------|-----------|-------|
@@ -879,6 +902,7 @@ document_ingest → parse → anticipate → extract_* → synthesize → duel
 | Postgres migration scope creep | Phase 1 = 50 tables only; layers 4–6, 9–10 deferred to Phase 2 | Sebastian + Tyler |
 | `helox_training_samples` orphan | `training_emitter` required at integration gate Week 5 | Tyler + Sebastian |
 | Two memory systems diverge | Ship `memory_artifact_links` bridge in Phase 1 | Tyler |
+| **Agent security posture** (added 2026-08-07) | Checklist: secure tool permissions, sandboxed execution, least privilege, continuous monitoring, human approval on high-risk actions, red-team eval. **Concrete violations found today:** one shared `CYREX_API_KEY` covers every endpoint and `x-desktop-client: true` bypasses auth entirely (`app/main.py:222-245`); `PersonaScope.hard_citation_gate` and ghost-artifact `rebase()` are specified but unenforced; zero evaluators implemented (§18). This checklist is the definition of done for `diri-agent-guardrails`. | Evan |
 
 ---
 
