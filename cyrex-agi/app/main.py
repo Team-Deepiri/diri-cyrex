@@ -82,8 +82,10 @@ async def _sugar_glider_ready(client: httpx.AsyncClient, base_url: str) -> bool:
     for path in ("/readyz", "/healthz", "/health"):
         try:
             resp = await client.get(f"{base_url}{path}", timeout=2.0)
-            if resp.status_code < 500:
+            if 200 <= resp.status_code < 300:
                 return True
+        except asyncio.CancelledError:
+            raise
         except Exception:
             continue
     return False
@@ -144,6 +146,8 @@ async def _consume_via_sugar_glider(
                     ack_resp.raise_for_status()
                 _state["status"] = "running"
                 _state["transport"] = "sugar-glider-http"
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:
                 _state["errors"] = int(_state["errors"]) + 1
                 _state["status"] = f"sugar_glider_error:{exc}"
@@ -190,6 +194,8 @@ async def _consume_via_redis(stream: str, counter_key: str, last_key: str) -> No
                     )
                     await client.xack(stream, CONSUMER_GROUP, entry_id)
             _state["status"] = "running"
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             _state["errors"] = int(_state["errors"]) + 1
             _state["status"] = f"redis_error:{exc}"
