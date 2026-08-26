@@ -13,7 +13,6 @@ from app.pipeline.voice.synthesizer import (
     ConfessionGap,
     VoiceQueryResult,
     VoiceSynthesizer,
-    WitnessSpan,
 )
 
 
@@ -59,7 +58,7 @@ class GuardedVoiceSynthesizer:
             )
 
         result = await VoiceSynthesizer(
-            store, scorer=self._get_scorer()
+            self._inner._store, scorer=self._get_scorer()
         ).query(document_id, question, scope)
 
         span_dicts = [s.model_dump() for s in result.spans]

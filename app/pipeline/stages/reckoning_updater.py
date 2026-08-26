@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, List, Optional
+from typing import Any, List
 
 from app.pipeline.contracts.models import PredictionRecord, PredictionStatus
 
