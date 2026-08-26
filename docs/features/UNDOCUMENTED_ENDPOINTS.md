@@ -1,6 +1,6 @@
 # Additional API Endpoints
 
-This document covers API endpoints that are not yet documented in the main guides. All endpoints require `x-api-key: change-me` header unless noted.
+This document covers API endpoints that are not yet documented in the main guides. All endpoints require an `x-api-key` header set to your configured `CYREX_API_KEY` unless noted.
 
 ## Agent Playground
 
@@ -178,7 +178,7 @@ http://localhost:8000
 
 All endpoints (except `/health`, `/metrics`, `/docs`) require:
 ```
-x-api-key: change-me
+x-api-key: $CYREX_API_KEY
 ```
 
 ## Swagger UI

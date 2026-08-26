@@ -85,7 +85,7 @@ jobs:
           REDIS_PORT: "6379"
           MILVUS_HOST: localhost
           MILVUS_PORT: "19530"
-          CYREX_API_KEY: change-me
+          CYREX_API_KEY: ci-smoke-test-key-not-a-real-secret
         run: |
           poetry run python -c "from app.main import app; assert app.title"
 
@@ -101,5 +101,5 @@ jobs:
           REDIS_PORT: "6379"
           MILVUS_HOST: localhost
           MILVUS_PORT: "19530"
-          CYREX_API_KEY: change-me
+          CYREX_API_KEY: ci-smoke-test-key-not-a-real-secret
         run: poetry run pytest --confcutdir=tests/contract tests/contract tests/mcp tests/routes/test_pressure.py -q
