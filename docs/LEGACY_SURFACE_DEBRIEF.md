@@ -80,8 +80,8 @@ Legend: ✅ layer present · ⚠️ partial / stubbed / indirect · ❌ absent
 |---|---|---|---|---|---|---|---|---|---|---|
 | `UniversalRAGEngine` | `app/integrations/universal_rag_engine.py` (16.6K) | ✅ live routes (`universal_rag_api.py`, vendor fraud) | ❌ | ⚠️ prompt-only, never calls an LLM | ⚠️ `deepiri_modelkit` base + LangChain `Document` type | ✅ Milvus (shared store) | ✅ store-delegated (all-MiniLM-L6-v2) | ⚠️ `DocumentProcessor` imported, never used; docs arrive pre-chunked | ❌ | ❌ |
 | `EnhancedUniversalRAGEngine` | `app/integrations/enhanced_universal_rag_engine.py` (23.7K) | ❌ **zero importers — orphaned** | ❌ | ⚠️ prompt-only | ⚠️ `deepiri_modelkit` advanced modules (retrieval/caching/monitoring) | ✅ Milvus (shared store) | ✅ store-delegated (embedding-cache path is a dead no-op) | ❌ | ⚠️ Redis query/embedding cache (not conversational) | ❌ |
-| `RAGPipeline` | `app/integrations/rag_pipeline.py` (15.6K) | ✅ live routes (`rag.py`), LangGraph workflow, lease/contract processors | ❌ | ⚠️ prompt-only | ❌ raw `pymilvus`, no framework | ✅ Milvus (HNSW/L2, lazy load, reconnection) | ✅ in-engine, GPU-aware | ⚠️ JSONL challenge datasets only | ❌ | ❌ |
-| `RAGBridge` | `app/integrations/rag_bridge.py` (4.3K) | ⚠️ library consumer (`orchestrator.py`), no routes | ❌ | ❌ no generation path at all | ⚠️ LangChain `Document` type only | ✅ Milvus, fallback to `KnowledgeRetrievalEngine` — a **6th** engine | ⚠️ delegated to whichever backend is active | ⚠️ accepts raw content, no parsing | ❌ | ❌ |
+| `RAGPipeline` | `app/integrations/rag_pipeline.py` (15.6K) | ✅ live routes (`rag.py`); consumed by LangGraph workflow for context retrieval (lease/contract processors are consumers, not RAGPipeline components) | ❌ | ⚠️ prompt-only | ❌ raw `pymilvus`, no framework | ✅ Milvus (HNSW/L2, lazy load, reconnection) | ✅ in-engine, GPU-aware | ⚠️ JSONL challenge datasets only | ❌ | ❌ |
+| `RAGBridge` | `app/integrations/rag_bridge.py` (4.3K) | ⚠️ library consumer (`orchestrator.py`), no routes | ❌ | ❌ no generation path at all | ⚠️ LangChain `Document` type only | ✅ Milvus, fallback to local `KnowledgeRetrievalEngine` — a **6th** in-repo engine | ⚠️ delegated to whichever backend is active | ⚠️ accepts raw content, no parsing | ❌ | ❌ |
 | `EnhancedRAGService` | `app/services/enhanced_rag_service.py` (8.6K) | ❌ **zero importers — orphaned** | ❌ | ❌ no LLM calls | ❌ raw Pinecone/Weaviate SDK | ✅ Pinecone or Weaviate (env-driven), in-memory fallback | ✅ shared `embedding_service` | ⚠️ `doc_type` tags only; cross-modal is aspirational | ❌ | ❌ |
 
 ### Zero-evaluator finding — confirmed by call path, not just grep
@@ -109,11 +109,14 @@ dicts for a caller that never runs. Evaluation is absent downstream by construct
   `EnhancedRAGService` have zero importers and can be deleted outright (the orphaned-LOC count in
   "Its real condition" above already includes the former; `EnhancedRAGService` is an additional
   orphan it didn't count). Consolidation is a ~3-surface problem, not a 5-surface one.
-- **Two of the five are wrappers over a 6th implementation in another repo.** Engines 1 & 2
-  subclass `deepiri_modelkit.rag.UniversalRAGEngine` (external git dependency, tag v0.2.1), and
-  `RAGBridge` wraps `KnowledgeRetrievalEngine` — the in-repo LOC understates the surface.
-- **Storage is already converging.** All Milvus engines route through the deprecated
-  `milvus_store.py` shim to `app/integrations/milvus/`; the duplication is at the engine layer,
+- **Wrapper targets differ.** `UniversalRAGEngine` and `EnhancedUniversalRAGEngine` wrap
+  external `deepiri_modelkit` (`deepiri_modelkit.rag.UniversalRAGEngine`, tag v0.2.1).
+  `RAGBridge` wraps the **local** `KnowledgeRetrievalEngine` (a 6th in-repo implementation) —
+  not another external package. The in-repo LOC understates the modelkit surface only for
+  engines 1 & 2.
+- **Storage is already converging.** Most Milvus engines route through the deprecated
+  `milvus_store.py` shim to `app/integrations/milvus/`; **exception:** `RAGPipeline` uses
+  `pymilvus` directly and bypasses the shim. The remaining duplication is at the engine layer,
   not the store layer.
 - **Rerankers ≠ evaluators.** Three engines load real cross-encoder rerankers; that is retrieval
   tuning, not Evaluation-layer coverage.
