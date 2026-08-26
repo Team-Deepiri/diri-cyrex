@@ -1374,7 +1374,7 @@ vision = ["Pillow (>=9.4.0)"]
 
 [[package]]
 name = "deepiri-dataset-processor"
-version = "0.3.2"
+version = "0.3.3"
 description = "Production dataset preprocessing: clean, dedup, safety-check, quality, version, and manifest generation."
 optional = false
 python-versions = "^3.11"
@@ -1386,24 +1386,24 @@ develop = false
 networkx = "^3.0"
 numpy = ">=1.24.0,<3.0"
 pandas = "^2.0.0"
-pyarrow = ">=18,<24"
+pyarrow = "^18.0.0"
 pydantic = {version = "^2.0.0", optional = true}
 sentence-transformers = "^3.0.0"
 sqlalchemy = {version = "^2.0.0", optional = true}
 tqdm = "^4.66.0"
 
 [package.extras]
-all = ["numpy (>=1.24.0,<3.0)", "pandas (>=2.0.0,<3.0.0)", "pyarrow (>=18,<24)", "pydantic (>=2.0.0,<3.0.0)", "sentence-transformers (>=3.0.0,<4.0.0)", "sqlalchemy (>=2.0.0,<3.0.0)"]
+all = ["numpy (>=1.24.0,<3.0)", "pandas (>=2.0.0,<3.0.0)", "pyarrow (>=18.0.0,<19.0.0)", "pydantic (>=2.0.0,<3.0.0)", "sentence-transformers (>=3.0.0,<4.0.0)", "sqlalchemy (>=2.0.0,<3.0.0)"]
 quality = ["numpy (>=1.24.0,<3.0)", "pandas (>=2.0.0,<3.0.0)"]
 semantic = ["numpy (>=1.24.0,<3.0)", "sentence-transformers (>=3.0.0,<4.0.0)"]
-streaming = ["pyarrow (>=18,<24)"]
+streaming = ["pyarrow (>=18.0.0,<19.0.0)"]
 versioning = ["pydantic (>=2.0.0,<3.0.0)", "sqlalchemy (>=2.0.0,<3.0.0)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git"
-reference = "v0.3.2"
-resolved_reference = "1dfea272e33d2a7e8a8e306dff1e01aedc412223"
+reference = "v0.3.3"
+resolved_reference = "4072892c4213f797193380bdd7da8b60b308ab06"
 
 [[package]]
 name = "deepiri-gpu-utils"
@@ -1487,7 +1487,7 @@ resolved_reference = "7f461397ff20e64a9d7d4ffb18b4f80c67800a18"
 
 [[package]]
 name = "deepiri-training-orchestrator"
-version = "0.4.2"
+version = "0.4.3"
 description = "Training orchestration and reproducibility: seeding, config fingerprinting, MLflow/W&B tracking, dataset-processor integration, and callback-based training loops."
 optional = false
 python-versions = ">=3.11,<3.14"
@@ -1497,23 +1497,23 @@ develop = false
 
 [package.dependencies]
 accelerate = {version = ">=0.34,<2.0", optional = true}
-deepiri-dataset-processor = {git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.2", extras = ["all"]}
+deepiri-dataset-processor = {git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.3", extras = ["all"]}
 mlflow = ">=3.11.1,<4.0"
 numpy = ">=1.24.0,<3.0"
 pydantic = "^2.0"
-torch = ">=2.8.0,<2.14.0"
+torch = ">=2.8.0,<2.13.0"
 
 [package.extras]
 distributed = ["accelerate (>=0.34,<2.0)"]
-full = ["accelerate (>=0.34,<2.0)", "deepiri-modelkit @ git+https://github.com/Team-Deepiri/deepiri-modelkit.git@v0.2.1", "wandb (>=0.16)"]
-modelkit = ["deepiri-modelkit @ git+https://github.com/Team-Deepiri/deepiri-modelkit.git@v0.2.1"]
+full = ["accelerate (>=0.34,<2.0)", "deepiri-modelkit @ git+https://github.com/Team-Deepiri/deepiri-modelkit.git@v0.2.0", "wandb (>=0.16)"]
+modelkit = ["deepiri-modelkit @ git+https://github.com/Team-Deepiri/deepiri-modelkit.git@v0.2.0"]
 wandb = ["wandb (>=0.16)"]
 
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git"
-reference = "v0.4.2"
-resolved_reference = "486278e825254c5c7558753aa2e44bedc14266d0"
+reference = "v0.4.3"
+resolved_reference = "515e341f5c83cff3c4cd528c08046bbea4dfae65"
 
 [[package]]
 name = "deepspeed"
@@ -9016,4 +9016,4 @@ rocm = ["torch", "torchaudio", "torchvision"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "ec16fde87e7ea58f79e688e5d80c10d8b1ddcb4852d745f46edb8225a8100ba3"
+content-hash = "931b349437f67f2b539b404de39b0a12a8e4310aa0200c615fb81c603c7be710"
