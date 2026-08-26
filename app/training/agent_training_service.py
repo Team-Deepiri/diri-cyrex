@@ -1,14 +1,13 @@
 """Agent training service composing corrections, Helox jobs, and training-orchestrator."""
 from __future__ import annotations
 
-import os
 import tempfile
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from app.logging_config import get_logger
 from app.pipeline.contracts.models import Citation, LearningArtifact
-from app.pipeline.registry.correction_store import SqliteCorrectionStore
+from app.pipeline.registry.postgres_correction_store import PostgresCorrectionStore
 from app.training.correction_trainer import CorrectionTrainer
 from app.training.helox_job_client import HeloxJobClient
 from app.training.training_status import TrainingStatusMonitor
@@ -60,11 +59,9 @@ class AgentTrainingService:
         correction_trainer: Optional[CorrectionTrainer] = None,
         job_client: Optional[HeloxJobClient] = None,
         status_monitor: Optional[TrainingStatusMonitor] = None,
-        correction_store: Optional[SqliteCorrectionStore] = None,
+        correction_store: Optional[Any] = None,
     ) -> None:
-        self.correction_store = correction_store or SqliteCorrectionStore(
-            os.getenv("CYREX_CORRECTIONS_DB", "cyrex_corrections.db")
-        )
+        self.correction_store = correction_store or PostgresCorrectionStore()
         self.correction_trainer = correction_trainer or CorrectionTrainer()
         self.job_client = job_client or HeloxJobClient()
         self.status_monitor = status_monitor or TrainingStatusMonitor()
@@ -77,6 +74,22 @@ class AgentTrainingService:
                 {"lr": 1e-4}, reproducibility=repro, max_steps=cfg.max_steps
             )
             self._feedback_trainer = FeedbackLoopTrainer(orch, live_config=cfg)
+
+    def _load_learning_artifact(self, artifact_id: str) -> Optional[LearningArtifact]:
+        """Sync wrapper around async PostgresCorrectionStore.get_by_id."""
+        import asyncio
+        import concurrent.futures
+        import inspect
+
+        result = self.correction_store.get_by_id(artifact_id)
+        if inspect.isawaitable(result):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return asyncio.run(result)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                return pool.submit(asyncio.run, result).result()
+        return result
 
     def submit_correction(
         self,
@@ -133,7 +146,7 @@ class AgentTrainingService:
 
         examples: List[Dict[str, Any]] = []
         for aid in artifact_ids:
-            stored = self.correction_store.get_by_id(aid)
+            stored = self._load_learning_artifact(aid)
             if stored:
                 examples.append(
                     {

@@ -1,52 +1,62 @@
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from .routes.artifacts import router as artifacts_router
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
-from collections import defaultdict
-from threading import Lock
-
+import asyncio
+import logging
+import os
 import time
 import uuid
-import logging
-import asyncio
+from collections import defaultdict
+from contextlib import asynccontextmanager
+from threading import Lock
+from typing import AsyncGenerator, Optional
+
 import numpy as np
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
-
-from .settings import settings
-from .logging_config import get_logger, RequestLogger, ErrorLogger
-from .middleware.request_timing import RequestTimingMiddleware
+from .database.postgres import get_postgres_manager
+from .logging_config import ErrorLogger, RequestLogger, get_logger
 from .middleware.rate_limiter import RateLimitMiddleware
+from .middleware.request_timing import RequestTimingMiddleware
+from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
+from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.registry.postgres_store import PostgresArtifactStore
+from .pipeline.stages.parse import ParseStage
 
 # Core routers
 from .routes.agent import router as agent_router
-from .routes.challenge import router as challenge_router
-from .routes.task import router as task_router
-from .routes.personalization import router as personalization_router
-from .routes.rag import router as rag_router
-from .routes.inference import router as inference_router
+from .routes.agent_playground_api import router as agent_playground_router
+from .routes.artifacts import get_pipeline_runner, router as artifacts_router
 from .routes.bandit import router as bandit_router
-from .routes.session import router as session_router
-from .routes.monitoring import router as monitoring_router
-from .routes.intelligence_api import router as intelligence_api_router
-from .routes.orchestration_api import router as orchestration_router
+from .routes.challenge import router as challenge_router
+from .routes.collection_management_api import router as collection_management_router
+from .routes.pressure import (
+    get_pressure_read_model,
+    router as pressure_router,
+)
 
 # Extended routers
 from .routes.company_automation_api import router as company_automation_router
-from .routes.universal_rag_api import router as universal_rag_router
-from .routes.document_indexing_api import router as document_indexing_router
-from .routes.collection_management_api import router as collection_management_router
-from .routes.language_intelligence_api import router as language_intelligence_router
-from .routes.document_extraction_api import router as document_extraction_router
-from .routes.testing_api import router as testing_router
-from .routes.vendor_fraud_api import router as vendor_fraud_router
-from .routes.agent_playground_api import router as agent_playground_router
-from .routes.workflow_api import router as workflow_router
 from .routes.cyrex_guard_api import router as cyrex_guard_router
+from .routes.document_extraction_api import router as document_extraction_router
+from .routes.document_indexing_api import router as document_indexing_router
 from .routes.documents import router as documents_router
+from .routes.inference import router as inference_router
+from .routes.intelligence_api import router as intelligence_api_router
+from .routes.language_intelligence_api import router as language_intelligence_router
+from .routes.monitoring import router as monitoring_router
+from .routes.orchestration_api import router as orchestration_router
+from .routes.personalization import router as personalization_router
+from .routes.rag import router as rag_router
+from .routes.session import router as session_router
+from .routes.task import router as task_router
+from .routes.testing_api import router as testing_router
 from .routes.training_api import router as training_router
+from .routes.universal_rag_api import router as universal_rag_router
+from .routes.vendor_fraud_api import router as vendor_fraud_router
+from .routes.workflow_api import router as workflow_router
+from .pipeline.registry.pressure_store import PostgresPressureStore
+from .settings import settings
 
 # Logging
 logger = get_logger("cyrex.main")
@@ -107,6 +117,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize Redis tool rate limiter
     try:
         from redis import asyncio as aioredis
+
         from .core.rate_limit_tools import RedisTokenBucketLimiter
         from .core.tool_registry import get_tool_registry
 
@@ -122,9 +133,50 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Rate limiter disabled: {e}")
 
+    document_stream_task: Optional[asyncio.Task] = None
+    model_reload_task: Optional[asyncio.Task] = None
+    if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        try:
+            from .core.document_stream_consumer import get_document_artifact_stream_consumer
+
+            document_consumer = await get_document_artifact_stream_consumer()
+            document_stream_task = asyncio.create_task(document_consumer.run_forever())
+            app.state.document_stream_consumer_task = document_stream_task
+            logger.info("Document stream artifact consumer enabled")
+        except Exception as e:
+            logger.warning(f"Document stream artifact consumer disabled: {e}")
+
+    # Close the Helox→Cyrex model loop (model-ready → hot reload).
+    if os.getenv("CYREX_MODEL_RELOAD_LISTENER_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        try:
+            from .training.model_reload_listener import start_model_reload_listener
+
+            model_reload_task = asyncio.create_task(start_model_reload_listener())
+            app.state.model_reload_listener_task = model_reload_task
+            logger.info("Model reload listener enabled (model-events)")
+        except Exception as e:
+            logger.warning(f"Model reload listener disabled: {e}")
+
     yield
 
     # Shutdown systems
+    for task in (document_stream_task, model_reload_task):
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                # Expected during FastAPI shutdown after cancelling the subscriber task.
+                pass
+
     try:
         system = await get_system_initializer()
         await system.shutdown_all()
@@ -183,14 +235,18 @@ async def middleware(request: Request, call_next):
                     request_id,
                     path
                 )
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                response.headers["x-request-id"] = request_id
+                return response
             if is_desktop and api_key and api_key != settings.CYREX_API_KEY:
                 error_logger.log_api_error(
                     HTTPException(status_code=401, detail="Invalid API key"),
                     request_id,
                     path
                 )
-                raise HTTPException(status_code=401, detail="Invalid API key")
+                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
+                response.headers["x-request-id"] = request_id
+                return response
 
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
@@ -225,7 +281,16 @@ async def health():
         "status": "healthy",
         "version": "3.0.0",
         "timestamp": time.time(),
-        "services": {"ai": "ready" if settings.OPENAI_API_KEY else "disabled"}
+        "services": {
+            "ai": "ready" if settings.OPENAI_API_KEY else "disabled",
+            "node_backend": "configured" if settings.NODE_BACKEND_URL else "not_configured",
+        },
+        "configuration": {
+            "cors_origin": settings.CORS_ORIGIN,
+            "node_backend_url": settings.NODE_BACKEND_URL,
+            "openai_model": settings.OPENAI_MODEL,
+            "api_key_required": bool(settings.CYREX_API_KEY),
+        },
     }
 
     # Redis health
@@ -243,7 +308,14 @@ async def health():
     finally:
         if r:
             await r.close()
+
     return health_status
+
+
+@app.options("/health")
+async def health_options_handler():
+    """Support bare OPTIONS /health checks in tests and simple preflight flows."""
+    return Response(status_code=204)
 
 # Metrics
 @app.get("/metrics")
@@ -264,6 +336,7 @@ def root():
 # Direct AI endpoints
 from pydantic import BaseModel
 
+
 class EmbeddingRequest(BaseModel):
     text: str
     model: Optional[str] = "sentence-transformers/all-MiniLM-L6-v2"
@@ -277,11 +350,15 @@ class CompletionRequest(BaseModel):
 async def api_embeddings(req: EmbeddingRequest, request: Request):
     request_id = getattr(request.state, 'request_id', 'unknown')
     try:
-        from ..services.embedding_service import get_embedding_service
+        if not req.text or not req.text.strip():
+            raise HTTPException(status_code=422, detail="Text must not be empty")
+        from .services.embedding_service import get_embedding_service
         service = get_embedding_service()
         embedding_result = service.embed(req.text, use_cache=True)
         embedding_list = embedding_result.tolist() if isinstance(embedding_result, np.ndarray) else list(embedding_result)
         return {"embedding": embedding_list, "dimension": len(embedding_list), "model": req.model}
+    except HTTPException:
+        raise
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/embeddings")
         raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}")
@@ -305,6 +382,8 @@ async def api_complete(req: CompletionRequest, request: Request):
         return {"completion": completion.choices[0].message.content,
                 "tokens_used": completion.usage.total_tokens if completion.usage else 0,
                 "model": completion.model}
+    except HTTPException:
+        raise
     except Exception as e:
         error_logger.log_api_error(e, request_id, "/api/complete")
         raise HTTPException(status_code=500, detail=f"Completion generation failed: {e}")
@@ -337,6 +416,32 @@ app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
+app.include_router(pressure_router)
+
+
+async def _get_postgres_pressure_read_model():
+    return PostgresPressureStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
+
+
+async def _get_postgres_artifact_store() -> ArtifactStorePort:
+    store = PostgresArtifactStore(await get_postgres_manager())
+    await store.ensure_schema()
+    return store
+
+
+async def _get_pipeline_runner() -> PipelineRunnerPort:
+    store = await _get_postgres_artifact_store()
+    return ArtifactEngineOrchestrator(
+        store=store,
+        parse_stage=ParseStage(),
+    )
+
+
+# Prefer Postgres orchestrator over the route stub FakePipelineRunner.
+app.dependency_overrides[get_pipeline_runner] = _get_pipeline_runner
 
 if __name__ == "__main__":
     import uvicorn

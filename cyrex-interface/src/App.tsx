@@ -8,6 +8,7 @@ import { AgentPlayground } from './components/AgentPlayground';
 import { WorkflowPlayground } from './components/WorkflowPlayground';
 import { MessagesWidget } from './components/MessagesWidget/MessagesWidget';
 import { DocumentIndexingPanel } from './components/DocumentIndexing/DocumentIndexingPanel';
+import { ArtifactEngineCanvas } from './components/ArtifactEngine/ArtifactEngineCanvas';
 type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -3854,6 +3855,13 @@ export default function App() {
             <div>
               <DocumentIndexingPanel baseUrl={baseUrl} apiKey={apiKey} />
               {renderDebugPanel('document-indexing')}
+            </div>
+          )}
+
+          {/* Artifact Engine Tab */}
+          {activeTab === 'artifact-engine' && (
+            <div>
+              <ArtifactEngineCanvas />
             </div>
           )}
           

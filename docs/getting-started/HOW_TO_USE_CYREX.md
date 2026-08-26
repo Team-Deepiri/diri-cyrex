@@ -412,7 +412,7 @@ MILVUS_HOST=milvus
 MILVUS_PORT=19530
 REDIS_HOST=redis
 POSTGRES_HOST=postgres-cyrex
-POSTGRES_PORT=5434
+POSTGRES_PORT=5432   # in-network; host-mapped 5434 is for laptop clients only
 OLLAMA_BASE_URL=http://ollama:11434
 ```
 

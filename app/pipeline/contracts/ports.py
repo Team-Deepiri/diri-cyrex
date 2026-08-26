@@ -161,8 +161,14 @@ class PipelineRunnerPort(Protocol):
         file_content: bytes,
         filename: str,
         metadata: Optional[Dict[str, Any]] = None,
+        *,
+        timeout: Optional[float] = None,
     ) -> ArtifactBundle:
-        """Run the full extraction pipeline on a document."""
+        """Run the full extraction pipeline on a document.
+
+        ``timeout`` is an optional overall deadline in seconds; when exceeded
+        the run is cancelled and ``asyncio.TimeoutError`` propagates.
+        """
 
 
 # ============================================================================
@@ -179,6 +185,24 @@ class AnticipatePort(Protocol):
         document_class: str,
     ) -> List[PredictionRecord]:
         """Generate prior predictions before extraction runs."""
+
+
+# ============================================================================
+# Document Parser (Track A ParseStage)
+# ============================================================================
+
+
+class DocumentParserPort(Protocol):
+    """Minimal parser interface used by ``ParseStage``."""
+
+    async def parse_document(
+        self,
+        file_content: bytes,
+        filename: str,
+        use_ocr: bool = False,
+        extract_tables: bool = False,
+    ) -> Any:
+        """Parse raw bytes into a document object with ``raw_text`` / ``document_type``."""
 
 
 # ============================================================================

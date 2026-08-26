@@ -1,7 +1,18 @@
 # Cyrex AGI — Producer & Subscriber Map
 
 **Parent:** [CYREX_AGI_DESIGN_PLAN_V2.md](./CYREX_AGI_DESIGN_PLAN_V2.md) §16  
-**Schema:** [CYREX_AGI_POSTGRES_SCHEMA.md](./CYREX_AGI_POSTGRES_SCHEMA.md)
+**Schema:** [CYREX_AGI_POSTGRES_SCHEMA.md](./CYREX_AGI_POSTGRES_SCHEMA.md)  
+**Live status:** [STATUS.md](./STATUS.md)
+
+**Corrected 2026-08-07:** `pressure_projector` (`app/pipeline/pressure/engine.py`, 163 LOC) is
+implemented and tested, but nothing in the live request path calls it — `reflect`/`extract`
+don't emit `PressureEvent`s yet (that wiring is Wave 1 item 7 in
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md)), and it queries
+Postgres tables that have no DDL (Wave 0 item 1). So "no producer" below means *no caller*, not
+*no code* — the engine exists. On the subscriber side, `cyrex-agi` is **not** a stub — it's a
+real ~150-LOC Redis Streams consumer on port 8003 that counts pressure/invalidation events; it
+just doesn't act on them yet. The "cyrex-agi is a stub" language further down predates that
+correction.
 
 Actual producer → channel → subscriber map — what's **live in code today** vs **planned in the AGI design** (not wired yet).
 
@@ -44,6 +55,25 @@ RealtimeDataPipeline.ingest(PipelineRecord)
 | Agent pipeline tools | `app/agents/tools/pipeline_tools.py` | same, via tool calls |
 | Direct `ingest()` | `realtime_data_pipeline.py` | anything that calls the API |
 
+Every Helox-bound sample carries a concrete `producer` field. This keeps the
+durable replay table from collapsing all data into the generic
+`cyrex_realtime_pipeline` label and makes it clear which runtime path produced
+the sample.
+
+| Producer label | Source | Sample type |
+|----------------|--------|-------------|
+| `cyrex.orchestrator.auto_capture` | `WorkflowOrchestrator.process_request()` | real user input -> agent response pairs |
+| `cyrex.orchestrator.intermediate_step_auto_capture` | orchestrator intermediate steps | tool call traces |
+| `cyrex.orchestrator.error_recovery_auto_capture` | orchestrator exception recovery | error -> recovery examples |
+| `cyrex.auto_capture.workflow_result` | workflow completion capture | workflow summaries |
+| `cyrex.auto_capture.user_feedback` | feedback/correction capture | rated response pairs |
+| `cyrex.auto_capture.document_extraction_training_signal` | explicit document extraction capture | document-derived training signal |
+| `cyrex.agent_tool.submit_training_data` | agent tool | agent-selected I/O examples |
+| `cyrex.agent_tool.submit_structured_data` | agent tool | typed JSON examples |
+| `cyrex.agent_tool.submit_to_helox` | agent tool | Helox-only instruction examples |
+| `cyrex.agent_tool.submit_raw_to_helox` | agent tool | raw text examples |
+| `cyrex.agent_tool.log_tool_result` | agent tool | tool input/result/timing examples |
+
 **PipelineRecord categories:** `agent_interaction`, `tool_execution`, `user_feedback`, `conversation`, `error_recovery`, `workflow_result`, `knowledge_update`, `performance_metric`, `document_processing`, `compliance_check`, `fraud_detection`
 
 ---
@@ -60,13 +90,15 @@ RealtimeDataPipeline._route_to_helox()
         │              │
         │              ├──► StreamDataSource mode=live|subscribe  (Helox training jobs)
         │              │
-        │              └──► (PLANNED) training_emitter → cyrex.helox_training_samples  ❌ NOT WIRED
+        │              └──► RealtimeDataPipeline → cyrex.helox_training_samples
+        │                    (runtime-training producer; AGI artifact training_emitter remains planned)
         │
         └─► Redis  pipeline.helox-training.structured
                        │
                        ├──► HeloxRealtimeIngestion → JSONL structured/{category}/
                        ├──► StreamDataSource
-                       └──► (PLANNED) Postgres mirror  ❌ NOT WIRED
+                       └──► RealtimeDataPipeline → cyrex.helox_training_samples
+                             (runtime-training producer; AGI artifact training_emitter remains planned)
 ```
 
 | Subscriber | Where | How | Output |
@@ -131,6 +163,23 @@ No separate Redis stream for `pipeline.cyrex-runtime` today — it's SynapseBrok
 
 Helox train complete → `publish_model_ready` → `model-events` → Cyrex can hot-swap models if something calls `subscribe_to_model_events()`.
 
+### Real-time fine-tuning handoff to Cyrex agents
+
+The loop is split across two PR lanes:
+
+| Step | Owner | Status |
+|------|-------|--------|
+| Produce runtime samples | Cyrex #79 `RealtimeDataPipeline` + producer labels above | LIVE in this PR |
+| Stream live samples | Redis `pipeline.helox-training.raw` / `.structured` | LIVE in this PR |
+| Durable replay/backfill | Postgres `cyrex.helox_training_samples` | LIVE in this PR |
+| Start/poll training jobs | Cyrex #105 `/training/*`, `HeloxJobClient`, `TrainingStatusMonitor` | control-plane PR |
+| Train/export adapters | Helox library/service | downstream consumer |
+| Notify Cyrex | Helox/modelkit `training-events` and `model-events` | downstream event |
+| Reload into agents | Cyrex `ModelReloadListener`, `AutoModelLoader`, or `CyrexEventPublisher.subscribe_to_model_events()` callback | runtime subscriber |
+
+So #79 answers where the fine-tuning data comes from; #105/Helox answer when the
+job runs and how the resulting adapter/model is reloaded into Cyrex agents.
+
 ---
 
 ### F. Postgres direct readers (LIVE)
@@ -139,9 +188,14 @@ Helox train complete → `publish_model_ready` → `model-events` → Cyrex can 
 |-------|------------|---------|
 | `cyrex.memories` | MemoryManager ← RealtimeDataPipeline | agents / memory search |
 | `cyrex.synapse_messages` | SynapseBroker | broker replay / audit |
-| `cyrex.helox_training_samples` | nobody yet | PostgresDataSource in Helox (ready, table may not exist) |
+| `cyrex.helox_training_samples` | RealtimeDataPipeline runtime-training producer; AGI `training_emitter` planned | PostgresDataSource in Helox |
 | `cyrex.agents`, workflows, events, etc. | agent runtime | ops APIs |
 | `cyrex.document_parsing_*` | template learning service | template learning |
+
+For `cyrex.helox_training_samples`, `record_id` is the logical sample key used
+for idempotent upserts and replay. The `id` column is only a DB-local surrogate
+for operational tooling/indexing, so service code should continue to key on
+`record_id`.
 
 ---
 
@@ -197,7 +251,7 @@ POST /artifacts/upload
 
 | Stream | Producer(s) | Subscriber(s) | Status |
 |--------|-------------|---------------|--------|
-| `pipeline.helox-training.raw` | RealtimeDataPipeline; (planned) training_emitter | HeloxRealtimeIngestion, StreamDataSource | LIVE |
+| `pipeline.helox-training.raw` | RealtimeDataPipeline; AGI `training_emitter` planned | HeloxRealtimeIngestion, StreamDataSource | LIVE |
 | `pipeline.helox-training.structured` | same | same | LIVE |
 | `pipeline.cyrex-runtime` | RealtimeDataPipeline → SynapseBroker channel | MemoryManager + synapse in-proc subs | LIVE (not Redis stream name) |
 | `pipeline.dead-letter` | RealtimeDataPipeline | none | LIVE, orphan |
@@ -220,7 +274,7 @@ POST /artifacts/upload
 
 | Consumer | Reads from | Status |
 |----------|------------|--------|
-| Helox PostgresDataSource | helox_training_samples | code ready, table + writer missing |
+| Helox PostgresDataSource | helox_training_samples | runtime-training writer in RealtimeDataPipeline; AGI artifact training_emitter still planned |
 | Pressure API / MCP | pressure_cells | PLANNED |
 | Reckoning API | reckoning_records | PLANNED |
 | Artifact API / MCP | artifacts, citations, artifact_refs | PLANNED |
@@ -255,8 +309,9 @@ Agent/Orchestrator ──► PipelineAutoCapture ──► RealtimeDataPipeline
           ▼                           ▼
      JSONL on disk              training jobs
                                         │
-                                        └──► (optional) PostgresDataSource
-                                              helox_training_samples ❌ empty
+                                        └──► PostgresDataSource
+                                              helox_training_samples
+                                              (runtime samples)
 ```
 
 ### TARGET (AGI)
@@ -282,11 +337,40 @@ POST /artifacts/upload ──► artifact pipeline producers ──► Postgres 
 
 ---
 
+## Consumer-group matrix (Sugar Glider / Synapse spine)
+
+Every bus stream should have a durable worker group plus an observer group.
+
+| Stream | Worker group | Observer group | Status |
+|--------|--------------|----------------|--------|
+| `pipeline.helox-training.*` | `helox-train-live` | `telemetry-helox-ingest` | LIVE (Helox StreamDataSource defaults to XREADGROUP) |
+| `pipeline.pressure.events` | `cyrex-agi-pressure` | `telemetry-pressure` / RTG | LIVE stub in `cyrex-agi` V1 |
+| `pipeline.artifact.invalidation` | `cyrex-agi-pressure` (same service) | Canvas SSE / telemetry | LIVE publisher + AGI consumer |
+| `pipeline.splice.events` | `canvas-splice` | telemetry | PLANNED emit; topic reserved |
+| `pipeline.dead-letter` | `telemetry-dlq` | `messaging-dlq-alert` | Topic reserved; Telemetry TBD |
+| `pipeline.metrics` | `telemetry-pipeline` | — | Topic reserved |
+| `model-events` | `cyrex-model-loader` | `rtg-ui` / `registry-sync` | LIVE (`CYREX_MODEL_RELOAD_LISTENER_ENABLED`) |
+| `training-events` | `jobs-status` | `rtg-ui` / telemetry | partial |
+| `training-jobs` | `helox-workers` | telemetry | LIVE worker path |
+| `document.*` | LIS / Cyrex document consumers | — | LIS-owned |
+
+**Transport rule:** prefer `SYNAPSE_TRANSPORT=sidecar` (Sugar Glider). Cyrex `BusPublisher` and Helox `SynapseEventPublisher` fall back to Redis only when sidecar is down.
+
+**AGI emitter foundations (not wired into artifact stages yet):**
+- `app/pipeline/emitters/training_emitter.py` — dual-write Redis + `helox_training_samples` + `helox_sample_lineage`
+- `app/pipeline/projectors/pressure_bus_sink.py` — `PressureSignalSink` → `pipeline.pressure.events`
+- `app/pipeline/emitters/invalidation_publisher.py` — `pipeline.artifact.invalidation`
+
+---
+
 ## Gaps you should care about
 
-1. **helox_training_samples** — Helox can read it; no Cyrex producer writes it (mirror contract is doc-only).
+
+1. **AGI artifact training_emitter** — runtime samples are written by RealtimeDataPipeline; artifact-derived training samples and lineage still need the planned AGI `training_emitter`.
 2. **Artifact pipeline producers** — ports/models exist; no orchestrator, no subscribers on artifact tables.
-3. **pipeline.pressure.events** — no producer, no subscriber (cyrex-agi is a stub).
+3. **pipeline.pressure.events** — the engine exists but nothing calls it yet (no live producer);
+   `cyrex-agi` *is* a working consumer as of 2026-08-07 (~150-LOC Redis Streams observer, not a
+   stub), it just has nothing to consume until Wave 1 item 7 wires the producer side.
 4. **HeloxRealtimeIngestion** — exists but not in docker-compose as a service; manual / opt-in.
 5. **subscribe_to_model_events** — implemented but nothing in `main.py` wires it by default.
 6. **Two memory systems** — `cyrex.memories` (live) vs artifact store (planned); no link yet.

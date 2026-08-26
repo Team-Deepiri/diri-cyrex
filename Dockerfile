@@ -11,6 +11,9 @@ ARG DEVICE_TYPE=auto
 ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 ARG POETRY_VERSION=1.8.5
 ARG POETRY_EXTRAS=gpu
+ARG BEDD_IMAGE=ghcr.io/team-deepiri/bedd:0.8
+
+FROM ${BEDD_IMAGE} AS bedd
 
 FROM ${BASE_IMAGE} AS base
 

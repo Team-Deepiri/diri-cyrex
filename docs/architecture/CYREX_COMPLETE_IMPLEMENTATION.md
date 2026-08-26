@@ -312,8 +312,8 @@ npm test
 # Database
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
-POSTGRES_DB=cyrex
-POSTGRES_USER=cyrex
+POSTGRES_DB=cyrex_db
+POSTGRES_USER=deepiri_cyrex
 POSTGRES_PASSWORD=...
 
 # Redis (optional, for checkpointing)
@@ -337,7 +337,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - POSTGRES_HOST=postgres
+      - POSTGRES_HOST=postgres-cyrex
       - REDIS_HOST=redis
       - MILVUS_HOST=milvus
 ```

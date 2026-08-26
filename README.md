@@ -150,17 +150,18 @@ Key environment variables:
 | `OPENAI_MODEL` | `gpt-4o-mini` | Default OpenAI model |
 | `CYREX_API_KEY` | `change-me` | API key for Cyrex endpoints |
 | `REDIS_HOST` | `localhost` | Redis host (use `redis` in Docker) |
-| `POSTGRES_HOST` | `localhost` | PostgreSQL host (use `postgres` in Docker) |
+| `POSTGRES_HOST` | `localhost` | PostgreSQL host (use `postgres-cyrex` in Docker) |
 | `MILVUS_HOST` | `localhost` | Milvus host (use `milvus` in Docker) |
 | `LOCAL_LLM_BACKEND` | `ollama` | Local LLM backend |
 | `LOCAL_LLM_MODEL` | `llama3:8b` | Ollama model name (`.env.example` default) |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama API URL |
-| `POSTGRES_PORT` | `5432` | PostgreSQL port |
-| `POSTGRES_DB` | `deepiri` | PostgreSQL database name |
-| `POSTGRES_USER` | `deepiri` | PostgreSQL user |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port (host-mapped `5434` for laptop clients) |
+| `POSTGRES_DB` | `cyrex_db` | PostgreSQL database name |
+| `POSTGRES_USER` | `deepiri_cyrex` | PostgreSQL user |
 | `POSTGRES_PASSWORD` | `deepiripassword` | PostgreSQL password |
+| `CYREX_METRICS_DB_TIMEOUT` | `5.0` | Agent metrics database health-check timeout in seconds |
 | `LLAMA_CPP_MODEL_PATH` | — | Path to GGUF model file (llama_cpp backend) |
-| `MESSAGING_SERVICE_URL` | `http://messaging-service:5009` | Synapse messaging service URL |
+| `MESSAGING_SERVICE_URL` | `http://messaging-service:5010` | Synapse messaging service URL |
 | `JWT_SECRET` | `default-secret-change-in-production` | JWT secret key |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
 | `NODE_BACKEND_URL` | `http://localhost:5000` | Node backend API URL |
