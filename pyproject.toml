@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "diri-cyrex"
-version = "0.2.1"
+version = "0.2.3"
 description = "AI agent orchestration platform with Ollama, LangGraph, and deep learning capabilities"
 readme = "README.md"
 license = "Apache-2.0"
