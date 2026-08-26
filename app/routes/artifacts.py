@@ -18,7 +18,6 @@ from app.integrations.speech_client import get_speech_client
 from app.pipeline.contracts.models import LearningArtifact
 from app.pipeline.contracts.ports import ArtifactStorePort, CorrectionWriterPort
 from app.pipeline.emitters.training_emitter import TrainingEmitter
-from app.pipeline.stages.reckoning import emit_learning_artifacts
 from app.settings import settings
 
 from ..logging_config import get_logger
@@ -413,7 +412,18 @@ async def submit_correction(
                 learning = LearningArtifact.model_validate(learning_raw)
                 pg = await get_postgres_manager()
                 emitter = TrainingEmitter(postgres=pg, producer="cyrex.correction_writer")
-                await emit_learning_artifacts([learning], emitter)
+                await emitter.emit_correction(
+                    instruction=(
+                        f"Correct field '{learning.field_name}' for {learning.document_id}"
+                    ),
+                    corrected_output=str(learning.corrected_value),
+                    document_id=learning.document_id,
+                    artifact_id=learning.artifact_id,
+                    metadata={
+                        "field_name": learning.field_name,
+                        "actor_id": learning.actor_id,
+                    },
+                )
         except Exception as exc:
             logger.warning("correction training emit skipped: %s", exc)
         return CorrectionResponse(

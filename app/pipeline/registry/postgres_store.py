@@ -262,16 +262,13 @@ class PostgresArtifactStore:
         await self._insert_refs(db, bundle)
         await self._insert_citations(db, bundle)
 
-        # Pressure: Postgres via PressureEngine, then optional bus fan-out.
+        # Pressure: injected engine (Track D) + optional bus fan-out.
+        # Engine must be wired by composition (e.g. main.py) — no Track D import here.
         try:
             from app.pipeline.projectors.pressure_signals import project_pressure_events
 
             events = project_pressure_events(bundle)
-            if events:
-                from app.pipeline.pressure.engine import PressureEngine
-
-                if self._pressure_engine is None:
-                    self._pressure_engine = PressureEngine(await self._db())
+            if events and self._pressure_engine is not None:
                 await self._pressure_engine.accept_many(events)
                 if self._pressure_sink is not None:
                     await self._pressure_sink.emit_many(events)

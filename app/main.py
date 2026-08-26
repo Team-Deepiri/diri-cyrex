@@ -71,6 +71,7 @@ from .routes.universal_rag_api import router as universal_rag_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.workflow_api import router as workflow_router
 from .pipeline.registry.pressure_store import PostgresPressureStore
+from .pipeline.pressure.engine import PressureEngine
 from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
 from .pipeline.registry.reckoning_store import PostgresReckoningStore
 from .settings import settings
@@ -520,9 +521,11 @@ app.dependency_overrides[get_correction_writer] = _get_postgres_correction_write
 
 
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
+    pg = await get_postgres_manager()
     store = PostgresArtifactStore(
-        await get_postgres_manager(),
+        pg,
         pressure_sink=PressureBusSink(),
+        pressure_engine=PressureEngine(pg),
     )
     await store.ensure_schema()
     return store
