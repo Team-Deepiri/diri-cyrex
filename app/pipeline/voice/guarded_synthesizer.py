@@ -64,7 +64,11 @@ class GuardedVoiceSynthesizer:
             )
 
         result = await VoiceSynthesizer(
+<<<<<<< HEAD
             self._store, scorer=self._get_scorer()
+=======
+            self._inner._store, scorer=self._get_scorer()
+>>>>>>> origin/dev
         ).query(document_id, question, scope)
 
         span_dicts = [s.model_dump() for s in result.spans]
