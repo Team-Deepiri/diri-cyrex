@@ -99,7 +99,7 @@ diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-t
 deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.2", extras = ["all"] }
 deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.1" }
 deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.2", extras = ["distributed"] }
-diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "8a34be9e2576b862cab85cd0ca86460064e86ad6", extras = ["redis", "numpy"] }
+diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "f243586fd8de6dfe5c9f929513523509b9e69a51", extras = ["redis", "numpy"] }
 deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.1", extras = ["torch"] }
 deepiri-prismpipe = { git = "https://github.com/Team-Deepiri/deepiri-prismpipe.git", tag = "v0.2.1" }
 
