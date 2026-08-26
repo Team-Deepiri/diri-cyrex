@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "diri-cyrex"
-version = "0.2.1"
+version = "0.2.3"
 description = "AI agent orchestration platform with Ollama, LangGraph, and deep learning capabilities"
 readme = "README.md"
 license = "Apache-2.0"
@@ -24,6 +24,7 @@ python-dotenv = ">=1.0.0"
 httpx = ">=0.27.0"
 protobuf = ">=7.34.1,<8"
 python-multipart = ">=0.0.6"
+mcp = ">=1.0.0,<2.0.0"
 
 # Observability
 structlog = ">=24.1.0"
@@ -95,12 +96,12 @@ tensorboard = ">=2.15.0"
 influxdb-client = ">=1.38.0"
 
 # Internal Deepiri packages (git tags for cascade alignment)
-diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git", rev = "a934468cd142e2cb38bd365e8548b4bdde77bf73" }
-deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.1", extras = ["all"] }
+diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git", rev = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff" }
+deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.3", extras = ["all"] }
 deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.1" }
-deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.0", extras = ["distributed"] }
-diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "8a34be9e2576b862cab85cd0ca86460064e86ad6", extras = ["redis", "numpy"] }
-deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.0", extras = ["torch"] }
+deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.3", extras = ["distributed"] }
+diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "f243586fd8de6dfe5c9f929513523509b9e69a51", extras = ["redis", "numpy"] }
+deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.1", extras = ["torch"] }
 deepiri-prismpipe = { git = "https://github.com/Team-Deepiri/deepiri-prismpipe.git", tag = "v0.2.1" }
 
 # Platform-specific extras (not installed by default)

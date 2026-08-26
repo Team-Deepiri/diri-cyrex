@@ -11,9 +11,6 @@ ARG DEVICE_TYPE=auto
 ARG BASE_IMAGE=pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime
 ARG POETRY_VERSION=1.8.5
 ARG POETRY_EXTRAS=gpu
-ARG BEDD_IMAGE=ghcr.io/team-deepiri/bedd:0.8
-
-FROM ${BEDD_IMAGE} AS bedd
 
 FROM ${BASE_IMAGE} AS base
 
@@ -83,11 +80,6 @@ COPY --chown=root:root ops/k8s/load-k8s-env.sh /usr/local/bin/load-k8s-env.sh
 COPY --chown=root:root ops/k8s/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh && \
     chmod +x /usr/local/bin/load-k8s-env.sh /usr/local/bin/docker-entrypoint.sh
-
-# Bedd runtime (Bun-style) — glibc binary
-COPY --from=bedd /usr/local/bin/bedd /usr/local/bin/bedd
-COPY --from=bedd /opt/bedd/skills /opt/bedd/skills
-ENV BEDD_SKILLS_DIR=/opt/bedd/skills
 
 USER appuser
 
