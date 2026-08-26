@@ -94,7 +94,9 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     };
   }, [isOpen]);
 
-  // Live agent replies via realtime-gateway when in a messaging-backed chat
+  // Live agent replies via realtime-gateway when in a messaging-backed chat.
+  // Accept publisher shape ({event,data}) and gateway/sugar-glider reshape
+  // ({event_type,payload} or payload wrapping the original event).
   useEffect(() => {
     if (!isOpen || activeView !== 'chat' || !selectedChat?.chatRoomId) return;
     if (deliveryMode !== 'platform') return;
@@ -102,11 +104,51 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
     let unsubscribe: (() => void) | undefined;
     let cancelled = false;
 
+    const extractMessageNewData = (evt: Record<string, unknown> | null | undefined) => {
+      if (!evt || typeof evt !== 'object') return null;
+      const eventName = String(evt.event || evt.event_type || '');
+      const rawData = evt.data;
+      const rawPayload = evt.payload;
+
+      const asRecord = (v: unknown): Record<string, unknown> | null =>
+        v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+      const parseMaybeJson = (v: unknown): unknown => {
+        if (typeof v !== 'string') return v;
+        try {
+          return JSON.parse(v);
+        } catch {
+          return v;
+        }
+      };
+
+      if (eventName === 'message:new') {
+        const data = asRecord(parseMaybeJson(rawData));
+        if (data?.chatRoomId) return data;
+        const payload = asRecord(parseMaybeJson(rawPayload));
+        if (payload?.chatRoomId) return payload;
+        if (payload) {
+          const nested = asRecord(parseMaybeJson(payload.data));
+          if (nested?.chatRoomId) return nested;
+        }
+      }
+
+      // Fast-path / nested: payload is the original {event,data} envelope
+      const payload = asRecord(parseMaybeJson(rawPayload));
+      if (payload && String(payload.event || payload.event_type || '') === 'message:new') {
+        const nested = asRecord(parseMaybeJson(payload.data)) || asRecord(parseMaybeJson(payload.payload));
+        if (nested?.chatRoomId) return nested;
+        if (payload.chatRoomId) return payload;
+      }
+
+      return null;
+    };
+
     (async () => {
       unsubscribe = await subscribePlatformEvents((evt) => {
         if (cancelled) return;
-        if (evt?.event !== 'message:new') return;
-        const data = (evt.data || {}) as Record<string, unknown>;
+        const data = extractMessageNewData(evt as Record<string, unknown>);
+        if (!data) return;
         if (data.chatRoomId !== selectedChat.chatRoomId) return;
         if (data.senderType !== 'AGENT' && data.senderType !== 'SYSTEM') return;
 

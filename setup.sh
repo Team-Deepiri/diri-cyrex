@@ -78,6 +78,8 @@ Env:
 
 --run (default):
   headless services plus postgres-core api-gateway messaging-service realtime-gateway
+  plus livekit/speech when those services exist in platform compose
+  (missing optional services are skipped with a warning; --run still succeeds)
 
 --run --headless:
   postgres-cyrex redis influxdb etcd minio milvus
@@ -118,10 +120,82 @@ find_platform_root() {
     return 1
 }
 
+# Return service names defined in the platform compose file (one per line).
+list_compose_services() {
+    local platform_root="$1"
+    (cd "$platform_root" && docker compose -f "$COMPOSE_FILE" config --services 2>/dev/null) || true
+}
+
+# Keep only services present in compose; print warnings for skipped ones.
+# Optional services (livekit/speech) are skipped with a warning.
+# Required services missing from compose cause a hard error.
+filter_available_services() {
+    local platform_root="$1"
+    shift
+    local -a requested=("$@")
+    local -a available=()
+    local -a selected=()
+    local -a skipped=()
+    local -a missing_required=()
+    local svc
+    local avail_set
+
+    is_optional_service() {
+        case "$1" in
+            livekit | speech) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    mapfile -t available < <(list_compose_services "$platform_root")
+    if [[ ${#available[@]} -eq 0 ]]; then
+        echo "setup.sh: warning: could not list compose services; starting requested names as-is" >&2
+        printf '%s\n' "${requested[@]}"
+        return 0
+    fi
+
+    avail_set=" $(printf '%s ' "${available[@]}") "
+    for svc in "${requested[@]}"; do
+        if [[ "$avail_set" == *" ${svc} "* ]]; then
+            selected+=("$svc")
+        else
+            skipped+=("$svc")
+            if ! is_optional_service "$svc"; then
+                missing_required+=("$svc")
+            fi
+        fi
+    done
+
+    if [[ ${#skipped[@]} -gt 0 ]]; then
+        echo "setup.sh: warning: skipping services not defined in ${COMPOSE_FILE}:" >&2
+        printf '  - %s\n' "${skipped[@]}" >&2
+        if [[ " ${skipped[*]} " == *" livekit "* ]] || [[ " ${skipped[*]} " == *" speech "* ]]; then
+            echo "  (livekit/speech are optional until platform compose defines them)" >&2
+        fi
+    fi
+
+    if [[ ${#missing_required[@]} -gt 0 ]]; then
+        echo "setup.sh: error: required services missing from ${COMPOSE_FILE}:" >&2
+        printf '  - %s\n' "${missing_required[@]}" >&2
+        return 1
+    fi
+
+    if [[ ${#selected[@]} -eq 0 ]]; then
+        echo "setup.sh: error: no requested services are available in ${COMPOSE_FILE}" >&2
+        return 1
+    fi
+
+    printf '%s\n' "${selected[@]}"
+}
+
 run_cyrex_stack() {
     local platform_root compose_args=()
     local -a services=()
+    local -a requested=()
     local mode_label
+    local has_livekit=0
+    local has_speech=0
+    local svc
 
     if ! command -v docker >/dev/null 2>&1; then
         echo "setup.sh: docker not found." >&2
@@ -135,12 +209,31 @@ run_cyrex_stack() {
     platform_root="$(find_platform_root)"
 
     if [[ "$DO_HEADLESS" -eq 1 ]]; then
-        services=("${CYREX_HEADLESS_SERVICES[@]}")
+        requested=("${CYREX_HEADLESS_SERVICES[@]}")
         mode_label="headless (engine + cyrex-interface only)"
     else
-        services=("${CYREX_RUN_SERVICES[@]}")
-        mode_label="full (engine + messaging + realtime-gateway + speech)"
+        requested=("${CYREX_RUN_SERVICES[@]}")
+        mode_label="full (engine + messaging + realtime-gateway; speech if available)"
     fi
+
+    local filtered_output
+    if ! filtered_output="$(filter_available_services "$platform_root" "${requested[@]}")"; then
+        exit 1
+    fi
+    mapfile -t services <<< "$filtered_output"
+    # Drop empty line mapfile can add when output is empty
+    if [[ ${#services[@]} -eq 1 && -z "${services[0]:-}" ]]; then
+        services=()
+    fi
+    if [[ ${#services[@]} -eq 0 ]]; then
+        echo "setup.sh: error: no services to start after compose filtering" >&2
+        exit 1
+    fi
+
+    for svc in "${services[@]}"; do
+        [[ "$svc" == "livekit" ]] && has_livekit=1
+        [[ "$svc" == "speech" ]] && has_speech=1
+    done
 
     echo "setup.sh: platform root → ${platform_root}"
     echo "setup.sh: starting Cyrex stack — ${mode_label}"
@@ -168,6 +261,12 @@ run_cyrex_stack() {
         echo "  Realtime GW:     http://localhost:5008"
         echo "  Messaging:       http://localhost:5010"
         echo "  API Gateway:     http://localhost:5100"
+        if [[ "$has_livekit" -eq 1 ]]; then
+            echo "  LiveKit:         http://localhost:7880"
+        fi
+        if [[ "$has_speech" -eq 1 ]]; then
+            echo "  Speech:          http://localhost:5020"
+        fi
     fi
     echo ""
     echo "  Health: curl -s http://localhost:8000/health"
