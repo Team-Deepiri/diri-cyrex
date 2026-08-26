@@ -117,7 +117,8 @@ export interface WitnessSpan {
 
 // When no factual answer is found.
 export interface ConfusionGap {
-  // TODO: fill in later once interface is created
+  claim: string;
+  reason: string;
 }
 
 // Voice request.

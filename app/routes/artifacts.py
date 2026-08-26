@@ -6,7 +6,11 @@ from pydantic import BaseModel, Field
 from typing import Optional, Any, List
 from datetime import datetime
 from app.pipeline.voice.corrections import CorrectionStage
-from app.pipeline.contracts.ports import CorrectionWriterPort
+from app.pipeline.voice.synthesizer import (
+    VoiceQueryResponse as SynthesizerVoiceQueryResponse,
+    VoiceSynthesizer,
+)
+from app.pipeline.contracts.ports import ArtifactStorePort, CorrectionWriterPort
 
 from ..pipeline.contracts.models import (
     ArtifactBundle,
@@ -30,6 +34,10 @@ def get_pipeline_runner() -> PipelineRunnerPort:
     from tests.fakes.pipeline_runner import FakePipelineRunner
     return FakePipelineRunner()
 
+def get_artifact_store() -> ArtifactStorePort:
+    # TODO: swap for PostgresArtifactStore
+    raise RuntimeError("Artifact store dependency is not configured")
+
 def get_correction_writer() -> CorrectionWriterPort:
     # TODO: replace with real PostgresArtifactStore-backed writer. Current implementation is in-memory
     return CorrectionStage()
@@ -40,31 +48,13 @@ def get_correction_writer() -> CorrectionWriterPort:
 
 class VoiceQueryRequest(BaseModel):
     document_id: str
-    question: str  # TODO: confirm field name once VoiceQueryRequest defined
+    question: str
     persona_scope: PersonaScope = Field(default_factory=PersonaScope)
-
-
-class WitnessSpan(BaseModel):
-    citation_id: str
-    quote: str
-    char_start: int
-    char_end: int
-    page: Optional[int] = None
-
-
-class ConfessionGap(BaseModel):
-    pass  # TODO: define when building voice/synthesizer.py
-
-
-class VoiceQueryResponse(BaseModel):
-    confessed: bool
-    spans: List[WitnessSpan]
-    gaps: Optional[List[ConfessionGap]] = None
 
 
 class VoiceQueryApiResponse(BaseModel):
     success: bool
-    response: VoiceQueryResponse
+    response: SynthesizerVoiceQueryResponse
 
 
 class CorrectionRequest(BaseModel):
@@ -73,10 +63,12 @@ class CorrectionRequest(BaseModel):
     corrected_citation: Citation
     actor_id: str
 
+
 class ArtifactResponse(BaseModel):
     success: bool
     artifact: ArtifactBundle
     uploaded_at: Optional[str] = None
+
 
 class ProvenanceResponse(BaseModel):
     success: bool
@@ -84,13 +76,13 @@ class ProvenanceResponse(BaseModel):
     provenance: Provenance
     citations: List[Citation]
 
+
 class CorrectionResponse(BaseModel):
     success: bool
     artifact_id: str
     field_name: str
     corrected_value: Any
     submitted_at: str
-
 
 # ----------------------------------------------------------------------------
 # Routes
@@ -198,27 +190,21 @@ async def submit_correction(
 @router.post("/voice/query", response_model=VoiceQueryApiResponse)
 async def voice_query(
     request: VoiceQueryRequest,
-    runner: PipelineRunnerPort = Depends(get_pipeline_runner)
+    store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """Voice Q&A — returns only verbatim cited spans or a confession."""
     logger.info("Voice query received", document_id=request.document_id)
     try:
-        # TODO: swap for real voice/synthesizer.py later
-        fake_span = WitnessSpan(
-            citation_id="cit_fake_001",
-            quote="The base rent shall be $4,500 per month.",
-            char_start=1042,
-            char_end=1080,
-            page=1,
+        synthesizer = VoiceSynthesizer(store=store)
+        response = await synthesizer.query(
+            document_id=request.document_id,
+            question=request.question,
+            persona_scope=request.persona_scope,
         )
-        return VoiceQueryApiResponse(
-            success=True,
-            response=VoiceQueryResponse(
-                confessed=False,
-                spans=[fake_span],
-                gaps=None,
-            )
-        )
+        return VoiceQueryApiResponse(success=True, response=response)
+    except ValueError as e:
+        # ex. hard_citation_gate=False
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Voice query failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
