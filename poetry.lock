@@ -1611,7 +1611,7 @@ resolved_reference = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff"
 
 [[package]]
 name = "diri-agent-toolbox"
-version = "0.2.0"
+version = "0.2.1"
 description = "Reusable typed agent tooling: HTTP, data, files, calendar, CRM, database, caching, streaming, contracts, confidence, device, processing, logging, monitoring primitives for LLM agents"
 optional = false
 python-versions = ">=3.11"
@@ -1627,9 +1627,8 @@ pydantic = ">=2.8.0"
 redis = {version = ">=5.0.0", optional = true}
 
 [package.extras]
-all = ["diri-agent-toolbox[database,langchain,numpy,redis,torch]"]
+all = ["asyncpg (>=0.30.0)", "langchain-core (>=0.3.0)", "numpy (>=1.24.0)", "redis (>=5.0.0)", "torch (>=2.0.0)"]
 database = ["asyncpg (>=0.30.0)"]
-dev = ["mypy (>=1.11.0)", "pre-commit (>=4.0.0)", "pytest (>=8.0.0)", "pytest-asyncio (>=0.24.0)", "ruff (>=0.6.0)", "types-aiofiles (>=24.1.0)"]
 langchain = ["langchain-core (>=0.3.0)"]
 numpy = ["numpy (>=1.24.0)"]
 redis = ["redis (>=5.0.0)"]
@@ -1638,8 +1637,8 @@ torch = ["torch (>=2.0.0)"]
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/diri-agent-toolbox.git"
-reference = "8a34be9e2576b862cab85cd0ca86460064e86ad6"
-resolved_reference = "8a34be9e2576b862cab85cd0ca86460064e86ad6"
+reference = "f243586fd8de6dfe5c9f929513523509b9e69a51"
+resolved_reference = "f243586fd8de6dfe5c9f929513523509b9e69a51"
 
 [[package]]
 name = "diskcache"
@@ -9017,4 +9016,4 @@ rocm = ["torch", "torchaudio", "torchvision"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "81f82331802367472505049134056136604924c8dffdb37e6d97555fe782a2a1"
+content-hash = "98af25b56f1c6b26838792de85ff5c4ef58e94fc6180473b5c5a452d594e429a"
