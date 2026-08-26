@@ -1407,7 +1407,7 @@ resolved_reference = "1dfea272e33d2a7e8a8e306dff1e01aedc412223"
 
 [[package]]
 name = "deepiri-gpu-utils"
-version = "0.2.0"
+version = "0.2.1"
 description = "Deepiri Hybrid LLM Build & Dev Toolkit (GPU detection, setup, and device helpers)"
 optional = false
 python-versions = ">=3.11"
@@ -1425,8 +1425,8 @@ torch = ["torch (>=2.0.0)"]
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git"
-reference = "v0.2.0"
-resolved_reference = "d1f8e92d5ec38f9a839ac9bade04cd71edd219b1"
+reference = "v0.2.1"
+resolved_reference = "3fc42a232c0b2aac403e133730963718d304eb40"
 
 [[package]]
 name = "deepiri-modelkit"
@@ -9017,4 +9017,4 @@ rocm = ["torch", "torchaudio", "torchvision"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "81f82331802367472505049134056136604924c8dffdb37e6d97555fe782a2a1"
+content-hash = "0589065f7333c40528f88da6fd90c6761acebb0d9eca9f974fa53dd55788d914"
