@@ -77,16 +77,15 @@ class MessagingServiceClient:
         try:
             client = await self._get_client()
             
-            payload = {
+            payload: Dict[str, Any] = {
                 'content': content,
                 'messageType': message_type,
                 'metadata': metadata or {},
             }
             
+            # Service API expects agentInstanceId at the top level only.
             if agent_instance_id:
-                payload['metadata'] = payload.get('metadata', {})
-                payload['metadata']['agentInstanceId'] = agent_instance_id
-            
+                payload['agentInstanceId'] = agent_instance_id
             # Use service-to-service endpoint for cyrex
             # This endpoint uses API key authentication instead of user auth
             response = await client.post(
