@@ -1,7 +1,18 @@
 # Cyrex AGI — Producer & Subscriber Map
 
 **Parent:** [CYREX_AGI_DESIGN_PLAN_V2.md](./CYREX_AGI_DESIGN_PLAN_V2.md) §16  
-**Schema:** [CYREX_AGI_POSTGRES_SCHEMA.md](./CYREX_AGI_POSTGRES_SCHEMA.md)
+**Schema:** [CYREX_AGI_POSTGRES_SCHEMA.md](./CYREX_AGI_POSTGRES_SCHEMA.md)  
+**Live status:** [STATUS.md](./STATUS.md)
+
+**Corrected 2026-08-07:** `pressure_projector` (`app/pipeline/pressure/engine.py`, 163 LOC) is
+implemented and tested, but nothing in the live request path calls it — `reflect`/`extract`
+don't emit `PressureEvent`s yet (that wiring is Wave 1 item 7 in
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md)), and it queries
+Postgres tables that have no DDL (Wave 0 item 1). So "no producer" below means *no caller*, not
+*no code* — the engine exists. On the subscriber side, `cyrex-agi` is **not** a stub — it's a
+real ~150-LOC Redis Streams consumer on port 8003 that counts pressure/invalidation events; it
+just doesn't act on them yet. The "cyrex-agi is a stub" language further down predates that
+correction.
 
 Actual producer → channel → subscriber map — what's **live in code today** vs **planned in the AGI design** (not wired yet).
 
@@ -357,7 +368,9 @@ Every bus stream should have a durable worker group plus an observer group.
 
 1. **AGI artifact training_emitter** — runtime samples are written by RealtimeDataPipeline; artifact-derived training samples and lineage still need the planned AGI `training_emitter`.
 2. **Artifact pipeline producers** — ports/models exist; no orchestrator, no subscribers on artifact tables.
-3. **pipeline.pressure.events** — no producer, no subscriber (cyrex-agi is a stub).
+3. **pipeline.pressure.events** — the engine exists but nothing calls it yet (no live producer);
+   `cyrex-agi` *is* a working consumer as of 2026-08-07 (~150-LOC Redis Streams observer, not a
+   stub), it just has nothing to consume until Wave 1 item 7 wires the producer side.
 4. **HeloxRealtimeIngestion** — exists but not in docker-compose as a service; manual / opt-in.
 5. **subscribe_to_model_events** — implemented but nothing in `main.py` wires it by default.
 6. **Two memory systems** — `cyrex.memories` (live) vs artifact store (planned); no link yet.

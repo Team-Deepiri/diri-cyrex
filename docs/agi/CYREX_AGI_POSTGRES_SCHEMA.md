@@ -1,15 +1,33 @@
 # Cyrex `cyrex.*` Schema — Full AGI Inventory
 
 **Parent:** [CYREX_AGI_DESIGN_PLAN_V2.md](./CYREX_AGI_DESIGN_PLAN_V2.md)  
-**Implementation:** [CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md)
+**Implementation:** [CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md)  
+**Live status:** [STATUS.md](./STATUS.md)
 
 ---
 
 ## Current state
 
-Today you already have **~20 tables** (scattered across `agent_tables.py`, `postgres-init-cyrex.sql`, session/memory/guardrails). Most are **runtime ops**, not AGI memory. The gap is the **artifact engine plane** — almost none of it is in Postgres yet.
+**Corrected 2026-08-07.** The ~20 pre-existing tables are real and live — but they're created by
+Python (`app/database/agent_tables.py` and several `_ensure_tables()`-style methods scattered
+across `app/core/`), not by a `postgres-init-cyrex.sql` file, which does not exist anywhere in
+this repo. Most of these ~20 are **runtime ops**, not AGI memory.
 
-**Bottom line:** Cyrex AGI Postgres is **~50 tables minimum** for Phase 1, **~111** for the full plane. Thirteen tables was a sketch; this is the actual substrate.
+**The gap below is worse than "almost none of it is in Postgres yet" — it is exactly zero, and
+four merged modules already query tables that don't exist.** There are **zero `.sql` files
+anywhere in the repository.** `scripts/database/cyrex/` (the directory this doc's own "Migration
+files" section below describes) does not exist. Of the ~75 AGI-plane tables named in this doc,
+**2 have DDL** (`cyrex.helox_training_samples`, `cyrex.helox_sample_lineage` —
+`app/pipeline/helox_training_schema.py:13,46`). **9 more are actively read or written by code
+already on `main`** with no DDL backing them (`pressure_events`, `pressure_cells`,
+`pressure_cell_metrics`, `pressure_cell_artifacts`, `reckoning_records`, `reckoning_actuals`,
+`reckoning_anomalies`, `reckoning_corpus_stats`, `reckoning_field_priors`) — against a fresh
+database, the merged `GET /api/v1/pressure/{document_id}` route throws. This is Wave 0 item 1 in
+[CYREX_AGI_IMPLEMENTATION_PLAN_V2.md](./CYREX_AGI_IMPLEMENTATION_PLAN_V2.md), owned by Sebastian,
+and it is the critical-path blocker for every other layer below.
+
+**Bottom line:** Cyrex AGI Postgres is **~50 tables minimum** for Phase 1, **~111** for the full plane. Thirteen tables was a sketch; this is the actual substrate. As of this correction, the
+substrate itself has not been poured.
 
 ---
 
