@@ -1,22 +1,23 @@
 """
-Artifact Engine API Routes (Prajwala). Stubs backed by FakePipelineRunner for Week 1.
+Artifact Engine API Routes — Postgres-backed pipeline runner and store.
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from pydantic import BaseModel, Field
 from typing import Optional, Any, List
 from datetime import datetime
-from app.pipeline.voice.corrections import CorrectionStage
-from app.pipeline.voice.synthesizer import (
-    VoiceQueryResponse as SynthesizerVoiceQueryResponse,
-    VoiceSynthesizer,
-)
-from app.pipeline.contracts.ports import ArtifactStorePort, CorrectionWriterPort
+from app.pipeline.contracts.ports import CorrectionWriterPort, ArtifactStorePort
+from app.pipeline.contracts.models import LearningArtifact
+from app.pipeline.emitters.training_emitter import TrainingEmitter
+from app.pipeline.stages.reckoning import emit_learning_artifacts
+from app.database.postgres import get_postgres_manager
 
 from ..pipeline.contracts.models import (
     ArtifactBundle,
     Citation,
+    ConfessionGap,
     PersonaScope,
     Provenance,
+    WitnessSpan,
 )
 
 from ..pipeline.contracts.ports import PipelineRunnerPort
@@ -26,21 +27,26 @@ logger = get_logger("cyrex.api.artifacts")
 
 router = APIRouter(prefix="/api/v1/artifacts", tags=["artifacts"])
 
-# ----------------------------------------------------------------------------
-# TODO: swap for real in bootstrap.py and PostgresArtifactStore
-# ----------------------------------------------------------------------------
 
 def get_pipeline_runner() -> PipelineRunnerPort:
-    from tests.fakes.pipeline_runner import FakePipelineRunner
-    return FakePipelineRunner()
+    """Resolved via ``app.dependency_overrides`` in ``main.py`` (Postgres orchestrator)."""
+    raise RuntimeError(
+        "Pipeline runner not wired — ensure app.dependency_overrides[get_pipeline_runner] is set"
+    )
+
 
 def get_artifact_store() -> ArtifactStorePort:
-    # TODO: swap for PostgresArtifactStore
-    raise RuntimeError("Artifact store dependency is not configured")
+    """Resolved via ``app.dependency_overrides`` in ``main.py``."""
+    raise RuntimeError(
+        "Artifact store not wired — ensure app.dependency_overrides[get_artifact_store] is set"
+    )
+
 
 def get_correction_writer() -> CorrectionWriterPort:
-    # TODO: replace with real PostgresArtifactStore-backed writer. Current implementation is in-memory
-    return CorrectionStage()
+    """Resolved via ``app.dependency_overrides`` in ``main.py`` (PostgresCorrectionStore)."""
+    raise RuntimeError(
+        "Correction writer not wired — ensure app.dependency_overrides[get_correction_writer] is set"
+    )
 
 # ----------------------------------------------------------------------------
 # Request / Response Models
@@ -48,13 +54,19 @@ def get_correction_writer() -> CorrectionWriterPort:
 
 class VoiceQueryRequest(BaseModel):
     document_id: str
-    question: str
+    question: str  # TODO: confirm field name once VoiceQueryRequest defined
     persona_scope: PersonaScope = Field(default_factory=PersonaScope)
+
+
+class VoiceQueryResponse(BaseModel):
+    confessed: bool
+    spans: List[WitnessSpan]
+    gaps: Optional[List[ConfessionGap]] = None
 
 
 class VoiceQueryApiResponse(BaseModel):
     success: bool
-    response: SynthesizerVoiceQueryResponse
+    response: VoiceQueryResponse
 
 
 class CorrectionRequest(BaseModel):
@@ -63,12 +75,10 @@ class CorrectionRequest(BaseModel):
     corrected_citation: Citation
     actor_id: str
 
-
 class ArtifactResponse(BaseModel):
     success: bool
     artifact: ArtifactBundle
     uploaded_at: Optional[str] = None
-
 
 class ProvenanceResponse(BaseModel):
     success: bool
@@ -77,12 +87,19 @@ class ProvenanceResponse(BaseModel):
     citations: List[Citation]
 
 
+class ArtifactGraphResponse(BaseModel):
+    success: bool
+    artifact_id: str
+    nodes: List[ArtifactBundle]
+    edges: List[dict[str, Any]]
+
 class CorrectionResponse(BaseModel):
     success: bool
     artifact_id: str
     field_name: str
     corrected_value: Any
     submitted_at: str
+
 
 # ----------------------------------------------------------------------------
 # Routes
@@ -117,18 +134,17 @@ async def upload_artifact(
 @router.get("/{artifact_id}", response_model=ArtifactResponse)
 async def get_artifact(
     artifact_id: str,
-    runner: PipelineRunnerPort = Depends(get_pipeline_runner)
+    store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """Get an artifact bundle by ID."""
     logger.info("Artifact fetch requested", artifact_id=artifact_id)
     try:
-        # TODO: swap for ArtifactStorePort later
-        fake_bundle = runner._golden
-        if fake_bundle.artifact_id != artifact_id:
+        bundle = await store.get(artifact_id)
+        if bundle is None:
             raise HTTPException(status_code=404, detail="Artifact not found")
         return ArtifactResponse(
             success=True,
-            artifact=fake_bundle,
+            artifact=bundle,
         )
     except HTTPException:
         raise
@@ -140,21 +156,52 @@ async def get_artifact(
 @router.get("/{artifact_id}/provenance", response_model=ProvenanceResponse)
 async def get_provenance(
     artifact_id: str,
-    runner: PipelineRunnerPort = Depends(get_pipeline_runner)
+    store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """Walk the artifact graph backward to source PDF spans."""
     logger.info("Provenance walk requested", artifact_id=artifact_id)
     try:
-        # TODO: swap for graph walk via ArtifactStorePort.get_graph_neighborhood later
-        fake_bundle = runner._golden
+        bundle = await store.get(artifact_id)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail="Artifact not found")
         return ProvenanceResponse(
             success=True,
             artifact_id=artifact_id,
-            provenance=fake_bundle.provenance,
-            citations=fake_bundle.citations,
+            provenance=bundle.provenance,
+            citations=bundle.citations,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Provenance walk failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{artifact_id}/graph", response_model=ArtifactGraphResponse)
+async def get_artifact_graph(
+    artifact_id: str,
+    hops: int = Query(2, ge=1, le=5),
+    store: ArtifactStorePort = Depends(get_artifact_store),
+):
+    """Artifact dependency neighborhood for Canvas provenance river."""
+    get_graph = getattr(store, "get_graph_neighborhood", None)
+    if get_graph is None:
+        raise HTTPException(status_code=501, detail="Graph walk not supported")
+    try:
+        bundle = await store.get(artifact_id)
+        if bundle is None:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+        graph = await get_graph(artifact_id, hops=hops)
+        return ArtifactGraphResponse(
+            success=True,
+            artifact_id=artifact_id,
+            nodes=graph.get("nodes") or [],
+            edges=graph.get("edges") or [],
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Artifact graph failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -162,7 +209,6 @@ async def get_provenance(
 async def submit_correction(
     artifact_id: str,
     request: CorrectionRequest,
-    runner: PipelineRunnerPort = Depends(get_pipeline_runner),
     correction_writer: CorrectionWriterPort = Depends(get_correction_writer),
 ):
     """Submit a human correction. Returns a LearningArtifact bundle."""
@@ -175,6 +221,15 @@ async def submit_correction(
             corrected_citation=request.corrected_citation,
             actor_id=request.actor_id,
         )
+        try:
+            learning_raw = (bundle.payload or {}).get("learning_artifact")
+            if learning_raw:
+                learning = LearningArtifact.model_validate(learning_raw)
+                pg = await get_postgres_manager()
+                emitter = TrainingEmitter(postgres=pg, producer="cyrex.correction_writer")
+                await emit_learning_artifacts([learning], emitter)
+        except Exception as exc:
+            logger.warning("correction training emit skipped: %s", exc)
         return CorrectionResponse(
             success=True,
             artifact_id=artifact_id,
@@ -193,18 +248,38 @@ async def voice_query(
     store: ArtifactStorePort = Depends(get_artifact_store),
 ):
     """Voice Q&A — returns only verbatim cited spans or a confession."""
+    from app.pipeline.voice.guarded_synthesizer import GuardedVoiceSynthesizer
+
     logger.info("Voice query received", document_id=request.document_id)
     try:
-        synthesizer = VoiceSynthesizer(store=store)
-        response = await synthesizer.query(
+        result = await GuardedVoiceSynthesizer(store).query(
             document_id=request.document_id,
             question=request.question,
             persona_scope=request.persona_scope,
         )
-        return VoiceQueryApiResponse(success=True, response=response)
-    except ValueError as e:
-        # ex. hard_citation_gate=False
-        raise HTTPException(status_code=400, detail=str(e))
+        spans = [
+            WitnessSpan(
+                citation_id=s.citation_id,
+                quote=s.quote,
+                char_start=s.char_start,
+                char_end=s.char_end,
+                page=s.page,
+            )
+            for s in result.spans
+        ]
+        gaps = (
+            [ConfessionGap(**g.model_dump()) for g in result.gaps]
+            if result.gaps
+            else None
+        )
+        return VoiceQueryApiResponse(
+            success=True,
+            response=VoiceQueryResponse(
+                confessed=result.confessed,
+                spans=spans,
+                gaps=gaps,
+            ),
+        )
     except Exception as e:
         logger.error(f"Voice query failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

@@ -16,6 +16,7 @@ DEFAULT_ANOMALY_SIGMA_THRESHOLD = 0.3
 
 
 def _coerce_float(value: Any) -> Optional[float]:
+    # Exclude bools — bool is a subclass of int, but not numeric for reckoning.
     if value is None:
         return None
     if isinstance(value, bool):
@@ -141,6 +142,68 @@ async def emit_learning_artifacts(
         if rid:
             record_ids.append(rid)
     return record_ids
+
+
+async def emit_reckoning_training(
+    records: List[PredictionRecord],
+    *,
+    document_id: str,
+    artifact_id: str | None,
+    emitter: TrainingEmitter,
+) -> List[str]:
+    """Emit Helox training samples for ANOMALOUS / NOVEL reckoning fields."""
+    from app.pipeline.emitters.corpus_exporter import CorpusExporter
+
+    exporter = CorpusExporter()
+    gated_rows = exporter.reckoning_rows(
+        [r for r in records if r.status in (PredictionStatus.ANOMALOUS, PredictionStatus.NOVEL)],
+        document_id=document_id,
+        artifact_id=artifact_id,
+    )
+    row_by_field = {
+        (row.get("metadata") or {}).get("field_name"): row for row in gated_rows
+    }
+
+    emitted: List[str] = []
+    for rec in records:
+        if rec.status not in (PredictionStatus.ANOMALOUS, PredictionStatus.NOVEL):
+            continue
+        if rec.actual_value is None:
+            continue
+        gated = row_by_field.get(rec.field_name)
+        instruction = gated["instruction"] if gated else (
+            f"Document {document_id}: field '{rec.field_name}' reckoning "
+            f"status={rec.status.value}. Prior mean={rec.predicted_mean}, "
+            f"actual={rec.actual_value}."
+        )
+        output = gated["output"] if gated else str(rec.actual_value)
+        input_text = (
+            gated.get("input", "")
+            if gated
+            else str(rec.predicted_mean or rec.predicted_range or "")
+        )
+        quality = float(gated.get("quality_score", 0.85)) if gated else (
+            0.85 if rec.status == PredictionStatus.ANOMALOUS else 0.7
+        )
+        rid = await emitter.emit_structured(
+            instruction=instruction,
+            output=output,
+            input_text=input_text,
+            category="reckoning",
+            quality_score=quality,
+            document_id=document_id,
+            artifact_id=artifact_id,
+            source_type="reckoning",
+            metadata={
+                "field_name": rec.field_name,
+                "status": rec.status.value,
+                "sigma_delta": rec.sigma_delta,
+            },
+            producer="cyrex.reckoning_stage",
+        )
+        if rid:
+            emitted.append(rid)
+    return emitted
 
 
 class ReckoningStage:

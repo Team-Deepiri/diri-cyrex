@@ -4,7 +4,6 @@ import os
 import time
 import uuid
 from collections import defaultdict
-
 from contextlib import asynccontextmanager
 from threading import Lock
 from typing import AsyncGenerator, Optional
@@ -26,19 +25,27 @@ from .middleware.rate_limiter import RateLimitMiddleware
 from .middleware.request_timing import RequestTimingMiddleware
 from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
 from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.projectors.pressure_bus_sink import PressureBusSink
 from .pipeline.registry.postgres_store import PostgresArtifactStore
-from .pipeline.registry.pressure_store import PostgresPressureStore
-from .pipeline.registry.reckoning_store import PostgresReckoningStore
+from .pipeline.stages.anticipate import AnticipateStage
+from .pipeline.stages.duel import DuelStage
+from .pipeline.stages.extract import ExtractStage
 from .pipeline.stages.parse import ParseStage
+from .pipeline.bootstrap import bootstrap_artifact_engine
+from .pipeline.emitters.training_emitter import TrainingEmitter
+from .pipeline.registry.reckoning_writer import PostgresReckoningWriter
 
 # Core routers
 from .routes.agent import router as agent_router
 from .routes.agent_playground_api import router as agent_playground_router
-from .routes.artifacts import get_artifact_store, get_pipeline_runner, router as artifacts_router
+from .routes.artifacts import get_pipeline_runner, get_artifact_store, get_correction_writer, router as artifacts_router
 from .routes.bandit import router as bandit_router
 from .routes.challenge import router as challenge_router
 from .routes.collection_management_api import router as collection_management_router
-from .routes.pressure import get_pressure_read_model, router as pressure_router
+from .routes.pressure import (
+    get_pressure_read_model,
+    router as pressure_router,
+)
 from .routes.reckoning import get_reckoning_read_model, router as reckoning_router
 
 # Extended routers
@@ -47,6 +54,8 @@ from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.document_extraction_api import router as document_extraction_router
 from .routes.document_indexing_api import router as document_indexing_router
 from .routes.documents import router as documents_router
+from .routes.duel import router as duel_router
+from .routes.eyes import router as eyes_router
 from .routes.inference import router as inference_router
 from .routes.intelligence_api import router as intelligence_api_router
 from .routes.language_intelligence_api import router as language_intelligence_router
@@ -61,6 +70,9 @@ from .routes.training_api import router as training_router
 from .routes.universal_rag_api import router as universal_rag_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.workflow_api import router as workflow_router
+from .pipeline.registry.pressure_store import PostgresPressureStore
+from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
+from .pipeline.registry.reckoning_store import PostgresReckoningStore
 from .settings import settings
 
 # Logging
@@ -115,15 +127,6 @@ def should_log_request(path: str) -> bool:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Deepiri AI Challenge Service API", version="3.0.0")
 
-    from .logging_config import RateLimitedAccessLogFilter
-    uvicorn_logger = logging.getLogger("uvicorn.access")
-    filter_instance = RateLimitedAccessLogFilter()
-    uvicorn_logger.filters.clear()
-    uvicorn_logger.addFilter(filter_instance)
-
-    if not settings.OPENAI_API_KEY:
-        logger.warning("OPENAI_API_KEY not set")
-
     if not _api_key_configured():
         if settings.CYREX_ALLOW_INSECURE_AUTH:
             logger.warning(
@@ -136,6 +139,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "503 until it is set to a generated secret"
             )
 
+
+    # Uvicorn log filtering
+    from .logging_config import RateLimitedAccessLogFilter
+    uvicorn_logger = logging.getLogger("uvicorn.access")
+    filter_instance = RateLimitedAccessLogFilter()
+    uvicorn_logger.filters.clear()
+    uvicorn_logger.addFilter(filter_instance)
+
+    # Validate config
+    if not settings.OPENAI_API_KEY:
+        logger.warning("OPENAI_API_KEY not set")
+
+    # Initialize core systems
     try:
         from .core.system_initializer import get_system_initializer
         system = await get_system_initializer()
@@ -144,6 +160,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"System init failed: {e}")
 
+    # Initialize Redis tool rate limiter
     try:
         from redis import asyncio as aioredis
 
@@ -162,9 +179,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Rate limiter disabled: {e}")
 
+    # Artifact Engine AGI schema (pressure, reckoning, elkedel scene doc)
+    try:
+        await bootstrap_artifact_engine()
+    except Exception as e:
+        logger.warning(f"Artifact engine bootstrap skipped: {e}")
+
+    try:
+        from .integrations.elkedel.tools import register_elkedel_tools
+        from .core.tool_registry import get_tool_registry
+
+        n = await register_elkedel_tools(get_tool_registry())
+        logger.info("Elkedel agent tools registered", extra={"count": n})
+    except Exception as e:
+        logger.warning(f"Elkedel agent tools disabled: {e}")
+
     document_stream_task: Optional[asyncio.Task] = None
     model_reload_task: Optional[asyncio.Task] = None
-    if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {"1", "true", "yes"}:
+    elkedel_sync_task: Optional[asyncio.Task] = None
+    if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
         try:
             from .core.document_stream_consumer import get_document_artifact_stream_consumer
 
@@ -175,7 +212,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Document stream artifact consumer disabled: {e}")
 
-    if os.getenv("CYREX_MODEL_RELOAD_LISTENER_ENABLED", "true").lower() in {"1", "true", "yes"}:
+    # Close the Helox→Cyrex model loop (model-ready → hot reload).
+    if os.getenv("CYREX_MODEL_RELOAD_LISTENER_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
         try:
             from .training.model_reload_listener import start_model_reload_listener
 
@@ -185,14 +227,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Model reload listener disabled: {e}")
 
+    if os.getenv("ELKEDEL_EYES_SYNC_ENABLED", "true").lower() in {"1", "true", "yes"}:
+        try:
+            from .integrations.elkedel.artifact_sync import start_elkedel_eyes_sync
+
+            elkedel_sync_task = await start_elkedel_eyes_sync()
+            app.state.elkedel_eyes_sync_task = elkedel_sync_task
+            logger.info("Elkedel eyes → artifact sync enabled")
+        except Exception as e:
+            logger.warning(f"Elkedel eyes sync disabled: {e}")
+
+    if os.getenv("ELKEDEL_EYES_AUTO_START", "false").lower() in {"1", "true", "yes"}:
+        try:
+            from .integrations.elkedel.client import get_elkedel_client
+
+            status = await get_elkedel_client().eyes_status()
+            if not status.get("running"):
+                await get_elkedel_client().eyes_start()
+                logger.info("Elkedel eyes pipeline auto-started")
+        except Exception as e:
+            logger.warning(f"Elkedel eyes auto-start skipped: {e}")
+
     yield
 
-    for task in (document_stream_task, model_reload_task):
+    # Shutdown systems
+    for task in (document_stream_task, model_reload_task, elkedel_sync_task):
         if task:
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
+                # Expected during FastAPI shutdown after cancelling the subscriber task.
                 pass
 
     try:
@@ -210,6 +275,7 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# CORS
 origins = [settings.CORS_ORIGIN] if settings.CORS_ORIGIN else []
 origins += [
     "http://localhost:3000",
@@ -228,6 +294,7 @@ app.add_middleware(
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(RateLimitMiddleware, requests_per_minute=60)
 
+# Middleware
 @app.middleware("http")
 async def middleware(request: Request, call_next):
     request_id = str(uuid.uuid4())
@@ -236,6 +303,7 @@ async def middleware(request: Request, call_next):
     response = None
 
     try:
+        # API Key guard
         path = request.url.path
         denial = authorize_request(request)
         if denial is not None:
@@ -275,6 +343,7 @@ async def middleware(request: Request, call_next):
                 ip_address=request.client.host if request.client else None
             )
 
+# Health endpoint
 @app.get("/health")
 async def health():
     health_status = {
@@ -289,10 +358,11 @@ async def health():
             "cors_origin": settings.CORS_ORIGIN,
             "node_backend_url": settings.NODE_BACKEND_URL,
             "openai_model": settings.OPENAI_MODEL,
-            "api_key_required": _api_key_configured(),
+            "api_key_required": bool(settings.CYREX_API_KEY),
         },
     }
 
+    # Redis health
     r = None
     try:
         import redis.asyncio as redis
@@ -316,10 +386,12 @@ async def health_options_handler():
     """Support bare OPTIONS /health checks in tests and simple preflight flows."""
     return Response(status_code=204)
 
+# Metrics
 @app.get("/metrics")
 def metrics():
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
+# Root
 @app.get("/")
 def root():
     return {
@@ -330,6 +402,7 @@ def root():
         "metrics": "/metrics"
     }
 
+# Direct AI endpoints
 from pydantic import BaseModel
 
 
@@ -367,6 +440,7 @@ async def api_complete(req: CompletionRequest, request: Request):
             raise HTTPException(status_code=503, detail="OpenAI API key not configured")
         import openai
         client = openai.OpenAI(api_key=settings.OPENAI_API_KEY)
+        import asyncio
         completion = await asyncio.to_thread(
             client.chat.completions.create,
             model=settings.OPENAI_MODEL,
@@ -411,6 +485,8 @@ app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
+app.include_router(eyes_router)
+app.include_router(duel_router)
 app.include_router(pressure_router)
 app.include_router(reckoning_router)
 
@@ -418,26 +494,55 @@ app.include_router(reckoning_router)
 async def _get_postgres_pressure_read_model():
     return PostgresPressureStore(await get_postgres_manager())
 
+
+app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
+
+
 async def _get_postgres_reckoning_read_model():
     return PostgresReckoningStore(await get_postgres_manager())
 
+
+app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
+
+
+async def _get_postgres_artifact_store_dep() -> ArtifactStorePort:
+    return await _get_postgres_artifact_store()
+
+
+app.dependency_overrides[get_artifact_store] = _get_postgres_artifact_store_dep
+
+
+async def _get_postgres_correction_writer():
+    return PostgresCorrectionStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_correction_writer] = _get_postgres_correction_writer
+
+
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
-    store = PostgresArtifactStore(await get_postgres_manager())
+    store = PostgresArtifactStore(
+        await get_postgres_manager(),
+        pressure_sink=PressureBusSink(),
+    )
     await store.ensure_schema()
     return store
 
 
 async def _get_pipeline_runner() -> PipelineRunnerPort:
+    pg = await get_postgres_manager()
     store = await _get_postgres_artifact_store()
+    extract = ExtractStage()
     return ArtifactEngineOrchestrator(
         store=store,
         parse_stage=ParseStage(),
+        anticipate=AnticipateStage(),
+        extract=extract,
+        duel=DuelStage(extract, ExtractStage()),
+        reckoning_writer=PostgresReckoningWriter(pg),
+        training_emitter=TrainingEmitter(postgres=pg, producer="cyrex.artifact_engine"),
     )
 
 
-app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
-app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
-app.dependency_overrides[get_artifact_store] = _get_postgres_artifact_store
 # Prefer Postgres orchestrator over the route stub FakePipelineRunner.
 app.dependency_overrides[get_pipeline_runner] = _get_pipeline_runner
 

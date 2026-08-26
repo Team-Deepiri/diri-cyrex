@@ -123,7 +123,7 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
 
             {/* Confusion Gap */}
             {result.confessed &&
-              result.gaps.map((gap, i) => (
+              (result.gaps ?? []).map((gap, i) => (
                 <div
                   key={i}
                   style={{
@@ -138,10 +138,13 @@ export const WitnessStitch: React.FC<WitnessStitchProps> = ({
                   }}
                 >
                   {gap.reason}
+                  {'claim_attempted' in gap && gap.claim_attempted
+                    ? `: ${gap.claim_attempted}`
+                    : ''}
                 </div>
               ))}
 
-            {result.spans.length === 0 && result.gaps.length === 0 && (
+            {result.spans.length === 0 && (result.gaps ?? []).length === 0 && (
               <p style={{ color: '#666', margin: 0 }}>No answer found.</p>
             )}
           </div>

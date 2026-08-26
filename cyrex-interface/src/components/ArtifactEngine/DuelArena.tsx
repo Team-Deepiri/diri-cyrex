@@ -1,11 +1,15 @@
-// Duel Arena & Disagreement Ribbon.
-// TODO: swap MOCK_DUEL for real fetch
+// Duel Arena & Disagreement Ribbon — Track-c UI wired to live duel API.
 
 import React from 'react';
+import { DuelArenaResponse } from '../../api/duel';
 import { DuelState, FieldDiscrepancy } from '../../types/artifactEngine';
 
 interface DuelArenaProps {
-  duelState: DuelState;
+  /** Live API payload from GET /duel/{document_id}. */
+  duel?: DuelArenaResponse | null;
+  loading?: boolean;
+  /** Track-c mock / storybook shape (optional fallback). */
+  duelState?: DuelState;
 }
 
 export const MOCK_DUEL: DuelState = {
@@ -67,7 +71,6 @@ export const MOCK_DUEL: DuelState = {
   resolution_status: 'unresolved',
 };
 
-// Amber → red based on how big the confidence gap is between agents
 function ribbonColor(confidenceDelta?: number): string {
   const delta = confidenceDelta ?? 0;
   if (delta > 0.15) return 'rgba(220, 50, 50, 0.9)';
@@ -75,31 +78,78 @@ function ribbonColor(confidenceDelta?: number): string {
   return 'rgba(220, 180, 40, 0.8)';
 }
 
-export const DuelArena: React.FC<DuelArenaProps> = ({ duelState }) => {
+type ArenaView = {
+  agent_a_id: string;
+  agent_b_id: string;
+  resolution_status: string;
+  disagreements: FieldDiscrepancy[];
+  allFieldNames: string[];
+  getValue: (fieldName: string, agent: 'a' | 'b') => unknown;
+};
+
+function fromDuelState(duelState: DuelState): ArenaView {
+  return {
+    agent_a_id: duelState.agent_a_id,
+    agent_b_id: duelState.agent_b_id,
+    resolution_status: duelState.resolution_status,
+    disagreements: duelState.disagreements,
+    allFieldNames: Array.from(
+      new Set([
+        ...duelState.agent_a_fields.map((f) => f.field_name),
+        ...duelState.agent_b_fields.map((f) => f.field_name),
+      ]),
+    ),
+    getValue: (fieldName, agent) => {
+      const fields = agent === 'a' ? duelState.agent_a_fields : duelState.agent_b_fields;
+      return fields.find((f) => f.field_name === fieldName)?.value;
+    },
+  };
+}
+
+function fromLiveDuel(duel: DuelArenaResponse): ArenaView {
+  return {
+    agent_a_id: duel.agent_a_id,
+    agent_b_id: duel.agent_b_id,
+    resolution_status: duel.resolution_status,
+    disagreements: duel.disagreements,
+    allFieldNames: duel.fields.map((f) => f.field_name),
+    getValue: (fieldName, agent) => {
+      const row = duel.fields.find((f) => f.field_name === fieldName);
+      return agent === 'a' ? row?.agent_a_value : row?.agent_b_value;
+    },
+  };
+}
+
+export const DuelArena: React.FC<DuelArenaProps> = ({ duel, loading, duelState }) => {
   const [expandedField, setExpandedField] = React.useState<string | null>(null);
 
+  if (loading) {
+    return <p style={{ color: '#666', fontSize: '0.85rem' }}>Loading duel state…</p>;
+  }
+
+  const view: ArenaView | null = duel
+    ? fromLiveDuel(duel)
+    : duelState
+      ? fromDuelState(duelState)
+      : null;
+
+  if (!view) {
+    return (
+      <p style={{ color: '#666', fontSize: '0.85rem' }}>
+        No duel artifact yet — upload a document to run adversarial extract.
+      </p>
+    );
+  }
+
   const disagreementFor = (fieldName: string): FieldDiscrepancy | undefined =>
-    duelState.disagreements.find((d) => d.field_name === fieldName);
-
-  const allFieldNames = Array.from(
-    new Set([
-      ...duelState.agent_a_fields.map((f) => f.field_name),
-      ...duelState.agent_b_fields.map((f) => f.field_name),
-    ])
-  );
-
-  const getValue = (fieldName: string, agent: 'a' | 'b') => {
-    const fields = agent === 'a' ? duelState.agent_a_fields : duelState.agent_b_fields;
-    return fields.find((f) => f.field_name === fieldName)?.value;
-  };
+    view.disagreements.find((d) => d.field_name === fieldName);
 
   return (
     <div>
-      {/* Resolution status badge */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
         <div style={{ display: 'flex', gap: '1.5rem' }}>
-          <span style={{ color: '#888', fontSize: '0.75rem' }}>Agent A: {duelState.agent_a_id}</span>
-          <span style={{ color: '#888', fontSize: '0.75rem' }}>Agent B: {duelState.agent_b_id}</span>
+          <span style={{ color: '#888', fontSize: '0.75rem' }}>Agent A: {view.agent_a_id}</span>
+          <span style={{ color: '#888', fontSize: '0.75rem' }}>Agent B: {view.agent_b_id}</span>
         </div>
         <span
           style={{
@@ -107,27 +157,26 @@ export const DuelArena: React.FC<DuelArenaProps> = ({ duelState }) => {
             padding: '0.2rem 0.6rem',
             borderRadius: '999px',
             background:
-              duelState.resolution_status === 'unresolved'
+              view.resolution_status === 'unresolved'
                 ? 'rgba(220, 130, 40, 0.2)'
-                : duelState.resolution_status === 'resolved'
-                ? 'rgba(80, 200, 120, 0.2)'
-                : 'rgba(120, 120, 120, 0.2)',
+                : view.resolution_status === 'resolved'
+                  ? 'rgba(80, 200, 120, 0.2)'
+                  : 'rgba(120, 120, 120, 0.2)',
             color:
-              duelState.resolution_status === 'unresolved'
+              view.resolution_status === 'unresolved'
                 ? '#dc8228'
-                : duelState.resolution_status === 'resolved'
-                ? '#50c878'
-                : '#999',
+                : view.resolution_status === 'resolved'
+                  ? '#50c878'
+                  : '#999',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
           }}
         >
-          {duelState.resolution_status}
+          {view.resolution_status}
         </span>
       </div>
 
-      {/* Field rows */}
-      {allFieldNames.map((fieldName) => {
+      {view.allFieldNames.map((fieldName) => {
         const disagreement = disagreementFor(fieldName);
         const isDisagreement = !!disagreement;
         const isExpanded = expandedField === fieldName;
@@ -144,13 +193,15 @@ export const DuelArena: React.FC<DuelArenaProps> = ({ duelState }) => {
                 padding: '0.5rem 0.75rem',
                 borderRadius: '4px',
                 background: '#1a1a1a',
-                border: isDisagreement ? `1px solid ${ribbonColor(disagreement?.confidence_delta)}` : '1px solid #333',
+                border: isDisagreement
+                  ? `1px solid ${ribbonColor(disagreement?.confidence_delta)}`
+                  : '1px solid #333',
                 opacity: isDisagreement ? 1 : 0.3,
                 cursor: isDisagreement ? 'pointer' : 'default',
               }}
             >
               <span style={{ color: '#e0e0e0', fontSize: '0.85rem', textAlign: 'right' }}>
-                {String(getValue(fieldName, 'a') ?? '—')}
+                {String(view.getValue(fieldName, 'a') ?? '—')}
               </span>
 
               <span
@@ -167,11 +218,10 @@ export const DuelArena: React.FC<DuelArenaProps> = ({ duelState }) => {
               </span>
 
               <span style={{ color: '#e0e0e0', fontSize: '0.85rem' }}>
-                {String(getValue(fieldName, 'b') ?? '—')}
+                {String(view.getValue(fieldName, 'b') ?? '—')}
               </span>
             </div>
 
-            {/* Disagreement reason expansion */}
             {isExpanded && disagreement?.reason && (
               <div
                 style={{
@@ -196,7 +246,7 @@ export const DuelArena: React.FC<DuelArenaProps> = ({ duelState }) => {
         );
       })}
 
-      {allFieldNames.length === 0 && (
+      {view.allFieldNames.length === 0 && (
         <p style={{ color: '#666', fontSize: '0.85rem' }}>No fields to compare yet.</p>
       )}
     </div>
