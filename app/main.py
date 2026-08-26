@@ -14,6 +14,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
+from .api_key_auth import (
+    AuthDenial,
+    api_key_configured,
+    evaluate_request as evaluate_api_key_request,
+)
 from .database.postgres import get_postgres_manager
 from .logging_config import ErrorLogger, RequestLogger, get_logger
 from .middleware.rate_limiter import RateLimitMiddleware
@@ -90,6 +95,22 @@ RATE_LIMITED_PATHS = [
     "/orchestration/health-comprehensive",
 ]
 
+
+def _api_key_configured() -> bool:
+    return api_key_configured(settings.CYREX_API_KEY)
+
+
+def authorize_request(request: Request) -> Optional[AuthDenial]:
+    """Apply the API key policy to an incoming request."""
+    return evaluate_api_key_request(
+        method=request.method,
+        path=request.url.path,
+        provided_key=request.headers.get("x-api-key"),
+        configured_key=settings.CYREX_API_KEY,
+        allow_insecure=settings.CYREX_ALLOW_INSECURE_AUTH,
+    )
+
+
 def should_log_request(path: str) -> bool:
     if "/conversation" in path and path.endswith("/conversation"):
         return False
@@ -105,6 +126,19 @@ def should_log_request(path: str) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Deepiri AI Challenge Service API", version="3.0.0")
+
+    if not _api_key_configured():
+        if settings.CYREX_ALLOW_INSECURE_AUTH:
+            logger.warning(
+                "CYREX_ALLOW_INSECURE_AUTH is enabled with no CYREX_API_KEY set - "
+                "every authenticated route is open. Local development only."
+            )
+        else:
+            logger.error(
+                "CYREX_API_KEY is not configured - authenticated routes will return "
+                "503 until it is set to a generated secret"
+            )
+
 
     # Uvicorn log filtering
     from .logging_config import RateLimitedAccessLogFilter
@@ -271,31 +305,17 @@ async def middleware(request: Request, call_next):
     try:
         # API Key guard
         path = request.url.path
-        method = request.method
-        if not path.startswith("/health") and not path.startswith("/metrics") and method != "OPTIONS":
-            api_key = request.headers.get("x-api-key")
-            is_desktop = request.headers.get("x-desktop-client") == "true"
-            is_default_key = settings.CYREX_API_KEY == "change-me"
-            has_valid_key = api_key == settings.CYREX_API_KEY
-
-            if not is_desktop and not has_valid_key and not (is_default_key and not api_key):
-                error_logger.log_api_error(
-                    HTTPException(status_code=401, detail="Invalid API key"),
-                    request_id,
-                    path
-                )
-                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
-                response.headers["x-request-id"] = request_id
-                return response
-            if is_desktop and api_key and api_key != settings.CYREX_API_KEY:
-                error_logger.log_api_error(
-                    HTTPException(status_code=401, detail="Invalid API key"),
-                    request_id,
-                    path
-                )
-                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
-                response.headers["x-request-id"] = request_id
-                return response
+        denial = authorize_request(request)
+        if denial is not None:
+            status_code, detail = denial
+            error_logger.log_api_error(
+                HTTPException(status_code=status_code, detail=detail),
+                request_id,
+                path
+            )
+            response = JSONResponse(status_code=status_code, content={"detail": detail})
+            response.headers["x-request-id"] = request_id
+            return response
 
         response = await call_next(request)
         response.headers["x-request-id"] = request_id

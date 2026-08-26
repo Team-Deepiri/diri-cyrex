@@ -63,8 +63,9 @@ pip install -r requirements.txt
    OPENAI_API_KEY=sk-your-openai-api-key-here
    OPENAI_MODEL=gpt-4o-mini
    
-   # Optional: API Key for authentication
-   CYREX_API_KEY=change-me
+   # Required: API key for authentication (generate with
+   # python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+   CYREX_API_KEY=your-generated-key-here
    
    # Optional: Backend URL (if connecting to Node.js backend)
    NODE_BACKEND_URL=http://localhost:5000
@@ -169,10 +170,10 @@ If you're accessing from a web frontend, make sure:
 
 ### Required (Minimum)
 - `OPENAI_API_KEY` - Your OpenAI API key
+- `CYREX_API_KEY` - API key for authentication; unset or `change-me` makes authenticated routes return 503
 
 ### Recommended
 - `OPENAI_MODEL` - Model to use (default: `gpt-4o-mini`)
-- `CYREX_API_KEY` - API key for authentication
 - `CORS_ORIGIN` - Frontend URL for CORS
 
 ### Optional

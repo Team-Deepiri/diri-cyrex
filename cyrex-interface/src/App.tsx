@@ -1436,7 +1436,7 @@ export default function App() {
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder="change-me"
+          placeholder="your CYREX_API_KEY"
           style={{
             padding: '0.5rem',
             background: '#222',
