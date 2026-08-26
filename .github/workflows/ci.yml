@@ -90,7 +90,7 @@ jobs:
           poetry run python -c "from app.main import app; assert app.title"
 
       - name: Ruff
-        run: poetry run ruff check app/pipeline app/training tests/contract tests/pipeline tests/training tests/fakes
+        run: poetry run ruff check app/mcp app/pipeline app/training tests/contract tests/mcp tests/pipeline tests/routes tests/training tests/fakes
 
       - name: Cross-track import gate
         run: poetry run python scripts/ci/check_cross_track_imports.py
@@ -102,4 +102,4 @@ jobs:
           MILVUS_HOST: localhost
           MILVUS_PORT: "19530"
           CYREX_API_KEY: change-me
-        run: poetry run pytest tests/contract -q
+        run: poetry run pytest --confcutdir=tests/contract tests/contract tests/mcp tests/routes/test_pressure.py -q

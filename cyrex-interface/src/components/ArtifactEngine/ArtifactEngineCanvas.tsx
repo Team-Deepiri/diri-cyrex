@@ -4,19 +4,15 @@ import { FaultDrillDown } from './FaultDrillDown';
 import { ProvenanceRiver } from './ProvenanceRiver';
 import { ReckoningCompass } from './ReckoningCompass';
 import { DuelArena } from './DuelArena';
+import { WitnessStitch } from './WitnessStitch';
 import { useLiveCanvasData } from '../../hooks/useLiveCanvasData';
-import { uploadArtifact, voiceQuery } from '../../api/artifactEngine';
+import { uploadArtifact } from '../../api/artifactEngine';
 import { ELKEDEL_SCENE_DOCUMENT_ID } from '../../constants/agi';
-import { VoiceQueryResponse } from '../../types/artifactEngine';
 
 export const ArtifactEngineCanvas: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFaultCell, setSelectedFaultCell] = useState<ReturnType<typeof useLiveCanvasData>['pressureCells'][0] | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [voiceQuestion, setVoiceQuestion] = useState('');
-  const [voiceLoading, setVoiceLoading] = useState(false);
-  const [voiceResult, setVoiceResult] = useState<VoiceQueryResponse | null>(null);
-  const [voiceError, setVoiceError] = useState<string | null>(null);
 
   const canvas = useLiveCanvasData(ELKEDEL_SCENE_DOCUMENT_ID);
 
@@ -30,29 +26,6 @@ export const ArtifactEngineCanvas: React.FC = () => {
       console.error('Upload failed', err);
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleVoiceAsk = async () => {
-    if (!voiceQuestion.trim()) return;
-    setVoiceLoading(true);
-    setVoiceError(null);
-    try {
-      const response = await voiceQuery({
-        document_id: canvas.documentId,
-        question: voiceQuestion.trim(),
-        persona_scope: {
-          witness_set_only: true,
-          hard_citation_gate: true,
-          corpus_filter: [canvas.documentId],
-        },
-      });
-      setVoiceResult(response);
-    } catch (err) {
-      setVoiceError(err instanceof Error ? err.message : 'Voice query failed');
-      setVoiceResult(null);
-    } finally {
-      setVoiceLoading(false);
     }
   };
 
@@ -154,11 +127,7 @@ export const ArtifactEngineCanvas: React.FC = () => {
 
         <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', minHeight: '300px' }}>
           <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Reckoning Compass</h3>
-          <ReckoningCompass
-            records={canvas.reckoningRecords}
-            anomalousCount={canvas.anomalousCount}
-            novelCount={canvas.novelCount}
-          />
+          <ReckoningCompass documentId={canvas.documentId} />
         </div>
       </div>
 
@@ -196,79 +165,14 @@ export const ArtifactEngineCanvas: React.FC = () => {
 
       <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', marginBottom: '1rem' }}>
         <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Voice Query</h3>
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
-          <input
-            type="text"
-            value={voiceQuestion}
-            onChange={e => setVoiceQuestion(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && void handleVoiceAsk()}
-            placeholder="Ask a question about the document (citation-gated)…"
-            style={{
-              flex: 1,
-              padding: '0.5rem',
-              background: '#1a1a1a',
-              color: '#e0e0e0',
-              border: '1px solid #444',
-              borderRadius: '4px',
-            }}
-          />
-          <button
-            disabled={voiceLoading}
-            onClick={() => void handleVoiceAsk()}
-            style={{
-              padding: '0.5rem 1.5rem',
-              background: voiceLoading ? '#333' : '#4a9eff',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: voiceLoading ? 'wait' : 'pointer',
-            }}
-          >
-            {voiceLoading ? '…' : 'Ask'}
-          </button>
-        </div>
-        {voiceError && (
-          <p style={{ color: '#ff8080', fontSize: '0.85rem' }}>{voiceError}</p>
-        )}
-        <div style={{
-          background: '#1a1a1a',
-          padding: '1rem',
-          borderRadius: '4px',
-          border: '1px solid #444',
-          minHeight: '80px',
-        }}>
-          {!voiceResult ? (
-            <p style={{ color: '#666', margin: 0 }}>Cited answer or confession appears here.</p>
-          ) : voiceResult.confessed ? (
-            <div>
-              <p style={{ color: '#ffaa00', margin: '0 0 0.5rem' }}>Confession — no witness span available</p>
-              {(voiceResult.gaps ?? []).map((gap, i) => (
-                <p key={i} style={{ color: '#888', fontSize: '0.85rem', margin: 0 }}>
-                  {gap.reason}: {gap.claim_attempted}
-                </p>
-              ))}
-            </div>
-          ) : (
-            voiceResult.spans.map(span => (
-              <blockquote
-                key={span.citation_id}
-                style={{
-                  margin: '0 0 0.5rem',
-                  padding: '0.5rem 0.75rem',
-                  borderLeft: '3px solid #4a9eff',
-                  color: '#e0e0e0',
-                  fontSize: '0.9rem',
-                }}
-              >
-                "{span.quote}"
-                <span style={{ display: 'block', color: '#666', fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                  {span.citation_id} · chars {span.char_start}–{span.char_end}
-                  {span.page != null ? ` · p.${span.page}` : ''}
-                </span>
-              </blockquote>
-            ))
-          )}
-        </div>
+        <WitnessStitch
+          documentId={canvas.documentId}
+          personaScope={{
+            witness_set_only: true,
+            hard_citation_gate: true,
+            corpus_filter: [canvas.documentId],
+          }}
+        />
       </div>
 
       <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px', marginBottom: '1rem' }}>

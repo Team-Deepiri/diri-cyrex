@@ -9,12 +9,10 @@ from pydantic import BaseModel
 
 from app.pipeline.contracts.models import PredictionRecord, PredictionStatus
 from app.pipeline.contracts.ports import ReckoningReadPort
-from app.pipeline.registry.reckoning_store import PostgresReckoningStore
-from app.database.postgres import get_postgres_manager
 
 
 async def get_reckoning_read_model() -> ReckoningReadPort:
-    return PostgresReckoningStore(await get_postgres_manager())
+    raise RuntimeError("Reckoning read model dependency is not configured")
 
 
 class ReckoningResponse(BaseModel):

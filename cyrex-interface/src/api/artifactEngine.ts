@@ -8,11 +8,21 @@ import {
   Citation,
   CorrectionRequest,
   CorrectionResponse,
-  ProvenanceResponse
+  ProvenanceResponse,
+  PredictionRecord,
 } from '../types/artifactEngine';
 import { apiRequest, apiUpload } from './client';
 
 const ARTIFACTS = '/artifacts';
+const RECKONING = '/reckoning';
+
+// Response shape
+export interface ReckoningResponse {
+  document_id: string;
+  records: PredictionRecord[];
+  anomalous_count: number;
+  novel_count: number;
+}
 
 // Upload a document and run the full pipeline. Returns ArtifactBundle.
 export async function uploadArtifact(
@@ -76,4 +86,9 @@ export async function voiceQuery(
     body: JSON.stringify(request),
   });
   return data.response;
+}
+
+// Fetch dead-reckoning prediction records
+export async function getReckoning(documentId: string): Promise<ReckoningResponse> {
+  return apiRequest<ReckoningResponse>(`${RECKONING}/${documentId}`);
 }

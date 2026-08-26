@@ -177,7 +177,11 @@ async def emit_reckoning_training(
             f"actual={rec.actual_value}."
         )
         output = gated["output"] if gated else str(rec.actual_value)
-        input_text = gated.get("input", "") if gated else str(rec.predicted_mean or rec.predicted_range or "")
+        input_text = (
+            gated.get("input", "")
+            if gated
+            else str(rec.predicted_mean or rec.predicted_range or "")
+        )
         quality = float(gated.get("quality_score", 0.85)) if gated else (
             0.85 if rec.status == PredictionStatus.ANOMALOUS else 0.7
         )
