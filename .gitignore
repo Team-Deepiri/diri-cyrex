@@ -170,6 +170,10 @@ model_cache/
 
 # Test files
 test_*.py
+!tests/mcp/
+!tests/mcp/test_*.py
+!tests/routes/
+!tests/routes/test_*.py
 !tests/integration/test_pressure_reckoning.py
 !tests/test_realtime_data_pipeline_postgres.py
 !tests/contract/test_*.py
