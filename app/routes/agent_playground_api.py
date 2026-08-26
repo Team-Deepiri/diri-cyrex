@@ -585,28 +585,13 @@ async def invoke_agent(request: AgentInvokeRequest):
                 media_type="text/event-stream",
             )
         else:
-            # Non-streaming response
+            # Non-streaming response.
+            # Do NOT post to messaging here: messaging-service forwardToAgent persists
+            # the AGENT reply from this HTTP body (expects `message` / `response`).
+            # Posting here created a duplicate row (real reply + "No response from agent"
+            # when extraction missed the Cyrex field name).
             response = await generate_agent_response(instance_id, request.input, config)
             agent_data["status"] = "idle"
-            
-            # If chat_room_id is provided in context, send response to messaging service
-            chat_room_id = request.context.get("chat_room_id")
-            if chat_room_id and response.get("success"):
-                try:
-                    messaging_client = get_messaging_client()
-                    await messaging_client.send_agent_message(
-                        chat_room_id=chat_room_id,
-                        content=response.get("response", ""),
-                        agent_instance_id=instance_id,
-                        message_type="TEXT",
-                        metadata={
-                            "tokens_used": response.get("tokens_used", 0),
-                            "tool_calls": response.get("tool_calls", []),
-                        }
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to send response to messaging service: {e}")
-            
             return response
     except Exception as e:
         agent_data["status"] = "error"
@@ -932,7 +917,10 @@ async def generate_agent_response(
         
         return {
             "success": result.get("success", True),
+            # `response` is the Cyrex contract; `message` aliases it for messaging-service
+            # forwardToAgent which historically read response.message.
             "response": response_text,
+            "message": response_text,
             "tokens_used": len(response_text.split()),
             "duration_ms": result.get("duration_ms", 0),
             "tool_calls": [

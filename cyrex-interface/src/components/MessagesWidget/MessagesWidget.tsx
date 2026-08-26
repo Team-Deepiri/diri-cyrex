@@ -6,13 +6,23 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FaComments, FaTimes, FaPlus, FaUsers, FaRobot, FaChevronDown, FaChevronUp, FaTools, FaCheckCircle, FaExclamationCircle } from 'react-icons/fa';
 import './MessagesWidget.css';
+import { CYREX_BASE_URL, getStoredRoomId } from '../../lib/platformConfig';
+import {
+  ensureAgentChatRoom,
+  listMessages,
+  messagingToUiMessage,
+  probeMessagingAvailable,
+  sendUserMessage,
+} from '../../lib/messagingClient';
+import { isRealtimeConnected, subscribePlatformEvents } from '../../lib/realtimeClient';
 
-const API_BASE = import.meta.env.VITE_CYREX_BASE_URL || 'http://localhost:8000';
+const API_BASE = CYREX_BASE_URL;
 
 interface AgentChat {
   instanceId: string;
   agentId: string;
   name: string;
+  chatRoomId?: string;
   lastMessage?: string;
   lastMessageTime?: string;
   unreadCount?: number;
@@ -67,6 +77,107 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   const [selectedAgentsForGroup, setSelectedAgentsForGroup] = useState<string[]>([]);
   const [groupChatAgentTypes, setGroupChatAgentTypes] = useState<string[]>(['conversational', 'conversational']);
   const [agentNames, setAgentNames] = useState<string[]>(['Agent 1', 'Agent 2']);
+  /** platform = messaging+RTG path; direct = Cyrex HTTP only (headless) */
+  const [deliveryMode, setDeliveryMode] = useState<'platform' | 'direct' | 'probing'>('probing');
+
+  // Probe messaging / RTG when widget opens
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      const messagingUp = await probeMessagingAvailable(true);
+      if (cancelled) return;
+      setDeliveryMode(messagingUp ? 'platform' : 'direct');
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  // Live agent replies via realtime-gateway when in a messaging-backed chat.
+  // Accept publisher shape ({event,data}) and gateway/sugar-glider reshape
+  // ({event_type,payload} or payload wrapping the original event).
+  useEffect(() => {
+    if (!isOpen || activeView !== 'chat' || !selectedChat?.chatRoomId) return;
+    if (deliveryMode !== 'platform') return;
+
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
+
+    const extractMessageNewData = (evt: Record<string, unknown> | null | undefined) => {
+      if (!evt || typeof evt !== 'object') return null;
+      const eventName = String(evt.event || evt.event_type || '');
+      const rawData = evt.data;
+      const rawPayload = evt.payload;
+
+      const asRecord = (v: unknown): Record<string, unknown> | null =>
+        v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+
+      const parseMaybeJson = (v: unknown): unknown => {
+        if (typeof v !== 'string') return v;
+        try {
+          return JSON.parse(v);
+        } catch {
+          return v;
+        }
+      };
+
+      if (eventName === 'message:new') {
+        const data = asRecord(parseMaybeJson(rawData));
+        if (data?.chatRoomId) return data;
+        const payload = asRecord(parseMaybeJson(rawPayload));
+        if (payload?.chatRoomId) return payload;
+        if (payload) {
+          const nested = asRecord(parseMaybeJson(payload.data));
+          if (nested?.chatRoomId) return nested;
+        }
+      }
+
+      // Fast-path / nested: payload is the original {event,data} envelope
+      const payload = asRecord(parseMaybeJson(rawPayload));
+      if (payload && String(payload.event || payload.event_type || '') === 'message:new') {
+        const nested = asRecord(parseMaybeJson(payload.data)) || asRecord(parseMaybeJson(payload.payload));
+        if (nested?.chatRoomId) return nested;
+        if (payload.chatRoomId) return payload;
+      }
+
+      return null;
+    };
+
+    (async () => {
+      unsubscribe = await subscribePlatformEvents((evt) => {
+        if (cancelled) return;
+        const data = extractMessageNewData(evt as Record<string, unknown>);
+        if (!data) return;
+        if (data.chatRoomId !== selectedChat.chatRoomId) return;
+        if (data.senderType !== 'AGENT' && data.senderType !== 'SYSTEM') return;
+
+        const uiMsg = messagingToUiMessage({
+          id: String(data.id || `rtg-${Date.now()}`),
+          chatRoomId: String(data.chatRoomId),
+          content: String(data.content || ''),
+          senderType: String(data.senderType),
+          createdAt: String(data.createdAt || new Date().toISOString()),
+        });
+
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === uiMsg.id)) return prev;
+          // Drop empty streaming placeholders if any
+          const withoutPlaceholders = prev.filter(
+            (m) => !(m.role === 'assistant' && m.streaming && !m.content),
+          );
+          return [...withoutPlaceholders, uiMsg];
+        });
+        setIsStreaming(false);
+        setIsLoading(false);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [isOpen, activeView, selectedChat?.chatRoomId, deliveryMode]);
 
   // Fetch agent chats
   useEffect(() => {
@@ -110,12 +221,16 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
       const response = await fetch(`${API_BASE}/api/agent/instances`);
       if (response.ok) {
         const instances = await response.json();
-        setAgentChats(instances.map((inst: any) => ({
-          instanceId: inst.instance_id,
-          agentId: inst.agent_id,
-          name: inst.name || `Agent ${inst.agent_id.slice(0, 8)}`,
-          lastMessage: 'Click to start chatting',
-        })));
+        setAgentChats(instances.map((inst: any) => {
+          const instanceId = inst.instance_id;
+          return {
+            instanceId,
+            agentId: inst.agent_id,
+            name: inst.name || `Agent ${inst.agent_id.slice(0, 8)}`,
+            chatRoomId: getStoredRoomId(instanceId),
+            lastMessage: 'Click to start chatting',
+          };
+        }));
       }
     } catch (error) {
       console.error('Failed to fetch agent chats:', error);
@@ -135,13 +250,41 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
   };
 
   const openChat = async (chat: AgentChat) => {
-    setSelectedChat(chat);
+    let resolved = { ...chat };
+    const messagingUp = await probeMessagingAvailable();
+
+    if (messagingUp) {
+      try {
+        const roomId = await ensureAgentChatRoom(
+          chat.instanceId,
+          chat.name,
+          chat.chatRoomId || getStoredRoomId(chat.instanceId),
+        );
+        resolved = { ...chat, chatRoomId: roomId };
+        setDeliveryMode('platform');
+      } catch (err) {
+        console.warn('Messaging room ensure failed; using Cyrex direct', err);
+        setDeliveryMode('direct');
+      }
+    } else {
+      setDeliveryMode('direct');
+    }
+
+    setSelectedChat(resolved);
     setSelectedGroupChat(null);
     setActiveView('chat');
     // Don't clear messages immediately - load history first to avoid flicker
     
-    // Load conversation history
+    // Prefer durable messaging history when room is bound; else Cyrex conversation
     try {
+      if (resolved.chatRoomId && messagingUp) {
+        const history = await listMessages(resolved.chatRoomId);
+        const mappedMessages = history.map((msg, index) => messagingToUiMessage(msg, index));
+        setMessages(mappedMessages);
+        lastSyncedMessageCountRef.current = mappedMessages.length;
+        return;
+      }
+
       const response = await fetch(`${API_BASE}/api/agent/${chat.instanceId}/conversation`);
       if (response.ok) {
         const data = await response.json();
@@ -276,6 +419,18 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
 
       if (response.ok) {
         const data = await response.json();
+        let chatRoomId: string | undefined;
+        if (await probeMessagingAvailable()) {
+          try {
+            chatRoomId = await ensureAgentChatRoom(
+              data.instance_id,
+              data.name || newAgentName,
+            );
+            setDeliveryMode('platform');
+          } catch (err) {
+            console.warn('Could not bind messaging room for new agent', err);
+          }
+        }
         // Refresh agent chats
         await fetchAgentChats();
         // Close dialog and open the new chat
@@ -285,6 +440,7 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
           instanceId: data.instance_id,
           agentId: data.agent_id,
           name: data.name || newAgentName,
+          chatRoomId,
         };
         await openChat(newChat);
       } else {
@@ -319,7 +475,60 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
 
     try {
       if (selectedChat) {
-        // Send to single agent
+        // Platform path: messaging persists + forwards to Cyrex; RTG delivers agent reply
+        if (selectedChat.chatRoomId && deliveryMode === 'platform') {
+          try {
+            await sendUserMessage(selectedChat.chatRoomId, messageContent);
+            setIsStreaming(true);
+            // Placeholder until platform-event (or poll fallback) arrives
+            const waitingId = `msg-wait-${Date.now()}`;
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: waitingId,
+                role: 'assistant',
+                content: '',
+                timestamp: new Date().toISOString(),
+                streaming: true,
+              },
+            ]);
+
+            // Fallback poll if RTG event is slow / broadcast missed
+            const roomId = selectedChat.chatRoomId;
+            const started = Date.now();
+            const poll = async () => {
+              while (Date.now() - started < 60_000) {
+                await new Promise((r) => setTimeout(r, 1500));
+                try {
+                  const history = await listMessages(roomId);
+                  const agents = history.filter((m) => m.senderType === 'AGENT');
+                  const last = agents[agents.length - 1];
+                  if (last && new Date(last.createdAt || 0).getTime() >= started - 2000) {
+                    setMessages((prev) => {
+                      const withoutWait = prev.filter((m) => m.id !== waitingId && !m.streaming);
+                      if (withoutWait.some((m) => m.id === last.id)) return withoutWait;
+                      return [...withoutWait, messagingToUiMessage(last)];
+                    });
+                    setIsStreaming(false);
+                    setIsLoading(false);
+                    return;
+                  }
+                } catch {
+                  /* keep waiting */
+                }
+              }
+              setIsStreaming(false);
+              setIsLoading(false);
+            };
+            void poll();
+            return;
+          } catch (err) {
+            console.warn('Platform send failed; falling back to Cyrex stream', err);
+            setDeliveryMode('direct');
+          }
+        }
+
+        // Send to single agent (Cyrex direct streaming)
         const response = await fetch(`${API_BASE}/api/agent/invoke`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -327,6 +536,9 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
             instance_id: selectedChat.instanceId,
             input: messageContent,
             stream: true,
+            context: selectedChat.chatRoomId
+              ? { chat_room_id: selectedChat.chatRoomId }
+              : undefined,
           }),
         });
 
@@ -650,6 +862,42 @@ export function MessagesWidget({ isOpen, onClose }: MessagesWidgetProps) {
       <div className="messages-widget" onClick={(e) => e.stopPropagation()}>
         <div className="messages-widget-header">
           <h3><FaComments /> Messages</h3>
+          <span
+            title={
+              deliveryMode === 'platform'
+                ? `messaging + realtime-gateway${isRealtimeConnected() ? ' (socket connected)' : ' (socket connecting…)'}`
+                : deliveryMode === 'direct'
+                  ? 'Cyrex HTTP only (messaging/RTG unavailable — headless mode)'
+                  : 'Checking messaging service…'
+            }
+            style={{
+              marginLeft: 'auto',
+              marginRight: '12px',
+              fontSize: '0.7rem',
+              fontWeight: 600,
+              letterSpacing: '0.02em',
+              padding: '3px 8px',
+              borderRadius: '4px',
+              background:
+                deliveryMode === 'platform'
+                  ? 'rgba(34, 197, 94, 0.2)'
+                  : deliveryMode === 'direct'
+                    ? 'rgba(148, 163, 184, 0.25)'
+                    : 'rgba(255, 184, 77, 0.2)',
+              color:
+                deliveryMode === 'platform'
+                  ? '#86efac'
+                  : deliveryMode === 'direct'
+                    ? '#cbd5e1'
+                    : '#FFB84D',
+            }}
+          >
+            {deliveryMode === 'platform'
+              ? 'via messaging + RTG'
+              : deliveryMode === 'direct'
+                ? 'direct Cyrex'
+                : 'probing…'}
+          </span>
           <button className="btn-icon" onClick={onClose}>
             <FaTimes />
           </button>
