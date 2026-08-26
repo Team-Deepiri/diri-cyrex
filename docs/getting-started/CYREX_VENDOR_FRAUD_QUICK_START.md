@@ -62,7 +62,7 @@ The UI will be available at: `http://localhost:5173` (or the port Vite assigns)
 ```bash
 curl -X POST http://localhost:8000/vendor-fraud/analyze-invoice \
   -H "Content-Type: application/json" \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -d '{
     "invoice": {
       "vendor_name": "ABC Plumbing Services",

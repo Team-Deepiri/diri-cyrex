@@ -1672,6 +1672,25 @@ graph = ["objgraph (>=1.7.2)"]
 profile = ["gprof2dot (>=2022.7.29)"]
 
 [[package]]
+name = "diri-agent-guardrails"
+version = "0.1.2"
+description = "Reusable input/output sanitization, PII detection, prompt-injection checks, and policy-driven guardrails for AI agents."
+optional = false
+python-versions = "^3.10"
+groups = ["main"]
+files = []
+develop = false
+
+[package.extras]
+opa = ["httpx (>=0.27.0,<0.28.0)"]
+
+[package.source]
+type = "git"
+url = "https://github.com/Team-Deepiri/diri-agent-guardrails.git"
+reference = "v0.1.2"
+resolved_reference = "23537193f40373ab29799275f912367e0cf6a8c1"
+
+[[package]]
 name = "diri-agent-testing-utils"
 version = "0.1.1"
 description = "Pytest fixtures, mocks, and test harness for AI agent testing"
@@ -1691,7 +1710,7 @@ dev = ["black (>=23.0.0)", "mypy (>=1.0.0)", "pytest (>=7.0.0)", "pytest-asyncio
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git"
-reference = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff"
+reference = "v0.1.1"
 resolved_reference = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff"
 
 [[package]]
@@ -1722,7 +1741,7 @@ torch = ["torch (>=2.0.0)"]
 [package.source]
 type = "git"
 url = "https://github.com/Team-Deepiri/diri-agent-toolbox.git"
-reference = "f243586fd8de6dfe5c9f929513523509b9e69a51"
+reference = "v0.2.1"
 resolved_reference = "f243586fd8de6dfe5c9f929513523509b9e69a51"
 
 [[package]]
@@ -9567,4 +9586,4 @@ rocm = ["torch", "torchaudio", "torchvision"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "8faee4dbbf15012f697667d73735addb6e0dfc6703196b8ee9c766d676ad58ec"
+content-hash = "52e8c54b13fbe64f74e3b6e34a655b6bbdaff2038d82bfd4ad0cc9ecc089d278"

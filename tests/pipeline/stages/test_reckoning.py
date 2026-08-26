@@ -18,7 +18,11 @@ from app.pipeline.contracts.models import (
     PredictionStatus,
 )
 from app.pipeline.stages.anticipate import AnticipateStage, default_lease_prior_lookup
-from app.pipeline.stages.reckoning import ReckoningStage, emit_learning_artifacts
+from app.pipeline.stages.reckoning import (
+    ReckoningStage,
+    emit_learning_artifacts,
+    emit_reckoning_training,
+)
 from tests.fakes.reckoning import FakeReckoningRead
 
 FIXTURES_DIR = Path(__file__).resolve().parents[2] / "fixtures" / "cyrex_contracts"
@@ -222,3 +226,47 @@ class TestTrainingBridge:
         assert first_call["document_id"] == "lease_001"
         assert first_call["metadata"]["field_name"] == "base_rent"
         assert first_call["metadata"]["actor_id"] == "user_1"
+
+
+class TestReckoningTrainingEmit:
+    @pytest.mark.asyncio
+    async def test_emit_reckoning_training_anomalous_and_novel(self):
+        records = [
+            PredictionRecord(
+                field_name="base_rent",
+                predicted_mean=4500.0,
+                predicted_range={"min": 3800.0, "max": 5200.0},
+                actual_value=9000,
+                sigma_delta=3.0,
+                status=PredictionStatus.ANOMALOUS,
+            ),
+            PredictionRecord(
+                field_name="lease_start",
+                actual_value="2024-01-01",
+                status=PredictionStatus.NOVEL,
+            ),
+            PredictionRecord(
+                field_name="notice_period",
+                predicted_mean=90.0,
+                predicted_range={"min": 60.0, "max": 120.0},
+                actual_value=90,
+                sigma_delta=0.0,
+                status=PredictionStatus.CONFIRMED,
+            ),
+        ]
+        emitter = AsyncMock()
+        emitter.emit_structured = AsyncMock(side_effect=["rid_a", "rid_n"])
+
+        emitted = await emit_reckoning_training(
+            records,
+            document_id="doc_1",
+            artifact_id="art_1",
+            emitter=emitter,
+        )
+
+        assert emitted == ["rid_a", "rid_n"]
+        assert emitter.emit_structured.await_count == 2
+        first = emitter.emit_structured.await_args_list[0].kwargs
+        assert first["category"] == "reckoning"
+        assert first["document_id"] == "doc_1"
+        assert first["metadata"]["status"] == "anomalous"

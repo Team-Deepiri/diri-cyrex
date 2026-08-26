@@ -117,7 +117,7 @@ export interface WitnessSpan {
 
 // When no factual answer is found.
 export interface ConfusionGap {
-  claim: string;
+  claim_attempted: string;
   reason: string;
 }
 

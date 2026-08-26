@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # Default to api-gateway service name for Docker, fallback to localhost for local dev
     NODE_BACKEND_URL: str = "http://api-gateway:5000"
     CYREX_API_KEY: Optional[str] = None
+    # Local development only. Lets requests through while CYREX_API_KEY is unset
+    # or still the placeholder; deployed environments must leave this False so a
+    # missing key fails closed instead of serving unauthenticated traffic.
+    # ApiKeyValidator does not cover this: it skips development entirely and
+    # treats an absent key as valid, so the runtime guard is what fails closed.
+    CYREX_ALLOW_INSECURE_AUTH: bool = False
 
     # Messaging Service Configuration (compose maps messaging to 5010)
     MESSAGING_SERVICE_URL: str = "http://messaging-service:5010"
@@ -108,6 +114,12 @@ class Settings(BaseSettings):
 
     # Health Check Configuration
     HEALTH_CHECK_INTERVAL: int = 30
+
+    # Elkedel — sensory / episodic visual memory (compose service ``elkedel``)
+    ELKEDEL_BASE_URL: str = "http://elkedel:8765"
+    ELKEDEL_MCP_URL: Optional[str] = "http://elkedel-mcp:8766/mcp"
+    ELKEDEL_API_KEY: Optional[str] = None
+    ELKEDEL_TIMEOUT_SEC: float = 30.0
 
     @field_validator('POSTGRES_PASSWORD')
     @classmethod

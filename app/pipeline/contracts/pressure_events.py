@@ -72,12 +72,22 @@ class DuelDisagreement(PressureEventBase):
     agent_b_confidence: Optional[float] = None
 
 
+class SceneIdentitySpawn(PressureEventBase):
+    """Elkedel eyes spawned a new visual identity in the live scene."""
+
+    event_type: Literal["scene_identity_spawn"] = "scene_identity_spawn"
+    label: str
+    identity_id: str
+    strength: float = Field(..., ge=0.0, le=1.0)
+
+
 # Union type — the only input PressureEngine accepts.
 PressureEvent = Union[
     PassDiscrepancy,
     ReflectFailure,
     LowConfidenceField,
     DuelDisagreement,
+    SceneIdentitySpawn,
 ]
 
 

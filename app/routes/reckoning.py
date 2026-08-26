@@ -1,4 +1,4 @@
-"""Dead reckoning read API."""
+"""Reckoning read API — dead reckoning records per document."""
 
 from __future__ import annotations
 
@@ -7,8 +7,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from app.pipeline.contracts.models import PredictionRecord
+from app.pipeline.contracts.models import PredictionRecord, PredictionStatus
 from app.pipeline.contracts.ports import ReckoningReadPort
+
+
+async def get_reckoning_read_model() -> ReckoningReadPort:
+    raise RuntimeError("Reckoning read model dependency is not configured")
 
 
 class ReckoningResponse(BaseModel):
@@ -16,10 +20,6 @@ class ReckoningResponse(BaseModel):
     records: list[PredictionRecord]
     anomalous_count: int
     novel_count: int
-
-
-async def get_reckoning_read_model() -> ReckoningReadPort:
-    raise RuntimeError("Reckoning read model dependency is not configured")
 
 
 router = APIRouter(prefix="/api/v1/reckoning", tags=["reckoning"])
@@ -31,9 +31,11 @@ async def get_document_reckoning(
     store: Annotated[ReckoningReadPort, Depends(get_reckoning_read_model)],
 ) -> ReckoningResponse:
     records = await store.get_reckoning(document_id)
+    anomalous = sum(1 for r in records if r.status == PredictionStatus.ANOMALOUS)
+    novel = sum(1 for r in records if r.status == PredictionStatus.NOVEL)
     return ReckoningResponse(
         document_id=document_id,
         records=records,
-        anomalous_count=sum(r.status == "anomalous" for r in records),
-        novel_count=sum(r.status == "novel" for r in records),
+        anomalous_count=anomalous,
+        novel_count=novel,
     )

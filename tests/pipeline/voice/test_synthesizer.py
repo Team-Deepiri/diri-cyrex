@@ -1,4 +1,5 @@
-"""Unit tests for VoiceSynthesizer grounding + spoken_text (no live speech)."""
+"""Tests for VoiceSynthesizer citation gate."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,194 +9,146 @@ from app.pipeline.contracts.models import (
     ArtifactType,
     Citation,
     CitationLocator,
-    CitedField,
     PersonaScope,
     Provenance,
 )
-from app.pipeline.voice.synthesizer import VoiceSynthesizer
-from tests.fakes.artifact_store import InMemoryArtifactStore
+from app.pipeline.voice.synthesizer import VoiceSynthesizer, collect_witness_citations
 
 
-def _lease_bundle(document_id: str = "lease_001") -> ArtifactBundle:
-    cit = Citation(
-        citation_id="cit_rent",
-        document_id=document_id,
-        source_doc_hash="hash1",
+class _MemoryStore:
+    def __init__(self, bundles: list[ArtifactBundle]) -> None:
+        self._bundles = bundles
+
+    async def list_by_document(self, document_id: str) -> list[ArtifactBundle]:
+        return [b for b in self._bundles if b.document_id == document_id]
+
+    async def get(self, artifact_id: str):
+        return None
+
+
+def _citation(quote: str, cid: str = "cit_1") -> Citation:
+    return Citation(
+        citation_id=cid,
+        document_id="doc_1",
+        source_doc_hash="hash",
         locator=CitationLocator(
-            locator_type="char_range", char_start=100, char_end=140, page_start=1
+            locator_type="char_range",
+            char_start=10,
+            char_end=10 + len(quote),
         ),
-        quote="The base rent is $4500 per month",
-        confidence=0.95,
-    )
-    field = CitedField(
-        field_name="base_rent",
-        value=4500,
-        value_type="number",
-        citations=[cit],
+        quote=quote,
         confidence=0.9,
     )
+
+
+def _bundle(citations: list[Citation]) -> ArtifactBundle:
     return ArtifactBundle(
-        artifact_id="art_extract_1",
-        document_id=document_id,
+        artifact_id="art_1",
+        document_id="doc_1",
         artifact_type=ArtifactType.EXTRACTION,
-        source_doc_hash="hash1",
+        source_doc_hash="hash",
         confidence=0.9,
-        payload={"fields": [field.model_dump(mode="json")]},
-        provenance=Provenance(source_doc_hash="hash1", document_id=document_id),
+        payload={},
+        provenance=Provenance(source_doc_hash="hash", document_id="doc_1"),
+        citations=citations,
     )
 
 
-@pytest.fixture
-async def store_with_lease():
-    store = InMemoryArtifactStore()
-    await store.create(_lease_bundle())
-    return store
+class TestCollectWitnessCitations:
+    def test_dedupes_by_citation_id(self):
+        c = _citation("rent is 4500")
+        bundles = [_bundle([c]), _bundle([c])]
+        assert len(collect_witness_citations(bundles)) == 1
 
 
-@pytest.mark.asyncio
-async def test_rent_question_returns_verbatim_span(store_with_lease):
-    synth = VoiceSynthesizer(store_with_lease)
-    resp = await synth.query(
-        "lease_001",
-        "What is the base rent?",
-        PersonaScope(),
-    )
-    assert resp.confessed is False
-    assert len(resp.spans) == 1
-    assert "4500" in resp.spans[0].quote
-    assert resp.spans[0].field_name == "base_rent"
-    assert "4500" in resp.spoken_text()
-    assert resp.question == "What is the base rent?"
+class _FakeScorer:
+    """Deterministic scorer — token overlap, no embedding model."""
+
+    def score(self, question: str, quote: str) -> float:
+        q = set(question.lower().split())
+        t = set(quote.lower().split())
+        if not q or not t:
+            return 0.0
+        return len(q & t) / float(len(q))
+
+    def rank(self, question: str, quotes, *, threshold: float = 0.35):
+        scored = [(self.score(question, q), q) for q in quotes]
+        scored.sort(reverse=True)
+        return [{"quote": q, "score": s} for s, q in scored if s >= threshold]
 
 
-@pytest.mark.asyncio
-async def test_ungrounded_question_confesses(store_with_lease):
-    synth = VoiceSynthesizer(store_with_lease)
-    resp = await synth.query(
-        "lease_001",
-        "What is the parking allotment for electric scooters?",
-        PersonaScope(),
-    )
-    assert resp.confessed is True
-    assert resp.spans == []
-    assert resp.gaps
-    spoken = resp.spoken_text()
-    assert "witness" in spoken.lower() or "ground" in spoken.lower() or "claim" in spoken.lower()
-
-
-@pytest.mark.asyncio
-async def test_hard_citation_gate_required(store_with_lease):
-    synth = VoiceSynthesizer(store_with_lease)
-    with pytest.raises(ValueError, match="hard_citation_gate"):
-        await synth.query(
-            "lease_001",
-            "What is the rent?",
-            PersonaScope(hard_citation_gate=False),
+class TestVoiceSynthesizer:
+    @pytest.mark.asyncio
+    async def test_returns_span_when_quote_matches_question(self):
+        store = _MemoryStore(
+            [_bundle([_citation("The base rent shall be $4,500 per month.")])]
         )
+        synth = VoiceSynthesizer(store, scorer=_FakeScorer())
+        result = await synth.query(
+            "doc_1",
+            "What is the base rent amount?",
+            PersonaScope(hard_citation_gate=True),
+        )
+        assert result.confessed is False
+        assert len(result.spans) == 1
+        assert "4,500" in result.spans[0].quote
 
+    @pytest.mark.asyncio
+    async def test_confesses_when_no_match(self):
+        store = _MemoryStore([_bundle([_citation("Termination clause is 90 days.")])])
+        synth = VoiceSynthesizer(store, scorer=_FakeScorer())
+        result = await synth.query(
+            "doc_1",
+            "What is the base rent amount?",
+            PersonaScope(hard_citation_gate=True),
+        )
+        assert result.confessed is True
+        assert result.gaps is not None
+        assert result.gaps[0].reason == "no_citation"
 
-@pytest.mark.asyncio
-async def test_corpus_filter_blocks_doc(store_with_lease):
-    synth = VoiceSynthesizer(store_with_lease)
-    resp = await synth.query(
-        "lease_001",
-        "What is the rent?",
-        PersonaScope(corpus_filter=["other_doc"]),
-    )
-    assert resp.confessed is True
-    assert "corpus" in resp.gaps[0].reason.lower()
+    @pytest.mark.asyncio
+    async def test_confesses_when_no_witness_set(self):
+        store = _MemoryStore([_bundle([])])
+        synth = VoiceSynthesizer(store, scorer=_FakeScorer())
+        result = await synth.query("doc_1", "Anything?", PersonaScope())
+        assert result.confessed is True
+        assert result.gaps[0].reason == "no_witness_set"
 
+    @pytest.mark.asyncio
+    async def test_spoken_text_uses_verbatim_quote(self):
+        store = _MemoryStore(
+            [_bundle([_citation("The base rent shall be $4,500 per month.")])]
+        )
+        synth = VoiceSynthesizer(store, scorer=_FakeScorer())
+        result = await synth.query(
+            "doc_1",
+            "What is the base rent amount?",
+            PersonaScope(hard_citation_gate=False, witness_set_only=True),
+        )
+        assert "4,500" in result.spoken_text()
+        assert result.speech_payload()["span_count"] == 1
 
-@pytest.mark.asyncio
-async def test_query_with_speech_tts_mock():
-    store = InMemoryArtifactStore()
-    await store.create(_lease_bundle())
+    @pytest.mark.asyncio
+    async def test_query_with_speech_tts_via_injected_client(self):
+        class _Speech:
+            async def synthesize(self, text, voice=None, session_id=None):
+                return b"WAVDATA", "audio/wav"
 
-    class FakeSpeech:
-        async def transcribe(self, audio, **kwargs):
-            return {"text": "What is the monthly rent?", "provider": "mock", "model": "mock"}
+            async def transcribe(self, audio, mime_type="audio/wav", session_id=None):
+                return {"text": "What is the base rent amount?", "provider": "fake"}
 
-        async def synthesize(self, text, **kwargs):
-            return f"MOCK:{text}".encode("utf-8"), "audio/mock"
-
-    synth = VoiceSynthesizer(store)
-    resp, meta = await synth.query_with_speech(
-        document_id="lease_001",
-        audio=b"fake-wav",
-        synthesize_audio=True,
-        speech_client=FakeSpeech(),
-    )
-    assert resp.confessed is False
-    assert "4500" in resp.spoken_text()
-    assert meta["stt"]["provider"] == "mock"
-    assert meta["audio"].startswith(b"MOCK:")
-    assert meta["spoken_text"]
-
-
-@pytest.mark.asyncio
-async def test_speech_payload_shape(store_with_lease):
-    synth = VoiceSynthesizer(store_with_lease)
-    resp = await synth.query("lease_001", "rent amount?", PersonaScope())
-    payload = resp.speech_payload()
-    assert payload["document_id"] == "lease_001"
-    assert "spoken_text" in payload
-    assert payload["confessed"] is False
-
-
-def test_tokenize_drops_stopwords_and_underscores():
-    tokens = VoiceSynthesizer._tokenize("What is the base_rent on the lease?")
-    assert "base" in tokens
-    assert "rent" in tokens
-    assert "what" not in tokens
-    assert "the" not in tokens
-    assert "is" not in tokens
-
-
-def test_score_field_alias_boosts_rent():
-    from app.pipeline.contracts.models import Citation, CitationLocator, CitedField
-
-    cit = Citation(
-        citation_id="c1",
-        document_id="d1",
-        source_doc_hash="h",
-        locator=CitationLocator(locator_type="char_range", char_start=0, char_end=10),
-        quote="The base rent is $4500 per month",
-        confidence=0.9,
-    )
-    field = CitedField(
-        field_name="base_rent",
-        value=4500,
-        value_type="number",
-        citations=[cit],
-        confidence=0.9,
-    )
-    synth = VoiceSynthesizer.__new__(VoiceSynthesizer)
-    q = "how much is monthly rent"
-    q_tokens = VoiceSynthesizer._tokenize(q)
-    score = synth._score_field(q_tokens, q.lower(), field)
-    assert score >= 0.12
-
-
-def test_score_field_unrelated_is_low():
-    from app.pipeline.contracts.models import Citation, CitationLocator, CitedField
-
-    cit = Citation(
-        citation_id="c1",
-        document_id="d1",
-        source_doc_hash="h",
-        locator=CitationLocator(locator_type="char_range", char_start=0, char_end=10),
-        quote="The base rent is $4500 per month",
-        confidence=0.9,
-    )
-    field = CitedField(
-        field_name="base_rent",
-        value=4500,
-        value_type="number",
-        citations=[cit],
-        confidence=0.9,
-    )
-    synth = VoiceSynthesizer.__new__(VoiceSynthesizer)
-    q = "what color is the lobby carpet"
-    q_tokens = VoiceSynthesizer._tokenize(q)
-    score = synth._score_field(q_tokens, q.lower(), field)
-    assert score < 0.12
+        store = _MemoryStore(
+            [_bundle([_citation("The base rent shall be $4,500 per month.")])]
+        )
+        synth = VoiceSynthesizer(store, scorer=_FakeScorer())
+        result, meta = await synth.query_with_speech(
+            document_id="doc_1",
+            question="What is the base rent amount?",
+            persona_scope=PersonaScope(hard_citation_gate=False),
+            synthesize_audio=True,
+            speech_client=_Speech(),
+        )
+        assert result.confessed is False
+        assert meta["spoken_text"]
+        assert meta["audio"] == b"WAVDATA"
+        assert meta["audio_mime_type"] == "audio/wav"

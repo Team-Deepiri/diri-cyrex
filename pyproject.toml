@@ -96,11 +96,12 @@ tensorboard = ">=2.15.0"
 influxdb-client = ">=1.38.0"
 
 # Internal Deepiri packages (git tags for cascade alignment)
-diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git", rev = "e85f8a31e37ef1cf1d45c9367d660caf9e2a14ff" }
+diri-agent-testing-utils = { git = "https://github.com/Team-Deepiri/diri-agent-testing-utils.git", tag = "v0.1.1" }
+diri-agent-guardrails = { git = "https://github.com/Team-Deepiri/diri-agent-guardrails.git", tag = "v0.1.2" }
 deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dataset-processor.git", tag = "v0.3.3", extras = ["all"] }
 deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.1" }
 deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.3", extras = ["distributed"] }
-diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "f243586fd8de6dfe5c9f929513523509b9e69a51", extras = ["redis", "numpy"] }
+diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", tag = "v0.2.1", extras = ["redis", "numpy"] }
 deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.1", extras = ["torch"] }
 deepiri-prismpipe = { git = "https://github.com/Team-Deepiri/deepiri-prismpipe.git", tag = "v0.2.1" }
 

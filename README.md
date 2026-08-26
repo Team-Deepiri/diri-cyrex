@@ -126,7 +126,7 @@ Response
 Most endpoints require an API key header:
 
 ```bash
-curl -H "x-api-key: change-me" http://localhost:8000/agent/intelligence/generate-ability
+curl -H "x-api-key: $CYREX_API_KEY" http://localhost:8000/agent/intelligence/generate-ability
 ```
 
 **Endpoints that DON'T require API keys:**
@@ -148,7 +148,8 @@ Key environment variables:
 |----------|---------|---------|
 | `OPENAI_API_KEY` | — | OpenAI API key (optional, for cloud LLM) |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Default OpenAI model |
-| `CYREX_API_KEY` | `change-me` | API key for Cyrex endpoints |
+| `CYREX_API_KEY` | — | **Required.** API key for Cyrex endpoints; unset or `change-me` makes authenticated routes return 503 |
+| `CYREX_ALLOW_INSECURE_AUTH` | `false` | Local development only — serve authenticated routes with no key set |
 | `REDIS_HOST` | `localhost` | Redis host (use `redis` in Docker) |
 | `POSTGRES_HOST` | `localhost` | PostgreSQL host (use `postgres-cyrex` in Docker) |
 | `MILVUS_HOST` | `localhost` | Milvus host (use `milvus` in Docker) |

@@ -303,6 +303,27 @@ class PersonaScope(BaseModel):
     corpus_filter: List[str] = Field(default_factory=list)
 
 
+class ConfessionGap(BaseModel):
+    """Gap where voice synthesis could not ground a claim in citations."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    claim_attempted: str
+    reason: str = "no_citation"
+
+
+class WitnessSpan(BaseModel):
+    """Quoted witness span with citation locator metadata."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    citation_id: str
+    quote: str
+    char_start: int = 0
+    char_end: int = 0
+    page: Optional[int] = None
+
+
 # ============================================================================
 # Epistemic Pressure Map (Track D)
 # ============================================================================
