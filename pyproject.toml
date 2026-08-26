@@ -100,7 +100,7 @@ deepiri-dataset-processor = { git = "https://github.com/Team-Deepiri/deepiri-dat
 deepiri-modelkit = { git = "https://github.com/Team-Deepiri/deepiri-modelkit.git", tag = "v0.2.1" }
 deepiri-training-orchestrator = { git = "https://github.com/Team-Deepiri/deepiri-training-orchestrator.git", tag = "v0.4.2", extras = ["distributed"] }
 diri-agent-toolbox = { git = "https://github.com/Team-Deepiri/diri-agent-toolbox.git", rev = "f243586fd8de6dfe5c9f929513523509b9e69a51", extras = ["redis", "numpy"] }
-deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.0", extras = ["torch"] }
+deepiri-gpu-utils = { git = "https://github.com/Team-Deepiri/deepiri-gpu-utils.git", tag = "v0.2.1", extras = ["torch"] }
 deepiri-prismpipe = { git = "https://github.com/Team-Deepiri/deepiri-prismpipe.git", tag = "v0.2.1" }
 
 # Platform-specific extras (not installed by default)
