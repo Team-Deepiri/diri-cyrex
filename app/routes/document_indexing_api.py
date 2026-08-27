@@ -36,6 +36,22 @@ class IndexTextRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
+class ChunkInput(BaseModel):
+    """A single pre-chunked piece of text with the caller's chunk_id preserved."""
+    chunk_id: str = Field(..., description="Caller-assigned chunk identifier (preserved, not regenerated)")
+    text: str = Field(..., description="Chunk text content")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Per-chunk metadata")
+
+
+class IndexChunksRequest(BaseModel):
+    """Request to index text that was already chunked upstream (e.g. by LIS)."""
+    document_id: str = Field(..., description="Identifier shared with the caller's document record")
+    chunks: List[ChunkInput] = Field(..., description="Pre-chunked text, in order")
+    doc_type: str = Field("legal_document", description="Document type")
+    industry: str = Field("generic", description="Industry niche")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Document-level metadata")
+
+
 class BatchIndexRequest(BaseModel):
     """Request to index multiple files"""
     files: List[Dict[str, Any]] = Field(..., description="List of file info dicts")
@@ -111,6 +127,67 @@ async def index_text(req: IndexTextRequest, request: Request):
     
     except Exception as e:
         logger.error(f"Error indexing text: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/index/chunks")
+async def index_chunks(req: IndexChunksRequest, request: Request):
+    """
+    Index text that was already chunked upstream (e.g. by LIS's DocumentChunk
+    pipeline), preserving the caller's chunk_id and returning the raw
+    embedding vector for each chunk.
+
+    **Use Case:** producer/consumer pipelines (e.g. the `document.vectorize`
+    bus route) that need chunk-identity preserved between the caller and
+    Milvus, and need the vector back to complete their own contract -- unlike
+    /index/text and /index/file, which re-chunk internally and don't return
+    vectors.
+
+    **Example:**
+    ```json
+    {
+        "document_id": "doc_123",
+        "chunks": [
+            {"chunk_id": "doc_123-0", "text": "Tenant shall pay rent..."},
+            {"chunk_id": "doc_123-1", "text": "Lease term is 5 years..."}
+        ],
+        "doc_type": "lease",
+        "industry": "real_estate"
+    }
+    ```
+    """
+    request_id = getattr(request.state, 'request_id', 'unknown')
+
+    try:
+        service = await get_document_indexing_service()
+
+        try:
+            doc_type = B2BDocumentType(req.doc_type)
+        except ValueError:
+            doc_type = B2BDocumentType.LEGAL_DOCUMENT
+
+        results = await service.index_pre_chunked(
+            document_id=req.document_id,
+            chunks=[c.model_dump() for c in req.chunks],
+            doc_type=doc_type,
+            industry=req.industry,
+            metadata=req.metadata,
+        )
+
+        return {
+            "success": True,
+            "document_id": req.document_id,
+            "provider": "cyrex",
+            "model": "sentence-transformers/all-MiniLM-L6-v2",
+            "dimensions": results[0]["dimensions"] if results else 0,
+            "chunks": results,
+            "request_id": request_id,
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error indexing chunks: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

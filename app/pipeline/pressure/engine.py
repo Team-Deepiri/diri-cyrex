@@ -31,6 +31,7 @@ class PressureEngine:
                 "reflect_failure": settings.PRESSURE_REFLECT_FAILURE_WEIGHT,
                 "low_confidence_field": settings.PRESSURE_LOW_CONFIDENCE_WEIGHT,
                 "duel_disagreement": settings.PRESSURE_DUEL_DISAGREEMENT_WEIGHT,
+                "scene_identity_spawn": 0.35,
             }
         )
 
@@ -79,6 +80,7 @@ class PressureEngine:
                 "reflect_failure": 0,
                 "low_confidence_field": 0,
                 "duel_disagreement": 0,
+                "scene_identity_spawn": 0,
                 "artifact_ids": set(),
             }
         )

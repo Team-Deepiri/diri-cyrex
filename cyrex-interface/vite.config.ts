@@ -7,6 +7,7 @@ export default defineConfig(({ mode }) => {
   const port = Number(env.VITE_PORT ?? 5175);
   const hmrHost = env.VITE_HMR_HOST || 'localhost';
   const hmrPort = Number(env.VITE_HMR_PORT || port);
+  const apiTarget = env.VITE_CYREX_API_URL || 'http://localhost:8000';
 
   return {
     plugins: [
@@ -24,6 +25,13 @@ export default defineConfig(({ mode }) => {
         port: hmrPort,
         protocol: 'ws',
         clientPort: hmrPort
+      },
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+          secure: false
+        }
       },
       watch: {
         usePolling: true,

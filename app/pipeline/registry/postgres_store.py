@@ -78,12 +78,12 @@ _DDL = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc ON cyrex.artifacts(document_id)",
-    ("CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc_type "
-     "ON cyrex.artifacts(document_id, artifact_type)"),
+    "CREATE INDEX IF NOT EXISTS idx_cyrex_artifacts_doc_type ON cyrex.artifacts"
+    "(document_id, artifact_type)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_refs_from ON cyrex.artifact_refs(from_artifact)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_refs_to ON cyrex.artifact_refs(to_artifact)",
-    ("CREATE INDEX IF NOT EXISTS idx_cyrex_citations_doc_span "
-     "ON cyrex.citations(document_id, char_start, char_end)"),
+    "CREATE INDEX IF NOT EXISTS idx_cyrex_citations_doc_span ON cyrex.citations"
+    "(document_id, char_start, char_end)",
     "CREATE INDEX IF NOT EXISTS idx_cyrex_learning_exported ON cyrex.learning_artifacts(exported)",
 ]
 
@@ -100,9 +100,11 @@ class PostgresArtifactStore:
         postgres: Any = None,
         *,
         pressure_sink: Optional[PressureSignalSink] = None,
+        pressure_engine: Any = None,
     ) -> None:
         self._postgres = postgres
         self._pressure_sink = pressure_sink
+        self._pressure_engine = pressure_engine
         self._schema_ready = False
 
     async def _db(self) -> Any:
@@ -260,20 +262,20 @@ class PostgresArtifactStore:
         await self._insert_refs(db, bundle)
         await self._insert_citations(db, bundle)
 
-        # Optional pressure emit after persist (Track A Appendix A).
-        if self._pressure_sink is not None:
-            try:
-                from app.pipeline.projectors.pressure_signals import project_pressure_events
+        # Pressure: injected engine (Track D) + optional bus fan-out.
+        # Engine must be wired by composition (e.g. main.py) — no Track D import here.
+        try:
+            from app.pipeline.projectors.pressure_signals import project_pressure_events
 
-                events = project_pressure_events(bundle)
-                if events:
+            events = project_pressure_events(bundle)
+            if events and self._pressure_engine is not None:
+                await self._pressure_engine.accept_many(events)
+                if self._pressure_sink is not None:
                     await self._pressure_sink.emit_many(events)
-            except ImportError:
-                logger.debug(
-                    "pressure_signals projector not available yet (Track A #128); skip emit"
-                )
-            except Exception as exc:
-                logger.warning("pressure emit after artifact create failed: %s", exc)
+        except ImportError:
+            logger.debug("pressure projector unavailable; skip emit")
+        except Exception as exc:
+            logger.warning("pressure emit after artifact create failed: %s", exc)
 
         return bundle
 

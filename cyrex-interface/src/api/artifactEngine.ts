@@ -8,11 +8,21 @@ import {
   Citation,
   CorrectionRequest,
   CorrectionResponse,
-  ProvenanceResponse
+  ProvenanceResponse,
+  PredictionRecord,
 } from '../types/artifactEngine';
 import { apiRequest, apiUpload } from './client';
 
 const ARTIFACTS = '/artifacts';
+const RECKONING = '/reckoning';
+
+// Response shape
+export interface ReckoningResponse {
+  document_id: string;
+  records: PredictionRecord[];
+  anomalous_count: number;
+  novel_count: number;
+}
 
 // Upload a document and run the full pipeline. Returns ArtifactBundle.
 export async function uploadArtifact(
@@ -32,6 +42,26 @@ export async function getArtifact(artifactId: string): Promise<ArtifactBundle> {
   return data.artifact;
 }
 
+export interface ArtifactGraphEdge {
+  from: string;
+  to: string;
+  ref_type: string;
+}
+
+export interface ArtifactGraphResponse {
+  success: boolean;
+  artifact_id: string;
+  nodes: ArtifactBundle[];
+  edges: ArtifactGraphEdge[];
+}
+
+export async function getArtifactGraph(
+  artifactId: string,
+  hops = 2,
+): Promise<ArtifactGraphResponse> {
+  return apiRequest<ArtifactGraphResponse>(`${ARTIFACTS}/${artifactId}/graph?hops=${hops}`);
+}
+
 export async function getProvenance(artifactId: string): Promise<ProvenanceResponse> {
   return apiRequest<ProvenanceResponse>(`${ARTIFACTS}/${artifactId}/provenance`);
 }
@@ -48,12 +78,55 @@ export async function submitCorrection(
 }
 
 // Send a voice query — returns verbatim cited spans or a confession.
+// Optional audio_b64 → STT; response may include TTS audio_b64 from deepiri-speech.
+export type VoiceQueryResult = VoiceQueryResponse & {
+  spoken_text?: string | null;
+  audio_b64?: string | null;
+  audio_mime_type?: string | null;
+  speech?: Record<string, unknown> | null;
+  question_used?: string | null;
+};
+
 export async function voiceQuery(
-  request: VoiceQueryRequest,
-): Promise<VoiceQueryResponse> {
-  const data = await apiRequest<{ response: VoiceQueryResponse }>(`${ARTIFACTS}/voice/query`, {
+  request: VoiceQueryRequest & {
+    audio_b64?: string;
+    audio_mime_type?: string;
+    synthesize_audio?: boolean;
+  },
+): Promise<VoiceQueryResult> {
+  const data = await apiRequest<{
+    response: VoiceQueryResponse;
+    spoken_text?: string;
+    audio_b64?: string;
+    audio_mime_type?: string;
+    speech?: Record<string, unknown>;
+    question_used?: string;
+  }>(`${ARTIFACTS}/voice/query`, {
     method: 'POST',
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      synthesize_audio: true,
+      ...request,
+    }),
   });
-  return data.response;
+  return {
+    ...data.response,
+    spoken_text: data.spoken_text,
+    audio_b64: data.audio_b64,
+    audio_mime_type: data.audio_mime_type,
+    speech: data.speech,
+    question_used: data.question_used,
+  };
+}
+
+export async function speechHealth(): Promise<{
+  ok: boolean;
+  speech?: Record<string, unknown>;
+  error?: string;
+}> {
+  return apiRequest(`${ARTIFACTS}/voice/speech-health`);
+}
+
+// Fetch dead-reckoning prediction records
+export async function getReckoning(documentId: string): Promise<ReckoningResponse> {
+  return apiRequest<ReckoningResponse>(`${RECKONING}/${documentId}`);
 }

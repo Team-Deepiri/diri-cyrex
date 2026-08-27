@@ -26,6 +26,20 @@ async def get_pressure_read_model() -> PressureReadModelPort:
 router = APIRouter(prefix="/api/v1/pressure", tags=["pressure"])
 
 
+@router.get("", response_model=PressureMapResponse)
+async def get_corpus_pressure(
+    store: Annotated[PressureReadModelPort, Depends(get_pressure_read_model)],
+) -> PressureMapResponse:
+    """Corpus-wide pressure map (all documents)."""
+    cells = await store.get_pressure(None)
+    return PressureMapResponse(
+        document_id="*",
+        cells=cells,
+        fault_zone_count=sum(cell.is_fault_zone for cell in cells),
+        max_score=max((cell.score for cell in cells), default=0.0),
+    )
+
+
 @router.get("/{document_id}", response_model=PressureMapResponse)
 async def get_document_pressure(
     document_id: str,

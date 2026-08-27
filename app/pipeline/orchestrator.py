@@ -43,6 +43,12 @@ from app.pipeline.stages.parse import ParseResult, ParseStage
 from app.pipeline.tools.confidence import ConfidenceCalculator
 from app.pipeline.tools.reflect import ReflectTool
 
+try:
+    from app.pipeline.stages.reckoning import ReckoningStage, emit_reckoning_training
+except ImportError:  # pragma: no cover
+    ReckoningStage = None  # type: ignore
+    emit_reckoning_training = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,6 +69,9 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         anticipate: Optional[AnticipatePort] = None,
         extract: Optional[ExtractPort] = None,
         duel: Optional[DuelRunnerPort] = None,
+        reckoning: Any = None,
+        reckoning_writer: Any = None,
+        training_emitter: Any = None,
         reflect_tool: Optional[ReflectTool] = None,
         confidence_calculator: Optional[ConfidenceCalculator] = None,
     ) -> None:
@@ -71,6 +80,9 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         self._anticipate = anticipate
         self._extract = extract
         self._duel = duel
+        self._reckoning = reckoning or (ReckoningStage() if ReckoningStage else None)
+        self._reckoning_writer = reckoning_writer
+        self._training_emitter = training_emitter
         self._reflect_tool = reflect_tool or ReflectTool()
         self._confidence_calculator = confidence_calculator or ConfidenceCalculator()
 
@@ -142,6 +154,12 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
             all_citations = list(synthesis_result.all_citations or [])
             all_discrepancies = list(synthesis_result.discrepancies or [])
 
+            if self._reckoning is not None and prediction_records:
+                logger.info("Running reckoning stage for %s", document_id)
+                prediction_records = await self._reckoning.run(
+                    prediction_records, final_fields
+                )
+
             logger.info(
                 "Running reflection on %d fields for %s",
                 len(final_fields),
@@ -205,6 +223,29 @@ class ArtifactEngineOrchestrator(PipelineRunnerPort):
         )
 
         await self._store.create(bundle)
+
+        if prediction_records:
+            if self._reckoning_writer is not None:
+                try:
+                    await self._reckoning_writer.persist(document_id, prediction_records)
+                except Exception as exc:
+                    logger.warning("reckoning persist failed: %s", exc)
+            try:
+                from app.pipeline.stages.reckoning_updater import ReckoningCorpusUpdater
+
+                await ReckoningCorpusUpdater().update_from_records(prediction_records)
+            except Exception as exc:
+                logger.warning("reckoning corpus update failed: %s", exc)
+            if self._training_emitter is not None and emit_reckoning_training:
+                try:
+                    await emit_reckoning_training(
+                        prediction_records,
+                        document_id=document_id,
+                        artifact_id=bundle.artifact_id,
+                        emitter=self._training_emitter,
+                    )
+                except Exception as exc:
+                    logger.warning("reckoning training emit failed: %s", exc)
 
         if duel_state is not None:
             duel_bundle = ArtifactBundle(

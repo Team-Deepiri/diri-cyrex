@@ -68,7 +68,7 @@ curl http://localhost:8000/health
 
 # Command routing (replaces old /agent/ai/classify-intent)
 curl -X POST http://localhost:8000/agent/intelligence/route-command \
-  -H "x-api-key: change-me" \
+  -H "x-api-key: $CYREX_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"command": "Create a task to refactor auth.ts", "user_role": "software_engineer"}'
 ```

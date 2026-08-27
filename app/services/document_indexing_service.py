@@ -737,6 +737,79 @@ class DocumentIndexingService:
             )
             raise RuntimeError(f"Failed to index text: {str(e)}") from e
 
+    async def index_pre_chunked(
+        self,
+        document_id: str,
+        chunks: List[Dict[str, Any]],
+        doc_type: "B2BDocumentType" = None,
+        industry: str = "generic",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Index chunks that were already split upstream (e.g. by LIS's
+        DocumentChunk pipeline), preserving the caller's chunk_id instead of
+        re-splitting the text. Used by the document.vectorize producer path
+        so chunk identity stays consistent between LIS and Milvus.
+
+        Args:
+            document_id: Identifier shared with the caller's document record.
+            chunks: List of {"chunk_id": str, "text": str, "metadata": dict}.
+            doc_type: Document type classification.
+            industry: Industry classification.
+            metadata: Document-level metadata merged into every chunk.
+
+        Returns:
+            List of {"chunk_id": str, "vector": List[float], "dimensions": int},
+            one per input chunk, in the same order.
+        """
+        if not chunks:
+            raise ValueError("chunks must be a non-empty list")
+
+        doc_type = doc_type or B2BDocumentType.LEGAL_DOCUMENT
+        base_metadata = dict(metadata or {})
+        base_metadata.update({
+            "document_id": document_id,
+            "doc_type": doc_type.value,
+            "industry": industry,
+            "total_chunks": len(chunks),
+        })
+
+        documents = []
+        vectors: List[List[float]] = []
+        for index, chunk in enumerate(chunks):
+            chunk_id = chunk.get("chunk_id")
+            text = chunk.get("text", "")
+            if not chunk_id:
+                raise ValueError(f"chunks[{index}] is missing chunk_id")
+            if not text:
+                raise ValueError(f"chunks[{index}] ({chunk_id}) has empty text")
+
+            chunk_metadata = {
+                **base_metadata,
+                **(chunk.get("metadata") or {}),
+                "chunk_id": chunk_id,
+                "chunk_index": index,
+            }
+            documents.append(Document(page_content=text, metadata=chunk_metadata))
+            vectors.append(list(self.vector_store.embeddings.embed_query(text)))
+
+        # Persist into Milvus. add_documents recomputes embeddings internally
+        # via the same embeddings model, so this stays consistent with the
+        # vectors returned above.
+        self.vector_store.add_documents(documents)
+
+        dimensions = len(vectors[0]) if vectors else 0
+        logger.info(
+            "Pre-chunked text indexed",
+            document_id=document_id,
+            chunk_count=len(chunks),
+            dimensions=dimensions,
+        )
+        return [
+            {"chunk_id": chunk["chunk_id"], "vector": vector, "dimensions": dimensions}
+            for chunk, vector in zip(chunks, vectors)
+        ]
+
     async def index_batch(
         self,
         files: List[Dict[str, Any]],

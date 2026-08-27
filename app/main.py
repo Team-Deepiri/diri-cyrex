@@ -14,19 +14,31 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
+from .api_key_auth import (
+    AuthDenial,
+    api_key_configured,
+    evaluate_request as evaluate_api_key_request,
+)
 from .database.postgres import get_postgres_manager
 from .logging_config import ErrorLogger, RequestLogger, get_logger
 from .middleware.rate_limiter import RateLimitMiddleware
 from .middleware.request_timing import RequestTimingMiddleware
 from .pipeline.contracts.ports import ArtifactStorePort, PipelineRunnerPort
 from .pipeline.orchestrator import ArtifactEngineOrchestrator
+from .pipeline.projectors.pressure_bus_sink import PressureBusSink
 from .pipeline.registry.postgres_store import PostgresArtifactStore
+from .pipeline.stages.anticipate import AnticipateStage
+from .pipeline.stages.duel import DuelStage
+from .pipeline.stages.extract import ExtractStage
 from .pipeline.stages.parse import ParseStage
+from .pipeline.bootstrap import bootstrap_artifact_engine
+from .pipeline.emitters.training_emitter import TrainingEmitter
+from .pipeline.registry.reckoning_writer import PostgresReckoningWriter
 
 # Core routers
 from .routes.agent import router as agent_router
 from .routes.agent_playground_api import router as agent_playground_router
-from .routes.artifacts import get_pipeline_runner, router as artifacts_router
+from .routes.artifacts import get_pipeline_runner, get_artifact_store, get_correction_writer, router as artifacts_router
 from .routes.bandit import router as bandit_router
 from .routes.challenge import router as challenge_router
 from .routes.collection_management_api import router as collection_management_router
@@ -34,6 +46,7 @@ from .routes.pressure import (
     get_pressure_read_model,
     router as pressure_router,
 )
+from .routes.reckoning import get_reckoning_read_model, router as reckoning_router
 
 # Extended routers
 from .routes.company_automation_api import router as company_automation_router
@@ -41,6 +54,8 @@ from .routes.cyrex_guard_api import router as cyrex_guard_router
 from .routes.document_extraction_api import router as document_extraction_router
 from .routes.document_indexing_api import router as document_indexing_router
 from .routes.documents import router as documents_router
+from .routes.duel import router as duel_router
+from .routes.eyes import router as eyes_router
 from .routes.inference import router as inference_router
 from .routes.intelligence_api import router as intelligence_api_router
 from .routes.language_intelligence_api import router as language_intelligence_router
@@ -56,6 +71,9 @@ from .routes.universal_rag_api import router as universal_rag_router
 from .routes.vendor_fraud_api import router as vendor_fraud_router
 from .routes.workflow_api import router as workflow_router
 from .pipeline.registry.pressure_store import PostgresPressureStore
+from .pipeline.pressure.engine import PressureEngine
+from .pipeline.registry.postgres_correction_store import PostgresCorrectionStore
+from .pipeline.registry.reckoning_store import PostgresReckoningStore
 from .settings import settings
 
 # Logging
@@ -78,6 +96,22 @@ RATE_LIMITED_PATHS = [
     "/orchestration/health-comprehensive",
 ]
 
+
+def _api_key_configured() -> bool:
+    return api_key_configured(settings.CYREX_API_KEY)
+
+
+def authorize_request(request: Request) -> Optional[AuthDenial]:
+    """Apply the API key policy to an incoming request."""
+    return evaluate_api_key_request(
+        method=request.method,
+        path=request.url.path,
+        provided_key=request.headers.get("x-api-key"),
+        configured_key=settings.CYREX_API_KEY,
+        allow_insecure=settings.CYREX_ALLOW_INSECURE_AUTH,
+    )
+
+
 def should_log_request(path: str) -> bool:
     if "/conversation" in path and path.endswith("/conversation"):
         return False
@@ -93,6 +127,19 @@ def should_log_request(path: str) -> bool:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Deepiri AI Challenge Service API", version="3.0.0")
+
+    if not _api_key_configured():
+        if settings.CYREX_ALLOW_INSECURE_AUTH:
+            logger.warning(
+                "CYREX_ALLOW_INSECURE_AUTH is enabled with no CYREX_API_KEY set - "
+                "every authenticated route is open. Local development only."
+            )
+        else:
+            logger.error(
+                "CYREX_API_KEY is not configured - authenticated routes will return "
+                "503 until it is set to a generated secret"
+            )
+
 
     # Uvicorn log filtering
     from .logging_config import RateLimitedAccessLogFilter
@@ -133,8 +180,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Rate limiter disabled: {e}")
 
+    # Artifact Engine AGI schema (pressure, reckoning, elkedel scene doc)
+    try:
+        await bootstrap_artifact_engine()
+    except Exception as e:
+        logger.warning(f"Artifact engine bootstrap skipped: {e}")
+
+    try:
+        from .integrations.elkedel.tools import register_elkedel_tools
+        from .core.tool_registry import get_tool_registry
+
+        n = await register_elkedel_tools(get_tool_registry())
+        logger.info("Elkedel agent tools registered", extra={"count": n})
+    except Exception as e:
+        logger.warning(f"Elkedel agent tools disabled: {e}")
+
     document_stream_task: Optional[asyncio.Task] = None
     model_reload_task: Optional[asyncio.Task] = None
+    elkedel_sync_task: Optional[asyncio.Task] = None
     if os.getenv("CYREX_DOCUMENT_STREAM_CONSUMERS_ENABLED", "false").lower() in {
         "1",
         "true",
@@ -165,10 +228,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception as e:
             logger.warning(f"Model reload listener disabled: {e}")
 
+    if os.getenv("ELKEDEL_EYES_SYNC_ENABLED", "true").lower() in {"1", "true", "yes"}:
+        try:
+            from .integrations.elkedel.artifact_sync import start_elkedel_eyes_sync
+
+            elkedel_sync_task = await start_elkedel_eyes_sync()
+            app.state.elkedel_eyes_sync_task = elkedel_sync_task
+            logger.info("Elkedel eyes → artifact sync enabled")
+        except Exception as e:
+            logger.warning(f"Elkedel eyes sync disabled: {e}")
+
+    if os.getenv("ELKEDEL_EYES_AUTO_START", "false").lower() in {"1", "true", "yes"}:
+        try:
+            from .integrations.elkedel.client import get_elkedel_client
+
+            status = await get_elkedel_client().eyes_status()
+            if not status.get("running"):
+                await get_elkedel_client().eyes_start()
+                logger.info("Elkedel eyes pipeline auto-started")
+        except Exception as e:
+            logger.warning(f"Elkedel eyes auto-start skipped: {e}")
+
     yield
 
     # Shutdown systems
-    for task in (document_stream_task, model_reload_task):
+    for task in (document_stream_task, model_reload_task, elkedel_sync_task):
         if task:
             task.cancel()
             try:
@@ -222,31 +306,17 @@ async def middleware(request: Request, call_next):
     try:
         # API Key guard
         path = request.url.path
-        method = request.method
-        if not path.startswith("/health") and not path.startswith("/metrics") and method != "OPTIONS":
-            api_key = request.headers.get("x-api-key")
-            is_desktop = request.headers.get("x-desktop-client") == "true"
-            is_default_key = settings.CYREX_API_KEY == "change-me"
-            has_valid_key = api_key == settings.CYREX_API_KEY
-
-            if not is_desktop and not has_valid_key and not (is_default_key and not api_key):
-                error_logger.log_api_error(
-                    HTTPException(status_code=401, detail="Invalid API key"),
-                    request_id,
-                    path
-                )
-                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
-                response.headers["x-request-id"] = request_id
-                return response
-            if is_desktop and api_key and api_key != settings.CYREX_API_KEY:
-                error_logger.log_api_error(
-                    HTTPException(status_code=401, detail="Invalid API key"),
-                    request_id,
-                    path
-                )
-                response = JSONResponse(status_code=401, content={"detail": "Invalid API key"})
-                response.headers["x-request-id"] = request_id
-                return response
+        denial = authorize_request(request)
+        if denial is not None:
+            status_code, detail = denial
+            error_logger.log_api_error(
+                HTTPException(status_code=status_code, detail=detail),
+                request_id,
+                path
+            )
+            response = JSONResponse(status_code=status_code, content={"detail": detail})
+            response.headers["x-request-id"] = request_id
+            return response
 
         response = await call_next(request)
         response.headers["x-request-id"] = request_id
@@ -416,7 +486,10 @@ app.include_router(cyrex_guard_router)
 app.include_router(documents_router)
 app.include_router(training_router)
 app.include_router(artifacts_router)
+app.include_router(eyes_router)
+app.include_router(duel_router)
 app.include_router(pressure_router)
+app.include_router(reckoning_router)
 
 
 async def _get_postgres_pressure_read_model():
@@ -426,17 +499,50 @@ async def _get_postgres_pressure_read_model():
 app.dependency_overrides[get_pressure_read_model] = _get_postgres_pressure_read_model
 
 
+async def _get_postgres_reckoning_read_model():
+    return PostgresReckoningStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_reckoning_read_model] = _get_postgres_reckoning_read_model
+
+
+async def _get_postgres_artifact_store_dep() -> ArtifactStorePort:
+    return await _get_postgres_artifact_store()
+
+
+app.dependency_overrides[get_artifact_store] = _get_postgres_artifact_store_dep
+
+
+async def _get_postgres_correction_writer():
+    return PostgresCorrectionStore(await get_postgres_manager())
+
+
+app.dependency_overrides[get_correction_writer] = _get_postgres_correction_writer
+
+
 async def _get_postgres_artifact_store() -> ArtifactStorePort:
-    store = PostgresArtifactStore(await get_postgres_manager())
+    pg = await get_postgres_manager()
+    store = PostgresArtifactStore(
+        pg,
+        pressure_sink=PressureBusSink(),
+        pressure_engine=PressureEngine(pg),
+    )
     await store.ensure_schema()
     return store
 
 
 async def _get_pipeline_runner() -> PipelineRunnerPort:
+    pg = await get_postgres_manager()
     store = await _get_postgres_artifact_store()
+    extract = ExtractStage()
     return ArtifactEngineOrchestrator(
         store=store,
         parse_stage=ParseStage(),
+        anticipate=AnticipateStage(),
+        extract=extract,
+        duel=DuelStage(extract, ExtractStage()),
+        reckoning_writer=PostgresReckoningWriter(pg),
+        training_emitter=TrainingEmitter(postgres=pg, producer="cyrex.artifact_engine"),
     )
 
 
