@@ -24,23 +24,24 @@ Think of Cyrex as the **brain** of the Deepiri platform.
 
 ### Start with Docker Compose (Recommended)
 
-Cyrex is part of the larger **Deepiri Platform** monorepo. From the platform root:
+Cyrex is part of the larger **deepiri-control-plane** monorepo. From the control-plane root:
 
 ```bash
 # 1. Clone and initialize submodules
-git clone git@github.com:Team-Deepiri/deepiri-platform.git
-cd deepiri-platform
+git clone git@github.com:Team-Deepiri/deepiri-control-plane.git
+cd deepiri-control-plane
 git submodule update --init --recursive
 
 # 2. Start AI team services
-cd team_dev_environments/ai-team
-./build.sh && ./start.sh
+bash setup-deepiri-dev.sh pull ai-team
+bash setup-deepiri-dev.sh build ai-team
+bash setup-deepiri-dev.sh start ai-team
 ```
 
 Or start Cyrex directly with docker compose:
 
 ```bash
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml up -d \
   postgres redis influxdb etcd minio milvus \
   cyrex cyrex-interface ollama synapse synapse-sugar-glider
@@ -178,7 +179,7 @@ Cyrex uses a hybrid Dockerfile that supports both **prebuilt** (CUDA) and **from
 
 ```bash
 # Auto-detect GPU and build
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml build cyrex
 
 # Force CPU build

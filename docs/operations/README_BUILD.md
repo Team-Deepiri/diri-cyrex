@@ -12,7 +12,7 @@ Detection is implemented by **[deepiri-gpu-utils](https://github.com/Team-Deepir
 ### From deepiri-platform (Recommended)
 
 ```bash
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml build cyrex
 ```
 
@@ -30,10 +30,10 @@ cd diri-cyrex
 docker build -t deepiri-dev-cyrex:latest .
 ```
 
-### Docker Compose (from deepiri-platform)
+### Docker Compose (from deepiri-control-plane)
 
 ```bash
-cd deepiri-platform
+cd deepiri-control-plane
 # Set CYREX_DEVICE_TYPE, CYREX_BASE_IMAGE, and CYREX_BUILD_TYPE from GPU detection:
 eval "$(deepiri-gpu export-env --prefix CYREX_)"
 docker compose -f docker-compose.dev.yml build cyrex

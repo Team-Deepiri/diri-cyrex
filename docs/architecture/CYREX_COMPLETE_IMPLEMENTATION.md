@@ -294,7 +294,7 @@ const vendor = await vendorFraudApi.getVendorDetails("vendor_abc123");
 
 ### Backend Tests
 ```bash
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 pytest tests/test_vendor_intelligence.py
 pytest tests/test_vendor_fraud_agent.py
 ```

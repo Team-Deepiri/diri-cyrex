@@ -134,7 +134,7 @@ Build, deployment, optimization, and operational documentation.
 - **Root README**: See the [root README](../README.md) for project overview
 - **Algorithm Integration Analysis**: See [ALGORITHM_INTEGRATION_ANALYSIS.md](./ALGORITHM_INTEGRATION_ANALYSIS.md) - Cross-platform algorithm analysis
 - **RTX 5080 Support**: See [RTX_5080_SUPPORT.md](./RTX_5080_SUPPORT.md) - RTX 5080/5090 GPU compatibility guide
-- **Platform Documentation**: See [deepiri-platform/docs/DOCUMENTATION_INDEX.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/docs/DOCUMENTATION_INDEX.md) for the full platform documentation index (this repo is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform))
+- **Platform Documentation**: See [deepiri-platform/docs/DOCUMENTATION_INDEX.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/docs/DOCUMENTATION_INDEX.md) for the full platform documentation index (this repo is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-control-plane))
 - **API Documentation**: Swagger UI at http://localhost:8000/docs (when running)
 - **Code Comments**: Inline documentation in source files
 - **Component READMEs**: 
@@ -152,7 +152,7 @@ This documentation is actively maintained. If you find issues or have suggestion
 
 ## Note on Cross-Repo References
 
-This repo (`diri-cyrex`) is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform). Some documentation references external repos that are part of the platform:
+This repo (`diri-cyrex`) is a git submodule of [deepiri-platform](https://github.com/Team-Deepiri/deepiri-control-plane). Some documentation references external repos that are part of the platform:
 
 - **`deepiri-modelkit`** — Shared contracts for RAG components (see `COMPLETE_RAG_IMPLEMENTATION.md`)
 - **`deepiri-helox`** — ML training pipelines used by Cyrex-AGI

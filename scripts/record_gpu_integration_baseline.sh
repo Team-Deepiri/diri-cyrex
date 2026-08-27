@@ -1,6 +1,6 @@
 #!/bin/bash
 # Record Cyrex + Helox GPU-related outputs for before/after integration comparison.
-# Usage: from deepiri-platform repo root:
+# Usage: from deepiri-control-plane repo root:
 #   bash diri-cyrex/scripts/record_gpu_integration_baseline.sh
 # Output: /tmp/cyrex-helox-gpu-baseline-YYYYMMDD-HHMMSS/
 

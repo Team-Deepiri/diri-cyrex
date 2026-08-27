@@ -1100,7 +1100,7 @@ If you see Milvus containers, skip to Step 2.
 
 ```bash
 # Navigate to deepiri-platform directory
-cd deepiri-platform
+cd deepiri-control-plane
 
 # Start Milvus (if in docker-compose.yml)
 docker-compose up -d milvus
@@ -1134,7 +1134,7 @@ curl http://localhost:9091/healthz
 **2.1. Create or update `.env` file in `diri-cyrex/` directory:**
 
 ```bash
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 nano .env  # or use your preferred editor
 ```
 
@@ -1166,7 +1166,7 @@ RAG_SIMILARITY_THRESHOLD=0.7
 **3.1. Navigate to diri-cyrex directory:**
 
 ```bash
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 ```
 
 **3.2. Create virtual environment (if not already created):**
@@ -1656,7 +1656,7 @@ python get_stats.py
 **10.1. Start the FastAPI server:**
 
 ```bash
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
@@ -1706,7 +1706,7 @@ docker logs milvus-standalone
 **Solution**:
 ```bash
 # Make sure you're in the right directory
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 
 # Activate virtual environment
 source venv/bin/activate  # Mac/Linux
