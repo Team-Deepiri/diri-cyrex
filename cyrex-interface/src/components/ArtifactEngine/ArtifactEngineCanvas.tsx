@@ -5,6 +5,7 @@ import { ProvenanceRiver } from './ProvenanceRiver';
 import { ReckoningCompass } from './ReckoningCompass';
 import { DuelArena } from './DuelArena';
 import { WitnessStitch } from './WitnessStitch';
+import { ArtifactCity } from './ArtifactCity';
 import { useLiveCanvasData } from '../../hooks/useLiveCanvasData';
 import { uploadArtifact } from '../../api/artifactEngine';
 import { ELKEDEL_SCENE_DOCUMENT_ID } from '../../constants/agi';
@@ -183,6 +184,11 @@ export const ArtifactEngineCanvas: React.FC = () => {
           graphEdges={canvas.graphEdges}
           onNodeClick={(id) => void canvas.selectArtifact(id)}
         />
+      </div>
+
+      <div style={{ background: '#2a2a2a', padding: '1.5rem', borderRadius: '8px' }}>
+        <h3 style={{ color: '#e0e0e0', marginTop: 0 }}>Artifact City</h3>
+        <ArtifactCity documentId={canvas.documentId} artifacts={canvas.graphNodes} />
       </div>
     </div>
   );
