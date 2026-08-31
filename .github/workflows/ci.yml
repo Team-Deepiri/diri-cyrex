@@ -103,3 +103,20 @@ jobs:
           MILVUS_PORT: "19530"
           CYREX_API_KEY: ci-smoke-test-key-not-a-real-secret
         run: poetry run pytest --confcutdir=tests/contract tests/contract tests/mcp tests/routes/test_pressure.py -q
+
+      # tests/pipeline/registry and tests/pipeline/test_orchestrator.py are excluded:
+      # both reach a real Postgres (the orchestrator builds ReckoningCorpusUpdater,
+      # which falls back to get_postgres_manager()) and hang without a DB service.
+      - name: Pipeline tests
+        env:
+          REDIS_HOST: localhost
+          REDIS_PORT: "6379"
+          MILVUS_HOST: localhost
+          MILVUS_PORT: "19530"
+          CYREX_API_KEY: ci-smoke-test-key-not-a-real-secret
+        run: |
+          poetry run pytest --confcutdir=tests/pipeline -q \
+            tests/pipeline/stages \
+            tests/pipeline/emitters \
+            tests/pipeline/projectors \
+            tests/pipeline/voice
