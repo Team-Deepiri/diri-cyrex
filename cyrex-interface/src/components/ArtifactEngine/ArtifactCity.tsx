@@ -116,18 +116,21 @@ export const ArtifactCity: React.FC<ArtifactCityProps> = ({ documentId, artifact
         return [...invalidationEvents, ...pressureEvents, ...runEvents];
     }, []);
 
-  // Pulse-highlight whichever artifact the most recent feed event touches.
+    // Pulse-highlight whichever artifact the most recent feed event touches.
     useEffect(() => {
         const latest = feed[0];
-        if (!latest)
-            return;
+        if (!latest) return;
         const artifactId =
-        latest.kind === 'pressure' || latest.kind === 'invalidation' ? latest.data.artifact_id : null;
+            latest.kind === 'pressure' || latest.kind === 'invalidation' ? latest.data.artifact_id : null;
+
+        let timeout: ReturnType<typeof setTimeout> | undefined;
         if (artifactId) {
             setHighlightedArtifact(artifactId);
-            const timeout = setTimeout(() => setHighlightedArtifact(null), 2000);
-            return () => clearTimeout(timeout);
+            timeout = setTimeout(() => setHighlightedArtifact(null), 2000);
         }
+        return () => {
+            if (timeout) clearTimeout(timeout);
+        };
     }, [feed]);
 
     const clusters = CLUSTER_TYPES.map((type) => ({
