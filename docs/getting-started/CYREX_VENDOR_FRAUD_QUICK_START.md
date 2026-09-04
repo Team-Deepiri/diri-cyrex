@@ -5,7 +5,7 @@
 ### Step 1: Start the Backend
 
 ```bash
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 
 # Option A: Using Docker (Recommended)
 docker compose -f ../docker-compose.dev.yml up -d cyrex milvus redis

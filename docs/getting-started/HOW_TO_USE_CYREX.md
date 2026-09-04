@@ -568,7 +568,7 @@ npm run dev -- --host 0.0.0.0 --port 5175
 The `cyrex-interface` service is already wired into `docker-compose.dev.yml`:
 
 ```bash
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml up cyrex cyrex-interface
 ```
 

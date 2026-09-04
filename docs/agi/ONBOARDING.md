@@ -56,8 +56,8 @@ Cyrex is designed to run as one service inside the larger `deepiri-platform` doc
 stack, **not standalone**:
 
 ```bash
-git clone git@github.com:Team-Deepiri/deepiri-platform.git
-cd deepiri-platform
+git clone git@github.com:Team-Deepiri/deepiri-control-plane.git
+cd deepiri-control-plane
 git submodule update --init --recursive
 docker compose -f docker-compose.dev.yml up -d \
   postgres redis influxdb etcd minio milvus \

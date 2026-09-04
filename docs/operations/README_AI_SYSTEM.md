@@ -36,7 +36,7 @@ diri-cyrex/app/
 ### 1. Install Dependencies
 
 ```bash
-cd diri-cyrex  # or: cd deepiri-platform/diri-cyrex
+cd diri-cyrex  # or: cd deepiri-control-plane/diri-cyrex
 pip install -r requirements/requirements.txt
 ```
 

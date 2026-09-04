@@ -1,6 +1,6 @@
 # Complete Universal RAG Implementation - Full Documentation
 
-> **Note:** This document references components from the `deepiri-modelkit` submodule (`deepiri-modelkit/rag/`). This submodule is part of the parent [deepiri-platform](https://github.com/Team-Deepiri/deepiri-platform) repository. To access these shared contracts, run `git submodule update --init --recursive` in the platform root.
+> **Note:** This document references components from the `deepiri-modelkit` submodule (`deepiri-modelkit/rag/`). This submodule is part of the parent [deepiri-platform](https://github.com/Team-Deepiri/deepiri-control-plane) repository. To access these shared contracts, run `git submodule update --init --recursive` in the platform root.
 
 ## Implementation Summary
 

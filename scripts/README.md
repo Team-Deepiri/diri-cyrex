@@ -64,7 +64,7 @@ All scripts should be run from the project root directory:
 
 ```bash
 # Example: Install NVIDIA Container Toolkit
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 bash scripts/gpu/install-nvidia-container-toolkit.sh
 
 # Example: Check Ollama models
