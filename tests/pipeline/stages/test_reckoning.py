@@ -178,6 +178,77 @@ class TestReckoningDiffersFromFake:
         assert len(stage_result) > len(fake_result)
 
 
+class TestDegenerateInputs:
+    """A prior that cannot be compared against must not report CONFIRMED.
+
+    Regression coverage: these all previously collapsed into CONFIRMED because
+    an undefined sigma_delta was treated as agreement.
+    """
+
+    @pytest.mark.asyncio
+    async def test_non_numeric_actual_records_without_judging(self):
+        priors = [
+            _prior("base_rent", mean=4500.0, range_min=3800.0, range_max=5200.0)
+        ]
+        extracted = [_field("base_rent", "see addendum")]
+        result = await ReckoningStage().run(priors, extracted)
+        assert result[0].status == PredictionStatus.CONFIRMED
+        assert result[0].sigma_delta is None
+        assert result[0].actual_value == "see addendum"
+
+    @pytest.mark.asyncio
+    async def test_zero_width_range_falls_back_to_mean_comparison(self):
+        priors = [
+            _prior("base_rent", mean=4500.0, range_min=4500.0, range_max=4500.0)
+        ]
+        result = await ReckoningStage().run(priors, [_field("base_rent", 4500)])
+        assert result[0].status == PredictionStatus.CONFIRMED
+        assert result[0].sigma_delta is None
+
+    @pytest.mark.asyncio
+    async def test_zero_width_range_flags_a_value_off_the_mean(self):
+        priors = [
+            _prior("base_rent", mean=4500.0, range_min=4500.0, range_max=4500.0)
+        ]
+        result = await ReckoningStage().run(priors, [_field("base_rent", 99000)])
+        assert result[0].status == PredictionStatus.ANOMALOUS
+        assert result[0].sigma_delta is None
+
+    @pytest.mark.asyncio
+    async def test_mean_without_range_flags_a_value_off_the_mean(self):
+        priors = [_prior("base_rent", mean=4500.0)]
+        result = await ReckoningStage().run(priors, [_field("base_rent", 12000)])
+        assert result[0].status == PredictionStatus.ANOMALOUS
+
+    @pytest.mark.asyncio
+    async def test_range_without_mean_judges_containment(self):
+        priors = [_prior("base_rent", range_min=3800.0, range_max=5200.0)]
+
+        inside = await ReckoningStage().run(priors, [_field("base_rent", 4000)])
+        assert inside[0].status == PredictionStatus.CONFIRMED
+
+        outside = await ReckoningStage().run(priors, [_field("base_rent", 9000)])
+        assert outside[0].status == PredictionStatus.ANOMALOUS
+
+
+class TestResultDoesNotAliasPriors:
+    @pytest.mark.asyncio
+    async def test_passthrough_prior_is_copied(self):
+        prior = PredictionRecord(
+            field_name="custom_addendum",
+            predicted_range={"min": 1.0, "max": 2.0},
+            status=PredictionStatus.NO_PRIOR,
+            corpus_doc_count=0,
+        )
+        result = await ReckoningStage().run([prior], extracted_fields=[])
+
+        assert result[0] is not prior
+        result[0].status = PredictionStatus.ANOMALOUS
+        result[0].predicted_range["min"] = 999.0
+        assert prior.status == PredictionStatus.NO_PRIOR
+        assert prior.predicted_range == {"min": 1.0, "max": 2.0}
+
+
 class TestReckoningPortCompliance:
     def test_stage_implements_run(self):
         stage = ReckoningStage()
@@ -226,6 +297,36 @@ class TestTrainingBridge:
         assert first_call["document_id"] == "lease_001"
         assert first_call["metadata"]["field_name"] == "base_rent"
         assert first_call["metadata"]["actor_id"] == "user_1"
+
+    @pytest.mark.asyncio
+    async def test_one_failed_artifact_does_not_drop_the_rest(self):
+        citation = Citation(
+            document_id="lease_001",
+            source_doc_hash="sha256:abc",
+            locator=CitationLocator(locator_type="char_range", char_start=0, char_end=5),
+            quote="4500",
+            confidence=1.0,
+        )
+        artifacts = [
+            LearningArtifact(
+                document_id="lease_001",
+                field_name=name,
+                original_value=1,
+                corrected_value=2,
+                corrected_citation=citation,
+                actor_id="user_1",
+            )
+            for name in ("base_rent", "notice_period", "security_deposit")
+        ]
+        emitter = AsyncMock()
+        emitter.emit_correction = AsyncMock(
+            side_effect=["rid_1", RuntimeError("postgres down"), "rid_3"]
+        )
+
+        record_ids = await emit_learning_artifacts(artifacts, emitter)
+
+        assert record_ids == ["rid_1", "rid_3"]
+        assert emitter.emit_correction.await_count == 3
 
 
 class TestReckoningTrainingEmit:
