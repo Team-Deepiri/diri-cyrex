@@ -4,11 +4,10 @@ Full suite of API integrations for agent tasks, delegating portable tools to
 diri-agent-toolbox and deepiri-gpu-utils.
 """
 
-from typing import Dict, List, Optional, Any, Callable, Union
 from dataclasses import dataclass, field
-from datetime import datetime
 from enum import Enum
 from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from diri_agent_toolbox import AsyncHttpToolbox, ToolRunner
 from diri_agent_toolbox.caching import AdvancedCacheManager
@@ -32,6 +31,7 @@ except ImportError:
 from ...integrations.api_bridge import get_api_bridge
 from ...logging_config import get_logger
 from ...settings import settings
+from .tool_gate import authorize_cyrex_tool, denial_message, make_cyrex_tool_gate
 
 logger = get_logger("cyrex.agent.tools.api")
 
@@ -115,13 +115,18 @@ class ComprehensiveAPITools:
     ``get_postgres_manager()``.
     """
 
-    def __init__(self, session_id: Optional[str] = None):
+    def __init__(
+        self,
+        session_id: Optional[str] = None,
+        tool_gate: Any = None,
+    ):
         self.session_id = session_id
 
         # Portable toolbox components
         self._http_toolbox = AsyncHttpToolbox(timeout=30.0, block_private_hosts=False)
         sandbox_root = Path(settings.AGENT_FILE_SANDBOX_ROOT)
         sandbox_root.mkdir(parents=True, exist_ok=True)
+        self._sandbox_root = sandbox_root
         self._file_toolbox = SandboxedFileToolbox(root_dir=sandbox_root)
         self._tool_runner = ToolRunner(http=self._http_toolbox, files=self._file_toolbox)
 
@@ -145,6 +150,7 @@ class ComprehensiveAPITools:
         self.logger = logger
 
         self._register_all_tools()
+        self._tool_gate = tool_gate or make_cyrex_tool_gate(self._tool_registry.keys())
 
     async def close(self):
         await self._http_toolbox.aclose()
@@ -1027,6 +1033,28 @@ class ComprehensiveAPITools:
     async def execute(self, tool_name: str, **kwargs) -> ToolResult:
         if tool_name not in self._tool_implementations:
             return ToolResult(success=False, error=f"Tool not found: {tool_name}")
+
+        # Authorize the materialized call (final name + kwargs) before invoke.
+        decision = authorize_cyrex_tool(
+            self._tool_gate,
+            tool_name=tool_name,
+            parameters=kwargs,
+            sandbox_root=self._sandbox_root,
+            agent_id=self.session_id,
+        )
+        if decision.verdict.value != "allow":
+            self.logger.warning(
+                "tool gate blocked %s: %s",
+                tool_name,
+                decision.message,
+            )
+            return ToolResult(
+                success=False,
+                error=denial_message(decision),
+                metadata={
+                    "tool_gate": decision.to_dict(),
+                },
+            )
 
         implementation = self._tool_implementations[tool_name]
 
