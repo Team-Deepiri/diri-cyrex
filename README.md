@@ -1,5 +1,5 @@
 # Cyrex
-<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/dd6542fc-ed13-46a0-847f-787c690e5883" />
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/b8e43cb8-9c69-4cda-96ef-b4ab04687130" />
 
 ## What Is Cyrex?
 
