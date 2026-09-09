@@ -3,16 +3,22 @@
 
 ## What Is Cyrex?
 
-Cyrex is a **Python/FastAPI microservice** (port 8000) that provides AI capabilities to the rest of the Deepiri ecosystem. Other services call Cyrex to:
+Cyrex is designed to serve as the cognitive layer between applications and AI models, allowing Deepiri services and applications to leverage shared intelligence rather than implementing independent AI systems for every product.
 
-- **Chat with AI agents** that remember context and use tools
-- **Break down complex tasks** into actionable steps
-- **Analyze documents** — invoices, contracts, PDFs, and extract structured data
-- **Detect vendor fraud** — inflated billing, phantom work, kickbacks across 6 industries
-- **Search knowledge** — upload documents, ask natural language questions, get answers from those documents (RAG)
-- **Orchestrate multi-agent workflows** — specialized agents working together in pipelines
+At its core, Cyrex provides an environment where AI agents can:
 
-Think of Cyrex as the **brain** of the Deepiri platform.
+Reason through complex problems
+Decompose large objectives into executable tasks
+Maintain contextual and persistent memory
+Retrieve information from private knowledge bases
+Execute registered tools
+Process and understand documents
+Analyze financial and vendor data
+Detect suspicious business activity
+Coordinate with other specialized agents
+Stream responses and intermediate results
+Run against local models or cloud providers
+Operate as part of larger automated workflows
 
 ## Quick Start
 
