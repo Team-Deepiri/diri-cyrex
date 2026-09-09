@@ -1,6 +1,5 @@
-# Diri-Cyrex — AI Intelligence Engine
-
-> The AI/ML microservice that powers the Deepiri platform with agent orchestration, document intelligence, RAG, and vendor fraud detection.
+# Cyrex
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/dd6542fc-ed13-46a0-847f-787c690e5883" />
 
 ## What Is Cyrex?
 
