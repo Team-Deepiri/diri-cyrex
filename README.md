@@ -7,18 +7,18 @@ Cyrex is designed to serve as the cognitive layer between applications and AI mo
 
 At its core, Cyrex provides an environment where AI agents can:
 
-Reason through complex problems
-Decompose large objectives into executable tasks
-Maintain contextual and persistent memory
-Retrieve information from private knowledge bases
-Execute registered tools
-Process and understand documents
-Analyze financial and vendor data
-Detect suspicious business activity
-Coordinate with other specialized agents
-Stream responses and intermediate results
-Run against local models or cloud providers
-Operate as part of larger automated workflows
+- Reason through complex problems
+- Decompose large objectives into executable tasks
+- Maintain contextual and persistent memory
+- Retrieve information from private knowledge bases
+- Execute registered tools
+- Process and understand documents
+- Analyze financial and vendor data
+- Detect suspicious business activity
+- Coordinate with other specialized agents
+- Stream responses and intermediate results
+- Run against local models or cloud providers
+- Operate as part of larger automated workflows
 
 ## Quick Start
 
