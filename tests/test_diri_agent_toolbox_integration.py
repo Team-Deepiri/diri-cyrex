@@ -71,6 +71,18 @@ def _stub_app_packages_for_comprehensive_tools():
 
 def _load_comprehensive_api_tools_module():
     _stub_app_packages_for_comprehensive_tools()
+    # Relative package mates needed by comprehensive_api_tools imports.
+    tools_pkg = sys.modules["app.agents.tools"]
+    tools_pkg.__path__ = [str(_CYREX_APP / "agents" / "tools")]
+    gate_path = _CYREX_APP / "agents" / "tools" / "tool_gate.py"
+    gate_spec = importlib.util.spec_from_file_location(
+        "app.agents.tools.tool_gate", gate_path
+    )
+    gate_mod = importlib.util.module_from_spec(gate_spec)
+    assert gate_spec.loader
+    sys.modules["app.agents.tools.tool_gate"] = gate_mod
+    gate_spec.loader.exec_module(gate_mod)
+
     path = _CYREX_APP / "agents" / "tools" / "comprehensive_api_tools.py"
     spec = importlib.util.spec_from_file_location(
         "app.agents.tools.comprehensive_api_tools",
@@ -255,15 +267,32 @@ class TestComprehensiveAPIToolsToolboxDelegation:
         assert "No database pool" in q.error or "configured" in q.error
 
     async def test_new_categories_present(self, comprehensive_tools):
-        from app.agents.tools.comprehensive_api_tools import ToolCategory
 
-        cats = {c.value for c in comprehensive_tools.list_tools()}
+        cats = {t.category.value for t in comprehensive_tools.list_tools()}
         assert "cache" in cats
         assert "confidence" in cats
         assert "device" in cats
         assert "monitoring" in cats
         assert "processing" in cats
         assert "logging" in cats
+
+    async def test_tool_gate_blocks_path_escape(self, comprehensive_tools):
+        r = await comprehensive_tools.execute(
+            "file_read", path="../../etc/passwd"
+        )
+        assert r.success is False
+        assert "tool gate denied" in (r.error or "")
+        assert r.metadata.get("tool_gate")
+
+    async def test_tool_gate_allows_sandboxed_read(self, comprehensive_tools):
+        # write via toolbox then read — gate must allow in-sandbox paths
+        w = await comprehensive_tools.execute(
+            "file_write", path="note.txt", content="hi"
+        )
+        assert w.success is True
+        r = await comprehensive_tools.execute("file_read", path="note.txt")
+        assert r.success is True
+        assert r.result == "hi"
 
 
 @pytest.mark.asyncio
