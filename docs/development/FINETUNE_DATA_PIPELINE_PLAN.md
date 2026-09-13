@@ -28,36 +28,32 @@ Two directions:
 | `AutoModelLoader` (`model-events` → download/cache) | Implemented (download+cache) |
 | `ModelReloadListener` + `DynamicLoRAService` (hot LoRA reload) | Implemented |
 | `CorpusExporter` via `deepiri-dataset-processor` quality gates | Implemented (soft w/ ImportError guard) |
-| `TrainingEmitter` (artifact-derived samples) | Built, **not wired** into artifact pipeline |
+| `TrainingEmitter` (artifact-derived samples) | Implemented; wired into Artifact Engine for reckoning + correction flows (extract/parse/duel/anticipate not yet emitting) |
 | `TrainingDataStore` local fallback | Writes CSV/JSONL, **no export bridge to Helox** |
 | `docs/development/HOW_TO_COLLECT_TRAINING_DATA.md` | Marked **"Pending Implementation"** — references `app/train/` that **does not exist** |
-| Database migrations (`.sql` DDL for `cyrex.*` tables) | **MISSING** (fresh DB has no DDL) |
+| Database schema (idempotent `cyrex.*` DDL in code) | Bootstrapped at startup (`bootstrap_artifact_engine` → `ensure_agi_schema` + store `ensure_schema`); no `.sql` migration files in this repo |
 | `deepiri-dataset-processor` availability | Guarded by try/except — not guaranteed |
 
 ### Known Gaps / Blockers
 
-- **No `.sql` migration files** — code queries `cyrex.helox_training_samples`, `cyrex.helox_sample_lineage`, and other `cyrex.*` tables that don't exist on a fresh database.
+- **No versioned migrations in this repo** — `cyrex.*` DDL lives in Python (`app/pipeline/helox_training_schema.py`, `app/database/agi_schema.py`, store `ensure_schema`) and is applied idempotently at boot; optional external `.sql` migrations load only when `CYREX_MIGRATIONS_DIR` points at a numbered-SQL dir (`app/database/cyrex_migrations.py`).
 - **`TrainingDataStore` fallback is a dead-end** — rows land in local CSVs but there's no pickup/export bridge shipping them to Helox.
-- **`TrainingEmitter` is reserved but unwired** — artifacts corrections won't flow to Helox until pipeline stages emit through it.
+- **`TrainingEmitter` coverage is partial** — reckonings and corrections already emit to Helox via the Artifact Engine; extract/parse/duel/anticipate artifact stages do not yet emit through it.
 - **`HOW_TO_COLLECT_TRAINING_DATA.md` is aspirational** — the scripts/pipelines it references don't exist.
 - **`AutoModelLoader` caches paths but doesn't load** the model into an inference runtime (LoRA/PEFT mount not implemented in loader).
-- **Production artifact route imports a test fake** (`FakePipelineRunner`) — artifact responses fabricated.
 
 ---
 
 ## Execution Plan
 
-### Phase 1 — Durable Schema & Migrations (prerequisite)
+### Phase 1 — Verify the Schema Bootstrap (prerequisite)
 
-**Goal**: A fresh database can actually store training samples.
+**Goal**: A fresh database bootstraps every `cyrex.*` training table.
 
-- [ ] **1.1** Author `.sql` migration files (file: Alembic or raw SQL) creating:
-  - `cyrex.helox_training_samples` (mirror)
-  - `cyrex.helox_sample_lineage` (provenance)
-  - any other `cyrex.*` tables referenced at runtime.
-- [ ] **1.2** Add an Alembic setup (or a `migrations/` dir with idempotent DDL) so CI/dev DBs bootstrap cleanly.
-- [ ] **1.3** Add a startup check: `helox_training_samples` exists, else create/alert.
-- [ ] **1.4** Test on a fresh DB container (docker compose up postgres → migrate → verify tables).
+- [ ] **1.1** Confirm the in-code DDL (`HELOX_TRAINING_SAMPLES_DDL`, `ensure_agi_schema`, `PostgresArtifactStore.ensure_schema`) covers every `cyrex.*` table referenced at runtime (`cyrex.helox_training_samples`, `cyrex.helox_sample_lineage`, plus pipeline tables).
+- [ ] **1.2** Optionally consolidate repeat DDL application — `TrainingEmitter._ensure_schema`, `RealtimeDataPipeline._ensure_helox_postgres_table`, and `ensure_agi_schema` all run `HELOX_TRAINING_SAMPLES_DDL`.
+- [ ] **1.3** Add a startup check: `cyrex.helox_training_samples` exists after bootstrap, else alert.
+- [ ] **1.4** Test on a fresh DB container (docker compose up postgres → boot app → verify `\d cyrex.*`).
 
 ### Phase 2 — Make `TrainingDataStore` Real (fallback → bridge)
 
@@ -70,13 +66,13 @@ Two directions:
 - [ ] **2.3** De-duplicate on replay (idempotent by sample hash / lineage id).
 - [ ] **2.4** Wrap the exporter in `deepiri-dataset-processor` quality gates (dedup, null check, PII) rather than the soft import guard falling through silently.
 
-### Phase 3 — Wire `TrainingEmitter` into the Artifact Pipeline
+### Phase 3 — Extend `TrainingEmitter` Coverage in the Artifact Pipeline
 
-**Goal**: correlator/correction/visual observations flow to Helox too.
+**Goal**: reckonings and human corrections already flow to Helox through the Artifact Engine; extend emission to the remaining stages.
 
-- [ ] **3.1** Connect artifact/pipeline stages (reckoning, extract, parse, duel, anticipate) to `TrainingEmitter`.
-- [ ] **3.2** Emit dual-writes: Redis Streams (via sugar-glider bus) + Postgres rows + lineage.
-- [ ] **3.3** Add provenance fields so Helox can trace a sample to its source event.
+- [ ] **3.1** Wire extract/parse/duel/anticipate stages to `TrainingEmitter` (reckoning + corrections already emit via the orchestrator and the corrections route).
+- [ ] **3.2** Verify each new stage dual-writes: Redis Streams (via sugar-glider bus) + Postgres rows + lineage.
+- [ ] **3.3** Thread provenance fields so Helox can trace a sample to its source event.
 
 ### Phase 4 — Fix the Docs So They're Real
 
@@ -122,8 +118,9 @@ model-events                         → Helox model-ready → Cyrex consumes
 ## Key Commands / Snippets
 
 ```bash
-# 1. Migrate fresh DB
-alembic upgrade head   # or: psql < migrations/001_init_training_sample_tables.sql
+# 1. Fresh DB: cyrex.* schema is ensured idempotently at app startup
+#    (bootstrap_artifact_engine -> ensure_agi_schema + store ensure_schema).
+#    Optional external .sql migrations: CYREX_MIGRATIONS_DIR=<numbered-sql-dir>
 
 # 2. Verify mirror tables
 psql "$DATABASE_URL" -c "\d cyrex.helox_training_samples"
@@ -132,11 +129,11 @@ psql "$DATABASE_URL" -c "\d cyrex.helox_training_samples"
 CYREX_MODEL_RELOAD_LISTENER_ENABLED=1 uvicorn app.main:app --port 8000
 
 # 4. Emit a training sample (example)
-# POST /training/samples or call TrainingEmitter.emit(...)
+# POST /training/samples or call TrainingEmitter.emit_structured(...) / emit_correction(...)
 
 # 5. Submit a training job
 from app.training.helox_job_client import HeloxJobClient
-HeloxJobClient().submit_training_job(payload=...)
+HeloxJobClient().submit(request=TrainingRunRequest(...))   # or submit_agent_job(AgentTrainingJob(...))
 ```
 
 ---
@@ -145,7 +142,7 @@ HeloxJobClient().submit_training_job(payload=...)
 
 | Risk | Mitigation |
 |------|------------|
-| Fresh DB has no `cyrex.*` tables | Phase 1 migrations + startup existence check |
+| Fresh DB missing `cyrex.*` tables (startup DDL skipped/failed) | Phase 1 bootstrap verification + startup existence check |
 | Redis/Synapse down loses samples | Phase 2 durable fallback + replay bridge |
 | Duplicate/poison samples | Dataset-processor quality gates + lineage dedup |
 | Model downloaded but not loaded | Phase 5 load-and-mount implementation |
@@ -156,9 +153,9 @@ HeloxJobClient().submit_training_job(payload=...)
 
 ## Success Criteria
 
-1. Fresh DB bootstraps `cyrex.*` tables via migrations.
+1. Fresh DB bootstraps `cyrex.*` tables via the in-code DDL bootstrap.
 2. Training samples flow Cyrex → Redis + Postgres → (replay-safe) → Helox.
-3. Artifact pipeline emits through `TrainingEmitter`.
+3. Reckoning + correction flows already emit through `TrainingEmitter`; extract/parse/duel/anticipate stages emit too.
 4. `AutoModelLoader` mounts and serves a finetuned model, not just caches a path.
 5. `HOW_TO_COLLECT_TRAINING_DATA.md` is accurate and runnable.
 6. End-to-end loop validated: emit → train job → model-ready → runtime inference.
