@@ -1,0 +1,42 @@
+# Universal auto-approve for deepiri-cascade dependency PRs.
+# Install in every consumer repo at: .github/workflows/auto-approve-cascade.yml
+#
+# Merge flow: cascade PR -> this workflow approves -> cascade's already-queued
+# auto-merge fires once the repo's own CI is green. Human PRs are untouched
+# (still require a normal review).
+#
+# Prerequisites (org/repo Actions settings):
+#   - "Allow GitHub Actions to create and approve pull requests" = ON
+#   - "Allow GitHub Actions reviews to count towards required approval" = ON
+#   - If the org restricts actions to an allowlist, add hmarr/auto-approve-action
+#
+# Do NOT drop the `checks: write` permission below: GitHub only counts
+# approvals made by github-actions[bot] against the required-review rule when a
+# workflow declares BOTH `pull-requests: write` AND `checks: write`.
+
+name: Auto-Approve Cascade PRs
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: cascade-auto-approve-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  auto-approve:
+    name: Approve cascade dependency PR
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'deepiri-cascade[bot]'
+    steps:
+      - name: Submit approving review
+        uses: hmarr/auto-approve-action@v4
+        with:
+          pull-request-number: ${{ github.event.pull_request.number }}
+          review-message: Auto-approved: dependency-only bump from deepiri-cascade (no code changes).
