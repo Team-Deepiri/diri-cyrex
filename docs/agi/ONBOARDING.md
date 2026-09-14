@@ -52,7 +52,7 @@ fail partway through with no clear signal about which dependency is the problem.
 
 ## Running the service itself
 
-Cyrex is designed to run as one service inside the larger `deepiri-platform` docker-compose
+Cyrex is designed to run as one service inside the larger `deepiri-control-plane` docker-compose
 stack, **not standalone**:
 
 ```bash

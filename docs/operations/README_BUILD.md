@@ -9,7 +9,7 @@ Detection is implemented by **[deepiri-gpu-utils](https://github.com/Team-Deepir
 
 ## Quick Start
 
-### From deepiri-platform (Recommended)
+### From deepiri-control-plane (Recommended)
 
 ```bash
 cd deepiri-control-plane
@@ -44,7 +44,7 @@ Defaults in `docker-compose.dev.yml` keep a CUDA 12.8 base image when env vars a
 ## Force CPU Build
 
 ```bash
-# From deepiri-platform — deepiri-gpu-utils stays the source of truth:
+# From deepiri-control-plane — deepiri-gpu-utils stays the source of truth:
 eval "$(deepiri-gpu export-env --device-type cpu --prefix CYREX_)"
 docker compose -f docker-compose.dev.yml build cyrex
 ```
@@ -87,7 +87,7 @@ Policy lives in **deepiri-gpu-utils** (`detect`, `build_args`). Typical rules:
 ### Advanced: manual override
 
 Prefer the `deepiri-gpu export-env` forms above. Only if you must pin values yourself, set
-all three explicitly (from `deepiri-platform`):
+all three explicitly (from `deepiri-control-plane`):
 
 ```bash
 export CYREX_DEVICE_TYPE=cpu
@@ -100,7 +100,7 @@ Or pass `--build-arg BASE_IMAGE=... --build-arg DEVICE_TYPE=...` to `docker buil
 
 ## Baseline snapshots
 
-Before/after integration, run from `deepiri-platform`:
+Before/after integration, run from `deepiri-control-plane`:
 
 ```bash
 bash diri-cyrex/scripts/record_gpu_integration_baseline.sh

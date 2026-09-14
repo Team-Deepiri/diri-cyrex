@@ -1099,7 +1099,7 @@ If you see Milvus containers, skip to Step 2.
 **1.2. Start Milvus using Docker Compose:**
 
 ```bash
-# Navigate to deepiri-platform directory
+# Navigate to deepiri-control-plane directory
 cd deepiri-control-plane
 
 # Start Milvus (if in docker-compose.yml)

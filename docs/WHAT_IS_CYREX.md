@@ -98,7 +98,7 @@ has the full thesis if you want the long version.
   all of the above without writing `curl` commands. It is a testing console, not a product a
   customer would use.
 - It normally runs as one service inside a larger `docker compose` stack defined in the
-  `deepiri-platform` repo, alongside Postgres/Redis/Milvus/etc. It cannot fully start standalone
+  `deepiri-control-plane` repo, alongside Postgres/Redis/Milvus/etc. It cannot fully start standalone
   from this repo alone today — see `docs/agi/ONBOARDING.md`.
 
 ## The one-paragraph version, if you only remember this
