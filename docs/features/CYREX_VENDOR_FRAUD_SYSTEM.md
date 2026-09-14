@@ -309,7 +309,7 @@ curl -X POST http://localhost:8000/vendor-fraud/ingest-document \
 ### 1. Start Cyrex Backend
 
 ```bash
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 
 # With Docker
 docker compose -f ../docker-compose.dev.yml up -d cyrex milvus

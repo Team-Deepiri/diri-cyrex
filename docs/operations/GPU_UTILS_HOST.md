@@ -4,13 +4,13 @@ Cyrex [`scripts/utils/detect_gpu.sh`](../scripts/utils/detect_gpu.sh) and [`dete
 
 ## Monorepo layout
 
-If `Deepiri/` contains both `deepiri-platform/` and `deepiri-gpu-utils/`:
+If `Deepiri/` contains both `deepiri-control-plane/` and `deepiri-gpu-utils/`:
 
 ```bash
 pip install -e "../deepiri-gpu-utils"
 ```
 
-Run that from `deepiri-platform/diri-cyrex` or any working directory; adjust the relative path if your layout differs.
+Run that from `deepiri-control-plane/diri-cyrex` or any working directory; adjust the relative path if your layout differs.
 
 ## From GitHub (no local clone of gpu-utils)
 
@@ -42,4 +42,4 @@ docker compose -f docker-compose.dev.yml build cyrex
 
 ## Baseline / regression
 
-Run [`../../scripts/record_gpu_integration_baseline.sh`](../../scripts/record_gpu_integration_baseline.sh) or, from `deepiri-platform/`, `bash diri-cyrex/scripts/record_gpu_integration_baseline.sh` before and after integration changes; compare outputs under `/tmp/cyrex-helox-gpu-baseline-*`.
+Run [`../../scripts/record_gpu_integration_baseline.sh`](../../scripts/record_gpu_integration_baseline.sh) or, from `deepiri-control-plane/`, `bash diri-cyrex/scripts/record_gpu_integration_baseline.sh` before and after integration changes; compare outputs under `/tmp/cyrex-helox-gpu-baseline-*`.
