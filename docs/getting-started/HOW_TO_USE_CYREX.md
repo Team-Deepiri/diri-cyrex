@@ -27,18 +27,19 @@ Cyrex is the AI/ML microservice that provides natural language processing, agent
 
 **Option A: Using the AI Team Script (Recommended)**
 
-From the `deepiri-platform` root:
+From the `deepiri-control-plane` root:
 
 ```bash
-cd team_dev_environments/ai-team
-./build.sh && ./start.sh
+bash setup-deepiri-dev.sh pull ai-team
+bash setup-deepiri-dev.sh build ai-team
+bash setup-deepiri-dev.sh start ai-team
 ```
 
 This starts Cyrex along with all dependencies: PostgreSQL, Redis, Milvus, MinIO, Ollama, and Synapse.
 
 **Option B: Using Docker Compose Directly**
 
-From the `deepiri-platform` root:
+From the `deepiri-control-plane` root:
 
 ```bash
 docker compose -f docker-compose.dev.yml up -d \
@@ -568,7 +569,7 @@ npm run dev -- --host 0.0.0.0 --port 5175
 The `cyrex-interface` service is already wired into `docker-compose.dev.yml`:
 
 ```bash
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml up cyrex cyrex-interface
 ```
 
@@ -596,4 +597,3 @@ The dashboard exposes:
 - Explore the full API at `http://localhost:8000/docs`
 - Check `app/` for the source code
 - See [docs/architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) for system architecture
-- See [deepiri-platform/team_dev_environments/ai-team/README.md](https://github.com/Team-Deepiri/deepiri-platform/blob/dev/team_dev_environments/ai-team/README.md) for AI team development environment details

@@ -165,7 +165,7 @@
 
 ```bash
 # Terminal 1: Backend
-cd deepiri-platform/diri-cyrex
+cd deepiri-control-plane/diri-cyrex
 python -m app.main
 
 # Terminal 2: Frontend

@@ -1,19 +1,24 @@
-# Diri-Cyrex — AI Intelligence Engine
-
-> The AI/ML microservice that powers the Deepiri platform with agent orchestration, document intelligence, RAG, and vendor fraud detection.
+# Cyrex
+<img width="1024" height="559" alt="image" src="https://github.com/user-attachments/assets/b8e43cb8-9c69-4cda-96ef-b4ab04687130" />
 
 ## What Is Cyrex?
 
-Cyrex is a **Python/FastAPI microservice** (port 8000) that provides AI capabilities to the rest of the Deepiri ecosystem. Other services call Cyrex to:
+Cyrex is designed to serve as the cognitive layer between applications and AI models, allowing Deepiri services and applications to leverage shared intelligence rather than implementing independent AI systems for every product.
 
-- **Chat with AI agents** that remember context and use tools
-- **Break down complex tasks** into actionable steps
-- **Analyze documents** — invoices, contracts, PDFs, and extract structured data
-- **Detect vendor fraud** — inflated billing, phantom work, kickbacks across 6 industries
-- **Search knowledge** — upload documents, ask natural language questions, get answers from those documents (RAG)
-- **Orchestrate multi-agent workflows** — specialized agents working together in pipelines
+At its core, Cyrex provides an environment where AI agents can:
 
-Think of Cyrex as the **brain** of the Deepiri platform.
+- Reason through complex problems
+- Decompose large objectives into executable tasks
+- Maintain contextual and persistent memory
+- Retrieve information from private knowledge bases
+- Execute registered tools
+- Process and understand documents
+- Analyze financial and vendor data
+- Detect suspicious business activity
+- Coordinate with other specialized agents
+- Stream responses and intermediate results
+- Run against local models or cloud providers
+- Operate as part of larger automated workflows
 
 ## Quick Start
 
@@ -24,23 +29,24 @@ Think of Cyrex as the **brain** of the Deepiri platform.
 
 ### Start with Docker Compose (Recommended)
 
-Cyrex is part of the larger **Deepiri Platform** monorepo. From the platform root:
+Cyrex is part of the larger **deepiri-control-plane** monorepo. From the control-plane root:
 
 ```bash
 # 1. Clone and initialize submodules
-git clone git@github.com:Team-Deepiri/deepiri-platform.git
-cd deepiri-platform
+git clone git@github.com:Team-Deepiri/deepiri-control-plane.git
+cd deepiri-control-plane
 git submodule update --init --recursive
 
 # 2. Start AI team services
-cd team_dev_environments/ai-team
-./build.sh && ./start.sh
+bash setup-deepiri-dev.sh pull ai-team
+bash setup-deepiri-dev.sh build ai-team
+bash setup-deepiri-dev.sh start ai-team
 ```
 
 Or start Cyrex directly with docker compose:
 
 ```bash
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml up -d \
   postgres redis influxdb etcd minio milvus \
   cyrex cyrex-interface ollama synapse synapse-sugar-glider
@@ -178,7 +184,7 @@ Cyrex uses a hybrid Dockerfile that supports both **prebuilt** (CUDA) and **from
 
 ```bash
 # Auto-detect GPU and build
-cd deepiri-platform
+cd deepiri-control-plane
 docker compose -f docker-compose.dev.yml build cyrex
 
 # Force CPU build
